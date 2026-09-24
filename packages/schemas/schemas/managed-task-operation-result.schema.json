@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.webenvoy.dev/core/managed-task-operation-result.v1.schema.json",
   "title": "WebEnvoy managed task operation result",
-  "description": "Bounded projection of the existing Core Run, task input metadata, result envelope and FailureRecord. It does not define a site-task state machine.",
+  "description": "Bounded projection of the existing Core Run, task input metadata, result envelope and FailureRecord. A verified Agent-socket task submit may also carry one expiring worker ticket; it does not define a site-task state machine.",
   "type": "object",
   "additionalProperties": false,
   "required": ["ok", "schema_version", "operation", "operation_ref", "run", "input", "result", "failure"],
@@ -14,7 +14,8 @@
     "run": { "$ref": "#/$defs/run" },
     "input": { "$ref": "#/$defs/input_summary" },
     "result": { "oneOf": [{ "type": "null" }, { "$ref": "https://schemas.webenvoy.dev/core/result-envelope.v0.schema.json" }] },
-    "failure": { "oneOf": [{ "type": "null" }, { "$ref": "https://schemas.webenvoy.dev/core/run-record.v0.schema.json#/properties/failure" }] }
+    "failure": { "oneOf": [{ "type": "null" }, { "$ref": "https://schemas.webenvoy.dev/core/run-record.v0.schema.json#/properties/failure" }] },
+    "worker_execution": { "$ref": "#/$defs/worker_execution" }
   },
   "allOf": [
     {
@@ -24,6 +25,15 @@
     {
       "if": { "properties": { "input": { "properties": { "carrier": { "const": "webenvoy.managed-task-inline/v1" } } } } },
       "then": { "properties": { "input": { "properties": { "value_present": { "const": true } } } } }
+    },
+    {
+      "if": { "required": ["worker_execution"] },
+      "then": {
+        "properties": {
+          "operation": { "const": "task.submit" },
+          "run": { "properties": { "status": { "const": "running" }, "dispatch_state": { "const": "not_dispatched" } } }
+        }
+      }
     }
   ],
   "$defs": {
@@ -46,13 +56,79 @@
         "carrier": { "type": "string", "enum": ["none", "webenvoy.managed-task-inline/v1"] },
         "value_present": { "type": "boolean" }
       }
+    },
+    "worker_execution": {
+      "type": "object", "additionalProperties": false, "required": ["ticket"],
+      "properties": { "ticket": { "$ref": "#/$defs/worker_ticket" } }
+    },
+    "worker_ticket": {
+      "type": "object", "additionalProperties": false,
+      "required": ["ticket_id", "run_id", "package", "script", "authorization", "target", "input", "context", "deadline_at"],
+      "properties": {
+        "ticket_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "run_id": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "package": {
+          "type": "object", "additionalProperties": false,
+          "required": ["package_ref", "revision_ref", "package_digest", "task_ref", "source_ref", "lock_ref", "capability_ref", "capability_version", "source_admission_ref", "code_admission_ref"],
+          "properties": {
+            "package_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
+            "revision_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
+            "package_digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+            "task_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
+            "source_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
+            "lock_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
+            "capability_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
+            "capability_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+            "source_admission_ref": { "type": "string", "pattern": "^webenvoy\\.source-admission/site-skill-package/v1#sha256:[a-f0-9]{64}$" },
+            "code_admission_ref": { "type": "string", "pattern": "^webenvoy\\.code-admission/site-skill-script/v1#sha256:[a-f0-9]{64}$" }
+          }
+        },
+        "script": {
+          "type": "object", "additionalProperties": false,
+          "required": ["script_ref", "script_version", "script_sha256", "runtime_kind", "entrypoint", "broker", "broker_capabilities", "source"],
+          "properties": {
+            "script_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
+            "script_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+            "script_sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+            "runtime_kind": { "const": "webenvoy.site-skill-script-abi/v1" },
+            "entrypoint": { "const": "run" },
+            "broker": { "const": "webenvoy.site-skill-broker/v1" },
+            "broker_capabilities": { "type": "array", "minItems": 2, "maxItems": 2, "uniqueItems": true, "items": { "enum": ["runtime.invoke", "output.write"] } },
+            "source": { "type": "string", "minLength": 1, "maxLength": 65536 }
+          }
+        },
+        "authorization": {
+          "type": "object", "additionalProperties": false,
+          "required": ["principal_id", "connection_id", "grant_id", "profile_ref", "origin"],
+          "properties": {
+            "principal_id": { "type": "string", "minLength": 1, "maxLength": 512 },
+            "connection_id": { "type": "string", "minLength": 1, "maxLength": 512 },
+            "grant_id": { "type": "string", "minLength": 1, "maxLength": 512 },
+            "profile_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
+            "origin": { "type": "string", "format": "uri" }
+          }
+        },
+        "target": {
+          "type": "object", "additionalProperties": false, "required": ["target_type", "target_ref"],
+          "properties": { "target_type": { "type": "string", "minLength": 1, "maxLength": 512 }, "target_ref": { "type": "string", "minLength": 1, "maxLength": 2048 } }
+        },
+        "input": {
+          "type": "object", "additionalProperties": false, "required": ["schema_ref", "value"],
+          "properties": { "schema_ref": { "type": "string", "minLength": 1, "maxLength": 512 }, "value": { "type": "object", "additionalProperties": false } }
+        },
+        "context": {
+          "type": "object", "additionalProperties": false, "required": ["run_id", "task_ref"],
+          "properties": { "run_id": { "type": "string", "minLength": 1, "maxLength": 512 }, "task_ref": { "type": "string", "minLength": 1, "maxLength": 512 } }
+        },
+        "deadline_at": { "type": "integer", "minimum": 1 }
+      }
     }
   },
   "x-webenvoy": {
     "owner": "Core Managed Task Projection",
     "status": "accepted-v1",
     "schema_version": "webenvoy.managed-task-operation-result/v1",
-    "compatibility_boundary": "Bounded Agent projection of an existing Core Run and result; raw input, separate Run state, and additional owner facts are excluded.",
+    "compatibility_boundary": "Bounded Agent projection of an existing Core Run and result; a verified Agent-socket task submit may carry one expiring, one-time managed worker ticket. Raw input, separate Run state, and additional owner facts are excluded.",
     "source_adrs": ["docs/specs/site-skill-execution-v1.md"],
     "field_owners": { "run": "Core Run", "input": "Core metadata projection", "result": "Core Result Envelope", "failure": "Core FailureRecord" }
   }

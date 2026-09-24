@@ -1,0 +1,21 @@
+{
+  "schema": "account-system-owner-operation-request.schema.json",
+  "cases": [
+    {
+      "name": "Agent-supplied identity inference is not an owner operation field",
+      "instance": {
+        "operation": "import_template",
+        "template_ref": "lode://account-system/github@1.0.0",
+        "identity_method": "github-login-page"
+      }
+    },
+    {
+      "name": "unversioned template is not a fixed ref",
+      "instance": { "operation": "import_template", "template_ref": "lode://account-system/github" }
+    },
+    {
+      "name": "owner CAS is required for enable",
+      "instance": { "operation": "enable", "local_definition_ref": "webenvoy:account-system/00000000-0000-4000-8000-000000000000", "revision_ref": "webenvoy:account-system-revision/00000000-0000-4000-8000-000000000000@1#sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+    }
+  ]
+}

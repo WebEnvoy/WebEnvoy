@@ -46,11 +46,21 @@ export function agentDataSocket(value) {
   return socketPath;
 }
 
-export function verifyAgentSocket(path, { ownerUid } = {}) {
+export function verifyAgentSocket(path, { ownerUid, agentUid } = {}) {
   try {
     const info = lstatSync(path);
-    if (!info.isSocket() || info.isSymbolicLink() || ownerUid !== undefined && info.uid !== ownerUid) throw new Error('agent_endpoint_invalid');
-    return { state: 'verified', uid: info.uid, mode: info.mode & 0o777 };
+    const mode = info.mode & 0o777;
+    if (!info.isSocket() || info.isSymbolicLink() || ownerUid !== undefined && info.uid !== ownerUid || (mode & 0o077) !== 0) throw new Error('agent_endpoint_invalid');
+    const distinctAgent = Number.isSafeInteger(agentUid) && agentUid !== info.uid;
+    if (distinctAgent) {
+      if (process.platform !== 'darwin') throw new Error('agent_endpoint_invalid');
+      const name = execFileSync('/usr/bin/id', ['-nu', String(agentUid)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      if (!name || /[^A-Za-z0-9_.-]/.test(name)) throw new Error('agent_endpoint_invalid');
+      const listing = execFileSync('/bin/ls', ['-le', path], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' }, stdio: ['ignore', 'pipe', 'ignore'] });
+      const entries = listing.split('\n').filter(line => /^\s*\d+:/.test(line));
+      if (entries.length !== 1 || entries[0].trim() !== `0: user:${name} allow read,write`) throw new Error('agent_endpoint_invalid');
+    } else if (!macAclVerified(path, ['-lde'])) throw new Error('agent_endpoint_invalid');
+    return { state: 'verified', uid: info.uid, mode, agent_uid: agentUid ?? info.uid, acl: distinctAgent ? 'exact_agent_user' : 'owner_only' };
   } catch (error) {
     if (error.code === 'ENOENT') return { state: 'missing' };
     if (error.message === 'agent_endpoint_invalid') throw error;
@@ -166,6 +176,9 @@ const FIXED_AGENT_ASSET_PATHS = [
   'agent-entry/cli.mjs',
   'agent-entry/client.mjs',
   'agent-entry/service.mjs',
+  'agent-entry/managed-site-worker.mjs',
+  'agent-entry/managed-site-script-thread.mjs',
+  'agent-entry/managed-site-worker-supervisor.mjs',
   'bin/webenvoy',
   'runtime/node'
 ];
@@ -493,7 +506,7 @@ export function verifyLiveOsBoundary({ dataDir, ownerUid = process.getuid?.(), a
   catch { ownerTransport = false; addFailure('owner_socket_acl_unavailable'); }
   if (requireAgentSocket) {
     try {
-      if (verifyAgentSocket(agentSocketPath, { ownerUid }).state !== 'verified') throw new Error('agent_socket_unavailable');
+      if (verifyAgentSocket(agentSocketPath, { ownerUid, agentUid }).state !== 'verified') throw new Error('agent_socket_unavailable');
       agentTransport = true;
     }
     catch { addFailure('agent_socket_unavailable'); }

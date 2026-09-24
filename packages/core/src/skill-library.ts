@@ -5,7 +5,7 @@ import { withFileOwnershipLock } from "./file-ownership.js";
 import { ManagedAccessError, managedSkillOperations, type FileManagedAccessStore, type ManagedAccessRequest } from "./managed-access.js";
 import { publicRunResult, type FileRunRecordStore, type RunRecord } from "./run-record-store.js";
 import { completeRunWithFailure, completeRunWithResult } from "./result-envelope.js";
-import { approvedManagedSiteTaskPackage, resolveApprovedSiteTaskPackage, type VerifiedSiteTask } from "./site-skill-package.js";
+import { approvedManagedSiteTaskPackage, approvedManagedSiteTaskPackageFor, approvedManagedSiteTaskPackages, managedSiteScriptCodeAdmissionRef, resolveApprovedSiteTaskPackage, verifySiteSkillPackageRoot, type SiteSkillPackagePin, type VerifiedSiteTask } from "./site-skill-package.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -90,6 +90,19 @@ export type SkillScopeRequest = {
   idempotency_key: string;
 };
 export type ManagedSiteTaskPackageRequest = { package_ref: string; revision_ref: string; package_digest: string; task_ref: string };
+export type OwnerAdmittedSiteTaskPin = {
+  pin: SiteSkillPackagePin;
+  lodeAssetsPath: string;
+  admission_ref: string;
+  source_ref: string;
+  source_commit: string;
+  task_ref: string;
+  code_admission_ref?: string;
+};
+export type ManagedSiteTaskAdmissionStore = {
+  resolveAdmitted(request: ManagedSiteTaskPackageRequest): Promise<OwnerAdmittedSiteTaskPin | undefined>;
+  listAdmitted(packageRef?: string): Promise<readonly OwnerAdmittedSiteTaskPin[]>;
+};
 
 export class ManagedSkillError extends ManagedAccessError {
   constructor(code: string) { super(code); }
@@ -97,6 +110,13 @@ export class ManagedSkillError extends ManagedAccessError {
 
 const fail = (code: string): never => { throw new ManagedSkillError(code); };
 const digest = (value: Uint8Array | string) => createHash("sha256").update(value).digest("hex");
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value as JsonObject).sort().map(key => `${JSON.stringify(key)}:${canonical((value as JsonObject)[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
 const gitBlobDigest = (value: Uint8Array) => createHash("sha1").update(`blob ${value.byteLength}\0`).update(value).digest("hex");
 const nowIso = (clock?: () => Date) => (clock?.() ?? new Date()).toISOString();
 function siteSkillRevision(sitePackage: VerifiedSiteTask): SkillRevision {
@@ -261,6 +281,10 @@ function siteTaskSummary(sitePackage: VerifiedSiteTask): JsonObject {
   const outputs = task.outputs as JsonObject;
   const verification = task.verification as JsonObject;
   const declaredCapabilityRefs = objectOrEmpty(task.entrypoint).capability_refs as string[];
+  const entrypoint = sitePackage.script
+    ? { script_ref: sitePackage.script.script_ref, script_version: sitePackage.script.version, script_sha256: sitePackage.script.sha256,
+        runtime_kind: sitePackage.script.runtime_kind, broker: sitePackage.script.broker }
+    : { kind: "capability_refs", capability_refs: declaredCapabilityRefs };
   return {
     schema_version: "webenvoy.site-task-summary/v1",
     package_ref: sitePackage.package_ref,
@@ -272,7 +296,7 @@ function siteTaskSummary(sitePackage: VerifiedSiteTask): JsonObject {
       title: task.title,
       intent: task.intent,
       ...(Array.isArray(task.known_branches) ? { known_branches: task.known_branches } : {}),
-      entrypoint: { kind: "capability_refs", capability_refs: declaredCapabilityRefs },
+      entrypoint,
       capability_ref: sitePackage.capability.capability_ref,
       capability_version: sitePackage.capability.version,
       source_ref: sitePackage.source_ref,
@@ -301,6 +325,7 @@ export function createFileSkillLibraryService(options: {
   lodeAssetsPath?: string;
   runRecordStore: FileRunRecordStore;
   accessStore: FileManagedAccessStore;
+  managedSiteTaskAdmissionStore?: ManagedSiteTaskAdmissionStore;
   clock?: () => Date;
   lockTimeoutMs?: number;
 }) {
@@ -360,22 +385,65 @@ export function createFileSkillLibraryService(options: {
     await mkdir(options.directory, { recursive: true, mode: 0o700 });
     return withFileOwnershipLock(lockPath, lockTimeoutMs, async () => { const state = await readState(); const result = await action(state); await writeState(state); return result; });
   }
-  async function sourceManifest(skillRef?: string): Promise<{ manifest: SkillSourceManifest; sourceRoot: string; sitePackage?: VerifiedSiteTask }> {
-    if (skillRef === approvedManagedSiteTaskPackage.package_ref) {
-      const sitePackage = await resolveApprovedSiteTaskPackage(options.lodeAssetsPath);
-      const revision = siteSkillRevision(sitePackage);
-      return {
-        manifest: {
-          schema_version: skillSourceManifestSchemaVersion,
-          asset_ref: sitePackage.package_ref,
-          asset_name: String(sitePackage.task.title ?? "Site skill"),
-          source_repository: "WebEnvoy/Lode",
-          source_path: approvedManagedSiteTaskPackage.package_path,
-          revisions: [revision]
-        },
-        sourceRoot: options.lodeAssetsPath ?? process.env.WEBENVOY_LODE_ASSETS_PATH ?? "",
-        sitePackage
-      };
+  async function ownerAdmittedSitePackages(skillRef?: string, sourceRefs?: readonly string[]): Promise<VerifiedSiteTask[]> {
+    const candidates = await options.managedSiteTaskAdmissionStore?.listAdmitted(skillRef) ?? [];
+    const selected = candidates.filter(candidate => sourceRefs === undefined || sourceRefs.includes(candidate.pin.source_ref) || sourceRefs.includes(candidate.pin.revision_ref));
+    const unique = new Map<string, OwnerAdmittedSiteTaskPin>();
+    for (const candidate of selected) unique.set(`${candidate.pin.package_ref}\0${candidate.pin.revision_ref}\0${candidate.pin.task_ref}`, candidate);
+    const result: VerifiedSiteTask[] = [];
+    for (const candidate of unique.values()) {
+      const pin = candidate.pin;
+      if (!candidate.lodeAssetsPath || candidate.source_ref !== pin.source_ref || candidate.source_commit !== pin.source_commit ||
+          candidate.task_ref !== pin.task_ref || !/^webenvoy\.(?:source|owner)-admission\/[A-Za-z0-9._/-]+#sha256:[a-f0-9]{64}$/.test(candidate.admission_ref) ||
+          candidate.code_admission_ref !== undefined && candidate.code_admission_ref !== managedSiteScriptCodeAdmissionRef(pin)) return fail("managed_skill_revision_unavailable");
+      const sitePackage = await verifySiteSkillPackageRoot(candidate.lodeAssetsPath, pin);
+      result.push({ ...sitePackage, source_admission_ref: candidate.admission_ref, ...(candidate.code_admission_ref ? { code_admission_ref: candidate.code_admission_ref } : {}) });
+    }
+    return result;
+  }
+  async function sourceManifest(skillRef?: string, sourceRefs?: readonly string[], selectedRevisionRef?: string): Promise<{ manifest: SkillSourceManifest; sourceRoot: string; sitePackage?: VerifiedSiteTask }> {
+    const sitePackagePin = skillRef === undefined ? undefined : approvedManagedSiteTaskPackageFor(skillRef);
+    if (skillRef !== undefined) {
+      const admitted = await ownerAdmittedSitePackages(skillRef, sourceRefs);
+      if (sitePackagePin !== undefined || admitted.length > 0) {
+      const fixedAllowed = sitePackagePin !== undefined && (sourceRefs === undefined || sourceRefs.includes(sitePackagePin.source_ref) || sourceRefs.includes(sitePackagePin.revision_ref)) &&
+        (selectedRevisionRef === undefined || selectedRevisionRef === sitePackagePin.source_ref || selectedRevisionRef === sitePackagePin.revision_ref);
+      const selectedAdmitted = selectedRevisionRef === undefined ? admitted : admitted.filter(candidate =>
+        candidate.revision_ref === selectedRevisionRef || candidate.source_ref === selectedRevisionRef);
+      // When a Grant exposes both the official base and an owner-admitted
+      // repair, inspect/list use the owner-selected revision. Mutations with
+      // an explicit revision selector can still select the exact base or
+      // derived revision without making the package ref itself an allowlist.
+      const sourceCandidates = selectedAdmitted.length > 0 ? selectedAdmitted : [
+        ...(fixedAllowed && sitePackagePin ? [{ ...await resolveApprovedSiteTaskPackage(options.lodeAssetsPath, sitePackagePin),
+          source_admission_ref: `webenvoy.source-admission/site-skill/v1#sha256:${digest(canonical({ package_ref: sitePackagePin.package_ref, revision_ref: sitePackagePin.revision_ref, package_digest: sitePackagePin.package_digest, source_ref: sitePackagePin.source_ref, source_commit: sitePackagePin.source_commit }))}`,
+          ...(sitePackagePin.script ? { code_admission_ref: managedSiteScriptCodeAdmissionRef(sitePackagePin) } : {}) }] : []),
+        ...(selectedRevisionRef === undefined ? admitted : [])
+      ];
+      const unique = new Map(sourceCandidates.map(candidate => [`${candidate.revision_ref}\0${candidate.task_ref}`, candidate]));
+      if (unique.size === 0) {
+        if (sourceRefs !== undefined || sitePackagePin) return fail("managed_skill_revision_unavailable");
+      } else {
+        if (unique.size > 1) return fail("managed_skill_revision_ambiguous");
+        const sitePackage = [...unique.values()][0]!;
+        const revision = siteSkillRevision(sitePackage);
+        const sourceRoot = sitePackage.source_admission_ref?.startsWith("webenvoy.source-admission/site-skill/v1#")
+          ? options.lodeAssetsPath ?? process.env.WEBENVOY_LODE_ASSETS_PATH ?? ""
+          : (await options.managedSiteTaskAdmissionStore?.resolveAdmitted({ package_ref: sitePackage.package_ref, revision_ref: sitePackage.revision_ref, package_digest: sitePackage.package_digest, task_ref: sitePackage.task_ref }))?.lodeAssetsPath ?? "";
+        return {
+          manifest: {
+            schema_version: skillSourceManifestSchemaVersion,
+            asset_ref: sitePackage.package_ref,
+            asset_name: String(sitePackage.task.title ?? "Site skill"),
+            source_repository: sitePackage.source_repository,
+            source_path: sitePackage.package_path,
+            revisions: [revision]
+          },
+          sourceRoot,
+          sitePackage
+        };
+      }
+      }
     }
     try {
       const info = await lstat(sourceManifestPath);
@@ -556,32 +624,38 @@ export function createFileSkillLibraryService(options: {
       const state = await readState();
       const visible: JsonObject[] = [];
       const refs = input.task_scope.skill_refs;
-      if (refs.includes(approvedManagedSiteTaskPackage.package_ref)) {
+      for (const pin of approvedManagedSiteTaskPackages) {
+        if (!refs.includes(pin.package_ref)) continue;
         try {
-          const { manifest, sitePackage } = await sourceManifest(approvedManagedSiteTaskPackage.package_ref);
+          const { manifest, sitePackage } = await sourceManifest(pin.package_ref, input.task_scope.source_refs);
           visible.push(await verifiedStateSummary(findRecord(state, manifest.asset_ref), manifest, input.task_scope.source_refs, sitePackage));
         } catch (error) {
           if (!(error instanceof ManagedAccessError) || error.code !== "managed_skill_source_missing") throw error;
         }
       }
-      if (refs.some(ref => ref !== approvedManagedSiteTaskPackage.package_ref)) {
+      for (const ref of refs) {
+        if (approvedManagedSiteTaskPackageFor(ref)) continue;
         try {
-          const { manifest, sitePackage } = await sourceManifest();
-          if (refs.includes(manifest.asset_ref)) visible.push(await verifiedStateSummary(findRecord(state, manifest.asset_ref), manifest, input.task_scope.source_refs, sitePackage));
+          const { manifest, sitePackage } = await sourceManifest(ref, input.task_scope.source_refs);
+          visible.push(await verifiedStateSummary(findRecord(state, manifest.asset_ref), manifest, input.task_scope.source_refs, sitePackage));
         } catch (error) {
-          if (!(error instanceof ManagedAccessError) || error.code !== "managed_skill_source_missing") throw error;
+          if (!(error instanceof ManagedAccessError) || !["managed_skill_source_missing", "managed_skill_revision_unavailable"].includes(error.code)) throw error;
         }
       }
       const metadata = { schema_version: skillResultSchemaVersion, skills: visible };
       await transaction(current => { rememberOperation(current, input, runId, principalId, requestHash, metadata); });
       return { metadata };
     }
-    const { manifest, sourceRoot, sitePackage } = await sourceManifest(input.skill_ref);
     const state = await readState();
+    const priorRecord = input.skill_ref === undefined ? undefined : findRecord(state, input.skill_ref);
+    const requestedRef = input.target_revision_ref ?? input.revision_ref;
+    const currentSelector = input.operation === "skill.read" || input.operation === "skill.disable"
+      ? input.expected_revision_ref ?? input.expected_current_revision_ref ?? priorRecord?.enabled_revision_ref ?? undefined
+      : undefined;
+    const { manifest, sourceRoot, sitePackage } = await sourceManifest(input.skill_ref, input.task_scope.source_refs, requestedRef ?? currentSelector);
     let record = findRecord(state, manifest.asset_ref);
     const skillRef = input.skill_ref ?? manifest.asset_ref;
     if (skillRef !== manifest.asset_ref) return fail("managed_skill_not_found");
-    const requestedRef = input.target_revision_ref ?? input.revision_ref;
     const requested = requestedRef === undefined ? undefined : findManifestRevision(manifest, requestedRef);
     if (input.source_ref !== undefined && requested && requested.source_ref !== input.source_ref) return fail("managed_skill_source_mismatch");
     assertScopeRef(input, skillRef, requested);
@@ -756,9 +830,31 @@ export function createFileSkillLibraryService(options: {
     return response(run);
   }
   async function resolveManagedSiteTask(request: ManagedSiteTaskPackageRequest): Promise<VerifiedSiteTask> {
-    if (!request || request.package_ref !== approvedManagedSiteTaskPackage.package_ref || request.revision_ref !== approvedManagedSiteTaskPackage.revision_ref ||
-        request.package_digest !== approvedManagedSiteTaskPackage.package_digest || request.task_ref !== approvedManagedSiteTaskPackage.task_ref) return fail("managed_skill_revision_unavailable");
-    const sitePackage = await resolveApprovedSiteTaskPackage(options.lodeAssetsPath);
+    const exactRequest = request && typeof request.package_ref === "string" && typeof request.revision_ref === "string" &&
+      typeof request.package_digest === "string" && typeof request.task_ref === "string";
+    if (!exactRequest) return fail("managed_skill_revision_unavailable");
+    const admitted = await options.managedSiteTaskAdmissionStore?.resolveAdmitted(request);
+    let pin: SiteSkillPackagePin;
+    let sitePackage: VerifiedSiteTask;
+    let sourceAdmissionRef: string;
+    let codeAdmissionRef: string | undefined;
+    if (admitted) {
+      pin = admitted.pin;
+      if (pin.package_ref !== request.package_ref || pin.revision_ref !== request.revision_ref || pin.package_digest !== request.package_digest ||
+          pin.task_ref !== request.task_ref || admitted.task_ref !== request.task_ref || admitted.source_ref !== pin.source_ref ||
+          admitted.source_commit !== pin.source_commit || !/^webenvoy\.source-admission\/[A-Za-z0-9._/-]+#sha256:[a-f0-9]{64}$/.test(admitted.admission_ref) ||
+          admitted.code_admission_ref !== undefined && admitted.code_admission_ref !== managedSiteScriptCodeAdmissionRef(pin)) return fail("managed_skill_revision_unavailable");
+      sitePackage = await verifySiteSkillPackageRoot(admitted.lodeAssetsPath, pin);
+      sourceAdmissionRef = admitted.admission_ref;
+      codeAdmissionRef = admitted.code_admission_ref;
+    } else {
+      const fixed = approvedManagedSiteTaskPackageFor(request.package_ref);
+      if (!fixed || request.revision_ref !== fixed.revision_ref || request.package_digest !== fixed.package_digest || request.task_ref !== fixed.task_ref) return fail("managed_skill_revision_unavailable");
+      pin = fixed;
+      sitePackage = await resolveApprovedSiteTaskPackage(options.lodeAssetsPath, pin);
+      sourceAdmissionRef = `webenvoy.source-admission/site-skill/v1#sha256:${digest(canonical({ package_ref: pin.package_ref, revision_ref: pin.revision_ref, package_digest: pin.package_digest, source_ref: pin.source_ref, source_commit: pin.source_commit }))}`;
+      codeAdmissionRef = pin.script ? managedSiteScriptCodeAdmissionRef(pin) : undefined;
+    }
     const state = await readState();
     const record = findRecord(state, sitePackage.package_ref);
     if (!record) return fail("managed_skill_not_installed");
@@ -767,7 +863,7 @@ export function createFileSkillLibraryService(options: {
     if (!installedRevision || installedRevision.package_type !== "site-skill" || installedRevision.package_digest !== sitePackage.package_digest || installedRevision.source_ref !== sitePackage.source_ref) return fail("managed_skill_revision_unavailable");
     const stateResult = await installedBytes(record, installedRevision, sitePackage);
     if (stateResult.state !== "available") return fail(`managed_skill_${stateResult.state}`);
-    return sitePackage;
+    return { ...sitePackage, source_admission_ref: sourceAdmissionRef, ...(codeAdmissionRef ? { code_admission_ref: codeAdmissionRef } : {}) };
   }
   return {
     submit,

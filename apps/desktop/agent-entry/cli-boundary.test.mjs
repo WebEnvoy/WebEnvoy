@@ -189,11 +189,79 @@ test('Agent task help documents the managed task API and recovery selector', asy
   assert.equal(submit.code, 0);
   assert.match(submit.stdout, /POST\s+\/managed-tasks\/operations/);
   assert.match(submit.stdout, /Core checks the current Grant and Page target/);
+  assert.match(submit.stdout, /verified distinct non-admin\s+Agent UID/);
+  assert.match(submit.stdout, /trusted_local refuses script dispatch/);
   assert.equal(query.code, 0);
   assert.match(query.stdout, /task\.submit idempotency key/);
   assert.match(query.stdout, /does not create or redispatch a Run/);
   assert.equal(stop.code, 0);
   assert.match(stop.stdout, /does\s+not\s+roll back effects already dispatched/);
+});
+
+test('owner AccountSystem CLI calls the Core owner API and keeps local refs on the owner path', async () => {
+  const dir = await (await import('node:fs/promises')).mkdtemp(join(tmpdir(), 'webenvoy-cli-account-system-'));
+  const socketPath = join(dir, 'owner-control.sock');
+  const requests = [];
+  const server = createServer(async (request, response) => {
+    const chunks = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    requests.push({ path: request.url, method: request.method, body: JSON.parse(Buffer.concat(chunks).toString('utf8')) });
+    response.setHeader('content-type', 'application/json');
+    response.end(JSON.stringify({ ok: true, result: { definitions: [] } }));
+  });
+  try {
+    await new Promise((resolve, reject) => { server.once('error', reject); server.listen(socketPath, resolve); });
+    await chmod(socketPath, 0o600);
+    const help = await runCli(['help', 'account-system']);
+    const result = await runCli(['account-system', 'list', '--data-dir', dir]);
+    assert.equal(help.code, 0);
+    assert.match(help.stdout, /explicitly enable or roll\s+back/);
+    assert.equal(result.code, 0);
+    assert.deepEqual(JSON.parse(result.stdout), { ok: true, result: { definitions: [] } });
+    assert.deepEqual(requests, [{ path: '/owner/account-systems/operations', method: 'POST', body: {
+      schema_version: 'webenvoy.account-system-owner-operation/v1', operation: 'list'
+    } }]);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('owner site-task admission CLI sends owner Git inspection through Core and documents the lifecycle', async () => {
+  const dir = await (await import('node:fs/promises')).mkdtemp(join(tmpdir(), 'wsa-'));
+  const socketPath = join(dir, 'owner-control.sock');
+  const requests = [];
+  const server = createServer(async (request, response) => {
+    const chunks = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    requests.push({ path: request.url, method: request.method, body: JSON.parse(Buffer.concat(chunks).toString('utf8')) });
+    response.setHeader('content-type', 'application/json');
+    response.end(JSON.stringify({ ok: true, result: { candidate_ref: 'webenvoy:site-task-candidate/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa#sha256:' + 'b'.repeat(64) } }));
+  });
+  try {
+    await new Promise((resolve, reject) => { server.once('error', reject); server.listen(socketPath, resolve); });
+    await chmod(socketPath, 0o600);
+    const help = await runCli(['help', 'site-task-admission']);
+    const result = await runCli(['site-task-admission', 'inspect-candidate', '--data-dir', dir,
+      '--repository-ref', 'webenvoy:site-task-authoring-repository/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      '--package-ref', 'lode://site-skill/github/trending',
+      '--base-revision-ref', 'lode://site-skill/github/trending@1.0.0#' + 'c'.repeat(40),
+      '--task-ref', 'read-daily-trending-top5']);
+    assert.equal(help.code, 0);
+    assert.match(help.stdout, /private Git worktree/);
+    assert.match(help.stdout, /Code admission is a separate owner/);
+    assert.equal(result.code, 0);
+    assert.equal(JSON.parse(result.stdout).result.candidate_ref.startsWith('webenvoy:site-task-candidate/'), true);
+    assert.deepEqual(requests, [{ path: '/owner/site-task-admissions/operations', method: 'POST', body: {
+      schema_version: 'webenvoy.site-task-admission-owner-operation/v1', operation: 'inspect_candidate',
+      repository_ref: 'webenvoy:site-task-authoring-repository/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      package_ref: 'lode://site-skill/github/trending',
+      base_revision_ref: 'lode://site-skill/github/trending@1.0.0#' + 'c'.repeat(40), task_ref: 'read-daily-trending-top5'
+    } }]);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test('formal CLI rejects the historical App entry', async () => {

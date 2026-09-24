@@ -203,6 +203,38 @@ assertValid(validateManagedTaskRequest, managedTaskRequest, "inline managed task
 managedTaskInput.value = "a".repeat(65535);
 assert.equal(validateManagedTaskRequest(managedTaskRequest), false, "inline managed task value over byte limit must be rejected");
 
+const managedTaskResultSchema = schemasByFile.get("managed-task-operation-result.schema.json");
+assert(managedTaskResultSchema, "managed task result schema must exist");
+const validateManagedTaskResult = ajv.getSchema(asString(managedTaskResultSchema.$id, "managed task result schema.$id"));
+assert(validateManagedTaskResult, "managed task result validator must compile");
+const workerTicket = {
+  ticket_id: "worker-ticket-001", run_id: "managed-task-run-001",
+  package: { package_ref: "lode://site-skill/github/trending", revision_ref: "lode://site-skill/github/trending@1.0.0#0dcd6232cdfd9c88982792d2ce88a39d528a6433",
+    package_digest: `sha256:${"a".repeat(64)}`, task_ref: "read-daily-trending-top5", source_ref: "lode://source/site-skill/github/trending@1.0.0#0dcd6232cdfd9c88982792d2ce88a39d528a6433",
+    lock_ref: "lode://lock/site-skill/github/trending@1.0.0", capability_ref: "lode:capability/managed-page-snapshot", capability_version: "1.0.0",
+    source_admission_ref: `webenvoy.source-admission/site-skill-package/v1#sha256:${"b".repeat(64)}`,
+    code_admission_ref: `webenvoy.code-admission/site-skill-script/v1#sha256:${"c".repeat(64)}` },
+  script: { script_ref: "lode://script/site-skill/github/trending/read-daily-top5@1.0.0", script_version: "1.0.0", script_sha256: `sha256:${"d".repeat(64)}`,
+    runtime_kind: "webenvoy.site-skill-script-abi/v1", entrypoint: "run", broker: "webenvoy.site-skill-broker/v1",
+    broker_capabilities: ["runtime.invoke", "output.write"], source: "export async function run(input, broker, context) {}" },
+  authorization: { principal_id: "principal:agent", connection_id: "connection:agent", grant_id: "grant:site", profile_ref: "profile:default", origin: "https://github.com" },
+  target: { target_type: "web_page", target_ref: "github-trending-current" },
+  input: { schema_ref: "lode://schema/site-skill/github/trending/daily-top5/input@1.0.0", value: {} },
+  context: { run_id: "managed-task-run-001", task_ref: "read-daily-trending-top5" }, deadline_at: Date.now() + 10_000
+};
+const managedTaskResult = {
+  ok: true, schema_version: "webenvoy.managed-task-operation-result/v1", operation: "task.submit", operation_ref: "managed-task-run-001",
+  run: { run_id: "managed-task-run-001", task_intent_ref: "intent:site-task", package_ref: "lode://site-skill/github/trending", status: "running", dispatch_state: "not_dispatched" },
+  input: { schema_ref: "lode://schema/site-skill/github/trending/daily-top5/input@1.0.0", carrier: "none", value_present: false },
+  result: null, failure: null, worker_execution: { ticket: workerTicket }
+};
+assertValid(validateManagedTaskResult, managedTaskResult, "one-time managed worker ticket in a prepared task result");
+managedTaskResult.operation = "task.query";
+assert.equal(validateManagedTaskResult(managedTaskResult), false, "worker tickets are only valid on task.submit responses");
+managedTaskResult.operation = "task.submit";
+(managedTaskResult.worker_execution.ticket.script as JsonObject).source = "x".repeat(65_537);
+assert.equal(validateManagedTaskResult(managedTaskResult), false, "worker source is bounded by the response contract");
+
 const validateTaskThread = ajv.getSchema(taskThreadSchemaId);
 assert(validateTaskThread, `${taskThreadSchemaFile} must compile as Draft 2020-12 JSON Schema`);
 const taskThreadFixture = await readJson(join(fixtureDir, "task-thread.fixture.json"));

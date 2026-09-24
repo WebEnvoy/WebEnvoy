@@ -28,6 +28,8 @@ try {
   await copyJsonTree(path.join(exportRoot, "registry"), path.join(outDir, "registry"));
   await copyJsonTree(path.join(exportRoot, "sites"), path.join(outDir, "sites"));
   await copySiteSkillFiles(path.join(exportRoot, "sites"), path.join(outDir, "sites"));
+  await copyJsonTree(path.join(exportRoot, "account-systems"), path.join(outDir, "account-systems"));
+  await verifyAccountSystemTemplate(outDir);
   await writeFile(
     path.join(outDir, "provenance.json"),
     `${JSON.stringify({ schema_version: "webenvoy-lode-asset-provenance/v1", ...lodeLock }, null, 2)}\n`,
@@ -81,7 +83,7 @@ function exportLockedAssets(repository, lock, target) {
   if (tree.status !== 0 || tree.stdout.trim() !== lock.tree) {
     throw new Error(`Lode tree does not match locked tree ${lock.tree}: ${tree.stderr || tree.stdout}`);
   }
-  const archive = spawnSync("git", ["archive", "--format=tar", lock.commit, "registry", "sites"], {
+  const archive = spawnSync("git", ["archive", "--format=tar", lock.commit, "registry", "sites", "account-systems"], {
     cwd: repository,
     encoding: null,
     maxBuffer: 64 * 1024 * 1024,
@@ -93,6 +95,40 @@ function exportLockedAssets(repository, lock, target) {
   }
   const extract = spawnSync("tar", ["-x", "-C", target], { input: archive.stdout, encoding: "utf8" });
   if (extract.status !== 0) throw new Error(`Unable to extract locked Lode assets: ${extract.stderr || "tar failed"}`);
+}
+
+async function verifyAccountSystemTemplate(root) {
+  const templateRef = "lode://account-system/github@1.0.0";
+  const expectedPath = "account-systems/github/1.0.0.json";
+  const expectedSha = "sha256:8b022fc329a6f75887e465ab561c83ba74d2ab2af1ef0e51a41f3d06b1b4c777";
+  await assertRegularAsset(root, "registry/account-system-templates.json");
+  await assertRegularAsset(root, expectedPath);
+  const index = JSON.parse(await readFile(path.join(root, "registry/account-system-templates.json"), "utf8"));
+  if (index.schema_version !== "lode.account-system-template-index.v1" || index.index_id !== "lode.account-system-templates" || !Array.isArray(index.entries)) {
+    throw new Error("account_system_template_index_invalid");
+  }
+  const matches = index.entries.filter((entry) => entry?.template_ref === templateRef);
+  if (matches.length !== 1 || matches[0].version !== "1.0.0" || matches[0].path !== expectedPath || matches[0].sha256 !== expectedSha) {
+    throw new Error("account_system_template_pin_invalid");
+  }
+  const bytes = await readFile(path.join(root, expectedPath));
+  if (`sha256:${createHash("sha256").update(bytes).digest("hex")}` !== expectedSha) throw new Error("account_system_template_digest_mismatch");
+  const template = JSON.parse(bytes.toString("utf8"));
+  if (template.schema_version !== "lode.account-system-template.v1" || template.template_ref !== templateRef ||
+      template.account_system_id !== "github" || template.version !== "1.0.0") throw new Error("account_system_template_content_invalid");
+}
+
+async function assertRegularAsset(root, relativePath) {
+  let current = root;
+  const parts = relativePath.split("/");
+  for (const [index, part] of parts.entries()) {
+    current = path.join(current, part);
+    const info = await lstat(current);
+    if (info.isSymbolicLink() || index < parts.length - 1 && !info.isDirectory() || index === parts.length - 1 && !info.isFile()) {
+      throw new Error("account_system_template_asset_type_invalid");
+    }
+    if (index === parts.length - 1 && info.size > 256 * 1024) throw new Error("account_system_template_asset_too_large");
+  }
 }
 
 async function copyJsonTree(from, to) {

@@ -1,9 +1,11 @@
 import { request } from 'node:http';
+import { createConnection } from 'node:net';
 import { spawn } from 'node:child_process';
 import { mkdir, readFile } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { agentDataSocket, ownerControlSocket, verifyAgentClientFile, verifyAgentIdentity, verifyAgentSocket, verifyOwnerDataDirectory, verifyOwnerSocket } from './os-boundary.mjs';
 import { root, verifyBundle } from './bundle.mjs';
+import { createManagedSiteWorkerSupervisor } from './managed-site-worker-supervisor.mjs';
 
 function requestSocket(socketPath, path, { method = 'GET', body, credential } = {}) {
   return new Promise((resolveResponse, reject) => {
@@ -47,7 +49,7 @@ export function agentRequest(endpointOrDataDir, path, options = {}) {
   if (resolvedAgentUid !== undefined) {
     verifyAgentIdentity(resolvedAgentUid);
   }
-  verifyAgentSocket(socketPath, { ownerUid: resolvedOwnerUid });
+  verifyAgentSocket(socketPath, { ownerUid: resolvedOwnerUid, agentUid: resolvedAgentUid });
   return requestSocket(socketPath, path, requestOptions);
 }
 
@@ -107,6 +109,88 @@ export async function ensureAgentRuntime(clientOrDataDir) {
     if (['ENOENT', 'ECONNREFUSED'].includes(error.code)) throw new Error('runtime_unavailable: owner must start Runtime before Agent connect');
     throw error;
   }
+}
+
+export async function probeOwnerSocketAccess(dataDir, { timeoutMs = 500 } = {}) {
+  const socketPath = ownerControlSocket(dataDir);
+  return await new Promise(resolveProbe => {
+    let settled = false;
+    const connection = createConnection(socketPath);
+    const finish = state => {
+      if (settled) return;
+      settled = true;
+      connection.destroy();
+      resolveProbe(state);
+    };
+    connection.once('connect', () => finish('accessible'));
+    connection.once('error', error => finish(['EACCES', 'EPERM'].includes(error.code) ? 'denied' : 'unverified'));
+    connection.setTimeout(timeoutMs, () => finish('unverified'));
+  });
+}
+
+function validWorkerApiResponse(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || value.ok !== true) {
+    throw new Error(typeof value?.error?.code === 'string' ? value.error.code : 'managed_site_worker_api_unavailable');
+  }
+  return value.result;
+}
+
+export async function runManagedSiteWorker(client, ticket, { signal } = {}) {
+  const request = async (path, body) => agentRequest(client, path, { credential: client.credential, method: 'POST', body });
+  let supervisor;
+  try {
+    verifyAgentIdentity(client.agent_uid);
+    if (client.agent_uid === client.owner_uid) throw Object.assign(new Error('worker_identity_unavailable'), { dispatch_state: 'not_dispatched' });
+    const status = await ensureAgentRuntime(client);
+    const boundary = status?.boundary;
+    const identity = boundary?.identity;
+    if (boundary?.state !== 'supported' || boundary?.mode !== 'distinct_uid_hardened' ||
+        identity?.owner_uid !== client.owner_uid || identity?.agent_uid !== client.agent_uid || identity?.socket_acl !== 'verified') {
+      throw Object.assign(new Error('worker_identity_unavailable'), { dispatch_state: 'not_dispatched' });
+    }
+    const ownerSocketProbe = await probeOwnerSocketAccess(client.data_dir);
+    if (ownerSocketProbe !== 'denied') throw Object.assign(new Error('owner_socket_acl_unavailable'), { dispatch_state: 'not_dispatched' });
+    supervisor = createManagedSiteWorkerSupervisor({
+      installRoot: root, ownerUid: client.owner_uid, agentUid: client.agent_uid, mode: boundary.mode,
+      probeOwnerSocket: async () => ownerSocketProbe
+    });
+    await supervisor.run(ticket, {
+      signal,
+      onStarted: async value => validWorkerApiResponse(await request('/managed-tasks/worker/started', value)),
+      onBroker: async value => validWorkerApiResponse(await request('/managed-tasks/worker/broker', value))
+    });
+    try {
+      return validWorkerApiResponse(await request('/managed-tasks/worker/complete', { ticket_id: ticket.ticket_id }));
+    } catch {
+      return await queryOriginalWorkerRun(client, ticket);
+    }
+  } catch (error) {
+    const code = typeof error?.message === 'string' && /^[a-z0-9_:-]{1,128}$/.test(error.message) ? error.message : 'managed_site_worker_unavailable';
+    try {
+      const result = validWorkerApiResponse(await request('/managed-tasks/worker/fail', { ticket_id: ticket.ticket_id, code }));
+      if (result?.ok === true) return result;
+    } catch { /* resolve the original Run below; never issue a replacement ticket */ }
+    return await queryOriginalWorkerRun(client, ticket);
+  } finally {
+    await supervisor?.stopAll();
+  }
+}
+
+async function queryOriginalWorkerRun(client, ticket) {
+  const value = await agentRequest(client, '/managed-tasks/operations', {
+    credential: client.credential,
+    method: 'POST',
+    body: {
+      schema_version: 'webenvoy.managed-task-operation/v1', operation: 'task.query',
+      grant_id: ticket.authorization.grant_id, connection_id: ticket.authorization.connection_id,
+      task_scope: {
+        operations: ['task.query'], skill_refs: [ticket.package.package_ref], source_refs: [ticket.package.revision_ref],
+        profile_refs: [ticket.authorization.profile_ref], origins: [ticket.authorization.origin]
+      }, selector: { run_id: ticket.run_id }
+    }
+  });
+  if (value?.ok !== true) throw new Error(value?.error?.code ?? 'managed_task_operation_unavailable');
+  return value;
 }
 
 // Agent/MCP callers retain the old name, but this path never starts a service.

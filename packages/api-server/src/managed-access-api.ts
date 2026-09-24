@@ -8,7 +8,10 @@ export type ManagedAccessApiOptions = {
   managedBrowserService?: Pick<ReturnType<typeof createManagedBrowserService>, "submit" | "query"> &
     Partial<Pick<ReturnType<typeof createManagedBrowserService>, "describe" | "getManagementPolicy" | "putManagementPolicy">>;
   managedSkillService?: Pick<ReturnType<typeof createFileSkillLibraryService>, "submit" | "query">;
-  managedTaskService?: Pick<ReturnType<typeof createManagedTaskService>, "operate">;
+  managedTaskService?: Pick<ReturnType<typeof createManagedTaskService>, "operate" | "workerStarted" | "broker" | "workerComplete" | "workerFailure">;
+  managedAccountSystemService?: {
+    read(credentialHash: string, request: { connection_id: string; grant_id: string; template_ref: string }): Promise<unknown>;
+  };
   managedRecoveryService?: Pick<ReturnType<typeof createManagedRecoveryService>, "inspect" | "backup" | "plan" | "apply" | "status" | "request">;
   managedFileService?: {
     importFile(input: Record<string, unknown>): Promise<unknown>;
@@ -36,8 +39,13 @@ function equalToken(value: string, expected: string): boolean {
   const supplied = Buffer.from(value), owner = Buffer.from(expected);
   return supplied.length === owner.length && timingSafeEqual(supplied, owner);
 }
+function hasVerifiedAgentSocketIngress(request: IncomingMessage, options: ManagedAccessApiOptions): boolean {
+  const names = request.rawHeaders.filter((_, index, headers) => index % 2 === 0 && headers[index]?.toLowerCase() === "x-webenvoy-agent-socket-ingress");
+  const value = request.headers["x-webenvoy-agent-socket-ingress"];
+  return names.length === 1 && typeof value === "string" && Boolean(options.supervisorToken) && equalToken(value, options.supervisorToken!);
+}
 function agentRoute(path: string): boolean {
-  return path === "/agent-connections" || path === "/managed-browser/capabilities/describe" || path === "/managed-browser/operations" || /^\/managed-browser\/operations\/[^/]+$/.test(path) || path === "/managed-skills/operations" || /^\/managed-skills\/operations\/[^/]+$/.test(path) || path === "/managed-tasks/operations";
+  return path === "/agent-connections" || path === "/managed-browser/capabilities/describe" || path === "/managed-browser/operations" || /^\/managed-browser\/operations\/[^/]+$/.test(path) || path === "/managed-skills/operations" || /^\/managed-skills\/operations\/[^/]+$/.test(path) || path === "/managed-tasks/operations" || /^\/managed-tasks\/worker\/(started|broker|complete|fail)$/.test(path) || path === "/managed-account-systems/operations";
 }
 function ownerRecoveryRoute(path: string): boolean {
   return path === "/owner/recovery/inspect" || path === "/owner/recovery/backup" || path === "/owner/recovery/plan" || path === "/owner/recovery/apply" || /^\/owner\/recovery\/status\/[^/]+$/.test(path);
@@ -125,6 +133,17 @@ export async function handleManagedAccessApi(request: IncomingMessage, response:
       if (!token) { reject(response, 401, "managed_access_authentication_required"); return true; }
       const credentialHash = createHash("sha256").update(token).digest("hex");
       await store.authenticateCredential(credentialHash);
+      const workerAction = /^\/managed-tasks\/worker\/(started|broker|complete|fail)$/.exec(path)?.[1];
+      if (workerAction) {
+        const service = options.managedTaskService;
+        if (!service || request.method !== "POST") { reject(response, service ? 405 : 503, service ? "managed_task_worker_method_not_allowed" : "managed_task_unavailable"); return true; }
+        const input = await body(request, 2 * 1024 * 1024, "managed_task_worker_invalid_input");
+        const result = workerAction === "started" ? await service.workerStarted(credentialHash, input)
+          : workerAction === "broker" ? await service.broker(credentialHash, input)
+            : workerAction === "complete" ? await service.workerComplete(credentialHash, input)
+              : await service.workerFailure(credentialHash, input);
+        send(response, 200, { ok: true, result }); return true;
+      }
       if (path === "/agent-connections" && request.method === "POST") {
         send(response, 201, { ok: true, connection: await store.connect(credentialHash), grants: await store.listAgentGrants(credentialHash) }); return true;
       }
@@ -152,8 +171,22 @@ export async function handleManagedAccessApi(request: IncomingMessage, response:
       if (path === "/managed-tasks/operations" && request.method === "POST") {
         const service = options.managedTaskService;
         if (!service) { reject(response, 503, "managed_task_unavailable"); return true; }
-        send(response, 200, await service.operate(credentialHash, await body(request, 128 * 1024, "managed_task_invalid_input"))); return true;
+        const input = await body(request, 128 * 1024, "managed_task_invalid_input");
+        const result = await service.operate(credentialHash, input, { agentSocketIngressVerified: hasVerifiedAgentSocketIngress(request, options) });
+        send(response, 200, result); return true;
       }
+      if (path === "/managed-account-systems/operations" && request.method === "POST") {
+        const service = options.managedAccountSystemService;
+        if (!service) { reject(response, 503, "managed_account_system_unavailable"); return true; }
+        const input = await body(request, 64 * 1024, "managed_account_system_invalid_input");
+        if (Object.keys(input).length !== 5 || input.schema_version !== "webenvoy.account-system-agent-operation/v1" ||
+            input.operation !== "account_system.read" || typeof input.connection_id !== "string" || !input.connection_id ||
+            typeof input.grant_id !== "string" || !input.grant_id || typeof input.template_ref !== "string" ||
+            !/^lode:\/\/account-system\/[A-Za-z0-9._/-]+@[0-9]+\.[0-9]+\.[0-9]+$/.test(input.template_ref)) throw new ManagedAccessError("managed_account_system_invalid_input");
+        send(response, 200, { ok: true, result: await service.read(credentialHash, { connection_id: input.connection_id, grant_id: input.grant_id, template_ref: input.template_ref }) });
+        return true;
+      }
+      if (path === "/managed-account-systems/operations") { reject(response, 405, "managed_account_system_method_not_allowed"); return true; }
       const skillOperation = /^\/managed-skills\/operations\/([^/]+)$/.exec(path);
       if (skillOperation && request.method === "GET") {
         const service = options.managedSkillService;
@@ -230,9 +263,17 @@ export async function handleManagedAccessApi(request: IncomingMessage, response:
               : conflict ? 409
                 : error instanceof ManagedAccessError ? 403 : 503
       : undefined;
+    const managedAccountSystemRequest = path === "/managed-account-systems/operations" && request.method === "POST";
+    const managedAccountSystemStatus = managedAccountSystemRequest
+      ? code === "managed_account_system_invalid_input" ? 400
+        : code === "account_system_definition_unavailable" ? 404
+        : ["managed_access_authentication_required", "managed_access_invalid_credential", "managed_access_connection_unavailable"].includes(code) ? 401
+          : code === "managed_access_denied" ? 403
+            : error instanceof ManagedAccessError ? 409 : 503
+      : undefined;
     const isDiscovery = path === "/managed-browser/capabilities/describe" && request.method === "POST";
     const discoveryStatus: number | undefined = isDiscovery ? (code === "discovery_context_unavailable" ? 404 : code === "discovery_context_not_supported" || code === "managed_browser_invalid_input" ? 400 : ["managed_access_connection_unavailable", "managed_access_authentication_required", "managed_access_invalid_credential"].includes(code) ? 401 : ["managed_browser_runtime_refused", "runtime_facts_unavailable", "execution_policy_unavailable"].includes(code) ? 503 : undefined) : undefined;
-    reject(response, managedTaskStatus ?? discoveryStatus ?? (code === "managed_access_authentication_required" ? 401 : code === "managed_access_invalid_input" || code === "managed_access_invalid_credential" || code === "managed_skill_invalid_input" ? 400 : conflict ? 409 : error instanceof ManagedAccessError ? 403 : 503), code, notDispatched);
+    reject(response, managedTaskStatus ?? managedAccountSystemStatus ?? discoveryStatus ?? (code === "managed_access_authentication_required" ? 401 : code === "managed_access_invalid_input" || code === "managed_access_invalid_credential" || code === "managed_skill_invalid_input" ? 400 : conflict ? 409 : error instanceof ManagedAccessError ? 403 : 503), code, notDispatched);
   }
   return true;
 }

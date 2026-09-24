@@ -1,11 +1,10 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { withFileOwnershipLock } from "./file-ownership.js";
 import { ManagedAccessError, type FileManagedAccessStore, type ManagedOperation, type ManagedTaskOperation, type ManagedTaskScope } from "./managed-access.js";
 import type { createManagedBrowserService } from "./managed-browser.js";
 import type { createFileSkillLibraryService } from "./skill-library.js";
-import { approvedManagedSiteTaskPackage } from "./site-skill-package.js";
 import { publicRunResult, terminalRunRecordStatuses, type FailureRecord, type FileRunRecordStore, type PostCheckResult, type RunRecord } from "./run-record-store.js";
 import { completeRunWithFailure, completeRunWithResult, type ResultEnvelope } from "./result-envelope.js";
 import { validateTaskIntent } from "./task-submission.js";
@@ -26,6 +25,31 @@ type ParsedRequest = {
   input?: { schema_ref: string; carrier: "none"; value?: unknown };
   intent?: { summary: string; policy: { risk: string; execution_intent: string; timeout_ms?: number } };
   selector?: { run_id?: string; original_idempotency_key?: string };
+};
+type ActiveManagedSiteTicket = {
+  ticket_id: string;
+  run_id: string;
+  credential_hash: string;
+  input: ParsedRequest;
+  principal_id: string;
+  profile_ref: string;
+  origin: string;
+  deadline_at: number;
+  package: NonNullable<ParsedRequest["package"]>;
+  sitePackage: Awaited<ReturnType<ReturnType<typeof createFileSkillLibraryService>["resolveManagedSiteTask"]>>;
+  taskFacts: ReturnType<typeof assertPinnedTask>;
+  target_ref: string;
+  cancelled: boolean;
+  dispatched: boolean;
+  worker_started: boolean;
+  snapshot_started: boolean;
+  snapshot?: JsonObject;
+  output?: JsonObject;
+  postCheck?: PostCheckResult;
+  failure_code?: string;
+  outcome_uncertain?: boolean;
+  timer?: ReturnType<typeof setTimeout>;
+  account_system?: { local_definition_ref: string; revision_ref: string; template_ref: string; template_sha256: string };
 };
 
 const responseSchemaVersion = "webenvoy.managed-task-operation-result/v1" as const;
@@ -55,7 +79,7 @@ function canonical(value: unknown): string {
   if (isObject(value)) return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`;
   return JSON.stringify(value);
 }
-function digest(value: string): string { return createHash("sha256").update(value).digest("hex"); }
+function digest(value: string | Uint8Array): string { return createHash("sha256").update(value).digest("hex"); }
 function parseScope(value: unknown, operation: ManagedTaskOperation): ParsedScope {
   const input = object(value, ["operations", "skill_refs", "source_refs", "profile_refs", "origins"]);
   const operations = stringArray(input.operations, 1) as ManagedOperation[];
@@ -133,7 +157,7 @@ function assertScopeMatches(input: ParsedRequest, facts: { package_ref: string; 
   if (input.task_scope.skill_refs[0] !== facts.package_ref || input.task_scope.source_refs[0] !== facts.revision_ref ||
       input.task_scope.profile_refs[0] !== facts.profile_ref || input.task_scope.origins[0] !== facts.origin) return fail("managed_task_operation_unavailable");
 }
-function assertPinnedTask(task: JsonObject, sitePackage: Awaited<ReturnType<ReturnType<typeof createFileSkillLibraryService>["resolveManagedSiteTask"]>>): { origin: string; inputSchemaRef: string; outputSchemaRef: string; resultKind: string; checkRef: string } {
+function assertPinnedTask(task: JsonObject, sitePackage: Awaited<ReturnType<ReturnType<typeof createFileSkillLibraryService>["resolveManagedSiteTask"]>>): { origin: string; inputSchemaRef: string; outputSchemaRef: string; resultKind: string; checkRef: string; accountSystemRef?: string } {
   const applicability = isObject(task.applicability) ? task.applicability : {};
   const inputs = isObject(task.inputs) ? task.inputs : {};
   const outputs = isObject(task.outputs) ? task.outputs : {};
@@ -145,27 +169,62 @@ function assertPinnedTask(task: JsonObject, sitePackage: Awaited<ReturnType<Retu
       outputs.completeness !== "required" || typeof outputs.result_kind !== "string" || typeof inputs.schema_ref !== "string" ||
       typeof outputs.schema_ref !== "string" || typeof verification.post_check_ref !== "string" ||
       sitePackage.capability.operation_id !== "instance.snapshot" || sitePackage.capability.action !== "read") return fail("managed_skill_source_corrupt");
-  return { origin, inputSchemaRef: inputs.schema_ref, outputSchemaRef: outputs.schema_ref, resultKind: outputs.result_kind, checkRef: verification.post_check_ref };
+  const accountSystemRef = applicability.account_system_ref === undefined ? undefined : string(applicability.account_system_ref, 512);
+  return { origin, inputSchemaRef: inputs.schema_ref, outputSchemaRef: outputs.schema_ref, resultKind: outputs.result_kind, checkRef: verification.post_check_ref,
+    ...(accountSystemRef === undefined ? {} : { accountSystemRef }) };
 }
 function schemaValid(value: unknown, schemaValue: unknown): boolean {
   if (!isObject(schemaValue)) return false;
   const schema = schemaValue;
   if (Object.hasOwn(schema, "const") && canonical(value) !== canonical(schema.const)) return false;
-  if (schema.type === "object") {
+  if (Array.isArray(schema.enum) && !schema.enum.some(item => canonical(item) === canonical(value))) return false;
+  const types = Array.isArray(schema.type) ? schema.type : [schema.type];
+  const typeMatches = (type: unknown): boolean => {
+    if (type === "object") return isObject(value);
+    if (type === "array") return Array.isArray(value);
+    if (type === "string") return typeof value === "string";
+    if (type === "boolean") return typeof value === "boolean";
+    if (type === "integer") return Number.isSafeInteger(value);
+    if (type === "number") return typeof value === "number" && Number.isFinite(value);
+    if (type === "null") return value === null;
+    return false;
+  };
+  if (schema.type !== undefined && (!Array.isArray(schema.type) && typeof schema.type !== "string" || !types.some(typeMatches))) return false;
+  if (typeof value === "string") {
+    if (typeof schema.minLength === "number" && value.length < schema.minLength) return false;
+    if (typeof schema.maxLength === "number" && value.length > schema.maxLength) return false;
+    if (typeof schema.pattern === "string") {
+      try { if (!new RegExp(schema.pattern).test(value)) return false; } catch { return false; }
+    }
+  }
+  if (typeof value === "number") {
+    if (typeof schema.minimum === "number" && value < schema.minimum) return false;
+    if (typeof schema.maximum === "number" && value > schema.maximum) return false;
+  }
+  if (Array.isArray(value)) {
+    if (typeof schema.minItems === "number" && value.length < schema.minItems) return false;
+    if (typeof schema.maxItems === "number" && value.length > schema.maxItems) return false;
+    if (schema.items !== undefined && (!isObject(schema.items) || !value.every(item => schemaValid(item, schema.items)))) return false;
+  }
+  if (isObject(value)) {
     if (!isObject(value)) return false;
     const required = Array.isArray(schema.required) ? schema.required : [];
     const properties = isObject(schema.properties) ? schema.properties : {};
     if (required.some(key => typeof key !== "string" || !Object.hasOwn(value, key))) return false;
     if (schema.additionalProperties === false && Object.keys(value).some(key => !Object.hasOwn(properties, key))) return false;
-    return Object.entries(value).every(([key, item]) => properties[key] === undefined || schemaValid(item, properties[key]));
+    if (!Object.entries(value).every(([key, item]) => properties[key] === undefined || schemaValid(item, properties[key]))) return false;
   }
-  if (schema.type === "array") return Array.isArray(value) && isObject(schema.items) && value.every(item => schemaValid(item, schema.items));
-  if (schema.type === "string") return typeof value === "string";
-  if (schema.type === "boolean") return typeof value === "boolean";
-  if (schema.type === "integer") return Number.isSafeInteger(value);
-  return Object.hasOwn(schema, "const") && schema.type === undefined;
+  if (Array.isArray(schema.allOf) && !schema.allOf.every(part => schemaValid(value, part))) return false;
+  if (schema.if !== undefined) {
+    if (!isObject(schema.if)) return false;
+    const branch = schemaValid(value, schema.if) ? schema.then : schema.else;
+    if (branch !== undefined && (!isObject(branch) || !schemaValid(value, branch))) return false;
+  }
+  const supported = new Set(["$schema", "$id", "type", "const", "enum", "required", "properties", "items", "additionalProperties", "minItems", "maxItems", "minLength", "maxLength", "pattern", "minimum", "maximum", "allOf", "if", "then", "else", "title", "description"]);
+  if (Object.keys(schema).some(key => !supported.has(key))) return false;
+  return true;
 }
-function normalizedField(value: unknown): value is string { return typeof value === "string" && value.length > 0 && value.trim() === value; }
+function normalizedField(value: unknown): boolean { return value !== undefined && value !== null && (typeof value !== "string" || value.length > 0 && value.trim() === value); }
 function evaluatePostCheck(output: JsonObject, check: JsonObject, facts: { sourceRef: string; evidenceRef: string }): { passed: boolean; postCheck: PostCheckResult } {
   const normalized = isObject(output.normalized) ? output.normalized : {};
   const outputEvidence = Array.isArray(output.evidence_refs) ? output.evidence_refs.filter(isObject) : [];
@@ -176,11 +235,11 @@ function evaluatePostCheck(output: JsonObject, check: JsonObject, facts: { sourc
     const requirement = rawRequirement;
     if (requirement.required_status !== output.status) passed = false;
     const requiredFields = Array.isArray(requirement.required_normalized_fields) ? requirement.required_normalized_fields : [];
-    for (const field of requiredFields) if (typeof field !== "string" || !normalizedField(normalized[field])) passed = false;
+    for (const field of requiredFields) if (typeof field !== "string" || !Object.hasOwn(normalized, field) || !normalizedField(normalized[field])) passed = false;
     const expected = isObject(requirement.expected_normalized_fields) ? requirement.expected_normalized_fields : {};
     for (const [field, expectation] of Object.entries(expected)) {
-      if (typeof expectation === "string") {
-        if (normalized[field] !== expectation) passed = false;
+      if (["string", "number", "boolean"].includes(typeof expectation) || expectation === null) {
+        if (canonical(normalized[field]) !== canonical(expectation)) passed = false;
       } else if (isObject(expectation) && Object.keys(expectation).length === 1 && typeof expectation.contains === "string") {
         if (typeof normalized[field] !== "string" || !normalized[field].includes(expectation.contains)) passed = false;
       } else passed = false;
@@ -234,12 +293,37 @@ export function createManagedTaskService(options: {
   runRecordStore: FileRunRecordStore;
   skillLibraryService: Pick<ReturnType<typeof createFileSkillLibraryService>, "resolveManagedSiteTask">;
   managedBrowserService: Pick<ReturnType<typeof createManagedBrowserService>, "executeTaskSnapshot">;
+  workerIdentity?: { owner_uid: number; agent_uid: number; mode: string; owner_socket_acl: string };
+  accountSystemDefinitionService?: {
+    resolveTemplate(templateRef: string): Promise<unknown>;
+  };
 }) {
   const store = options.runRecordStore;
   const directory = join(store.directory, "managed-task-operation-locks");
+  const activeTickets = new Map<string, ActiveManagedSiteTicket>();
+  function deactivateWorkerTicket(active: ActiveManagedSiteTicket): void {
+    active.cancelled = true;
+    if (active.timer !== undefined) clearTimeout(active.timer);
+    if (activeTickets.get(active.ticket_id) === active) activeTickets.delete(active.ticket_id);
+  }
 
   async function authorize(credentialHash: string, input: ParsedRequest, profileRef: string, origin: string, packageRef: string, revisionRef: string) {
     return options.accessStore.checkAccess(credentialHash, accessRequest(input, profileRef, origin, packageRef, revisionRef));
+  }
+  async function resolveTaskAccountSystem(templateRef: string | undefined): Promise<{ local_definition_ref: string; local_revision_ref: string; template_ref: string; template_sha256: string } | undefined> {
+    if (templateRef === undefined) return undefined;
+    if (!options.accountSystemDefinitionService) return fail("account_system_definition_unavailable");
+    const resolved = await options.accountSystemDefinitionService.resolveTemplate(templateRef);
+    if (!isObject(resolved) || resolved.template_ref !== templateRef || resolved.historical === true ||
+        typeof resolved.local_definition_ref !== "string" || !/^webenvoy:account-system\/[0-9a-f-]{36}$/.test(resolved.local_definition_ref) ||
+        typeof resolved.revision_ref !== "string" || !/^webenvoy:account-system-revision\/[0-9a-f-]{36}@[1-9][0-9]*#sha256:[a-f0-9]{64}$/.test(resolved.revision_ref) ||
+        typeof resolved.template_sha256 !== "string" || !/^sha256:[a-f0-9]{64}$/.test(resolved.template_sha256)) return fail("account_system_definition_unavailable");
+    return {
+      template_ref: templateRef,
+      local_definition_ref: resolved.local_definition_ref,
+      local_revision_ref: resolved.revision_ref,
+      template_sha256: resolved.template_sha256
+    };
   }
   function runId(principalId: string, key: string): string { return `managed-task-${digest(`${principalId}\0${key}`)}`; }
   async function finishFailure(runId: string, code: string, status: "failed" | "unknown_outcome", dispatchState: "not_dispatched" | "dispatched", options: { evidenceRef?: string; sourceRef?: string; postCheck?: PostCheckResult; failure?: FailureRecord } = {}): Promise<RunRecord> {
@@ -261,7 +345,7 @@ export function createManagedTaskService(options: {
   async function lookupRun(credentialHash: string, input: ParsedRequest, principalId: string): Promise<RunRecord> {
     const selectedRunId = input.selector?.run_id ?? (input.selector?.original_idempotency_key ? runId(principalId, input.selector.original_idempotency_key) : undefined);
     if (!selectedRunId || !isValidRunId(selectedRunId)) return fail("managed_task_operation_unavailable");
-    const run = await store.getRunRecord(selectedRunId);
+    let run = await store.getRunRecord(selectedRunId);
     if (!run || run.public_result_summary?.principal_id !== principalId || !summaryFacts(run)) return fail("managed_task_operation_unavailable");
     const facts = summaryFacts(run)!;
     assertScopeMatches(input, { package_ref: facts.package_ref, revision_ref: facts.revision_ref, profile_ref: facts.profile_ref, origin: facts.origin });
@@ -271,7 +355,255 @@ export function createManagedTaskService(options: {
       if (error instanceof ManagedAccessError && error.code === "managed_access_denied") return fail("managed_task_operation_unavailable");
       throw error;
     }
-    return run;
+    return recoverOrphanedScriptRun(run);
+  }
+  async function recoverOrphanedScriptRun(run: RunRecord): Promise<RunRecord> {
+    const summary = run.public_result_summary;
+    if ((run.status !== "running" && run.status !== "admitted") || summary?.script_execution !== true ||
+        [...activeTickets.values()].some(ticket => ticket.run_id === run.run_id)) return run;
+    const dispatchState = summary.dispatch_state === "dispatched" ? "dispatched" : "not_dispatched";
+    return finishFailure(run.run_id, "managed_site_worker_lost", dispatchState === "dispatched" ? "unknown_outcome" : "failed", dispatchState,
+      { ...(typeof summary.target_ref === "string" ? { sourceRef: summary.target_ref } : {}),
+        failure: publicFailure(dispatchState === "dispatched" ? "write_outcome" : "runtime_execution", "managed_site_worker_lost",
+          dispatchState === "dispatched" ? "reconciliation" : "execution", "query_original_run_only") });
+  }
+  async function revalidateWorkerTicket(active: ActiveManagedSiteTicket): Promise<void> {
+    if (active.cancelled || activeTickets.get(active.ticket_id) !== active || Date.now() >= active.deadline_at) return fail("managed_task_ticket_inactive");
+    const run = await store.getRunRecord(active.run_id);
+    if (!run || run.status !== "running" || run.public_result_summary?.principal_id !== active.principal_id ||
+        run.public_result_summary?.grant_id !== active.input.grant_id || run.public_result_summary?.revision_ref !== active.package.revision_ref ||
+        run.public_result_summary?.package_digest !== active.package.package_digest ||
+        run.public_result_summary?.script_execution !== true || run.public_result_summary?.script_ref !== active.sitePackage.script?.script_ref ||
+        run.public_result_summary?.script_sha256 !== active.sitePackage.script?.sha256 ||
+        run.public_result_summary?.source_admission_ref !== active.sitePackage.source_admission_ref ||
+        run.public_result_summary?.code_admission_ref !== active.sitePackage.code_admission_ref) return fail("managed_task_ticket_inactive");
+    await options.accessStore.authenticateCredential(active.credential_hash);
+    await authorize(active.credential_hash, active.input, active.profile_ref, active.origin, active.package.package_ref, active.package.revision_ref);
+    // Admission and enablement select bytes for a new Run. An in-flight Run
+    // keeps those exact bytes when a newer revision is installed or the skill
+    // is disabled. Authorization is still rechecked for every broker request.
+    const script = active.sitePackage.script;
+    if (!script || digest(script.source) !== script.sha256.slice("sha256:".length)) return fail("managed_skill_source_corrupt");
+  }
+  async function requireWorkerTicket(credentialHash: string, value: unknown): Promise<ActiveManagedSiteTicket> {
+    const request = object(value, ["ticket_id"]);
+    const ticketId = string(request.ticket_id, 128);
+    const active = activeTickets.get(ticketId);
+    if (!active || active.credential_hash !== credentialHash) return fail("managed_task_ticket_inactive");
+    await options.accessStore.authenticateCredential(credentialHash);
+    await revalidateWorkerTicket(active);
+    return active;
+  }
+  async function workerStarted(credentialHash: string, value: unknown): Promise<JsonObject> {
+    const active = await requireWorkerTicket(credentialHash, value);
+    if (active.worker_started) return fail("managed_task_ticket_reused");
+    active.worker_started = true;
+    return { accepted: true };
+  }
+  async function workerBroker(credentialHash: string, value: unknown): Promise<JsonObject> {
+    const request = object(value, ["ticket_id", "method", "input"]);
+    const ticketId = string(request.ticket_id, 128);
+    const active = activeTickets.get(ticketId);
+    if (!active || active.credential_hash !== credentialHash || !active.worker_started) return fail("managed_task_ticket_inactive");
+    try {
+      await options.accessStore.authenticateCredential(credentialHash);
+      await revalidateWorkerTicket(active);
+      if (request.method === "runtime.invoke") {
+        if (active.snapshot_started || !isObject(request.input) || Object.keys(request.input).length !== 2 ||
+            request.input.operation_id !== "instance.snapshot" || request.input.action !== "read") return fail("managed_site_capability_not_admitted");
+        active.snapshot_started = true;
+        active.dispatched = true;
+        const currentRun = await store.getRunRecord(active.run_id);
+        if (!currentRun || currentRun.status !== "running") return fail("managed_task_ticket_inactive");
+        await store.updateRunRecord(active.run_id, { public_result_summary: { ...currentRun.public_result_summary, dispatch_state: "dispatched" } });
+        let receiptValue: unknown;
+        try {
+          const remainingMs = active.deadline_at - Date.now();
+          if (remainingMs <= 0) return fail("managed_task_timeout");
+          receiptValue = await options.managedBrowserService.executeTaskSnapshot(active.credential_hash, {
+            idempotency_key: active.run_id, operation: "instance.snapshot", connection_id: active.input.connection_id,
+            grant_id: active.input.grant_id, profile_ref: active.profile_ref, origin: active.origin, page_ref: active.target_ref,
+            task_scope: { operations: ["instance.snapshot"], profile_refs: [active.profile_ref], origins: [active.origin] }
+          }, active.run_id, remainingMs);
+        } catch (error) {
+          const code = error instanceof ManagedAccessError ? error.code : "managed_task_snapshot_unavailable";
+          active.failure_code = code;
+          const receipt = isObject(error) && isObject(error.receipt) ? error.receipt : {};
+          if (receipt.status === "unknown_outcome" || receipt.dispatch_state === "possibly_dispatched") active.outcome_uncertain = true;
+          if (receipt.dispatch_state === "not_dispatched") active.dispatched = false;
+          throw error;
+        }
+        const receipt = isObject(receiptValue) ? receiptValue : {};
+        const page = isObject(receipt.page) ? receipt.page : {};
+        const snapshot = isObject(receipt.snapshot) ? receipt.snapshot : {};
+        const coverage = isObject(snapshot.coverage) ? snapshot.coverage : {};
+        const coverageText = isObject(coverage.text) ? coverage.text : {};
+        const continuation = isObject(snapshot.continuation) ? snapshot.continuation : {};
+        const currentUrl = typeof page.current_url === "string" ? page.current_url : undefined;
+        let sameOrigin = false;
+        try { sameOrigin = Boolean(currentUrl && new URL(currentUrl).origin === active.origin); } catch { /* invalid URL fails below */ }
+        if (receipt.status !== "completed" || page.page_ref !== active.target_ref || snapshot.page_ref !== active.target_ref ||
+            typeof page.title !== "string" || !page.title || typeof snapshot.text !== "string" || Buffer.byteLength(snapshot.text, "utf8") > 65_536 ||
+            typeof snapshot.truncated !== "boolean" || typeof coverageText.state !== "string" || !sameOrigin ||
+            typeof snapshot.observation_ref !== "string" || !snapshot.observation_ref ||
+            continuation.has_more !== false) {
+          active.failure_code = "site_task_snapshot_incomplete";
+          return fail("managed_task_snapshot_incomplete");
+        }
+        const projected = {
+          status: receipt.status,
+          page: { current_url: currentUrl!, title: page.title, page_ref: page.page_ref },
+          snapshot: { text: snapshot.text, truncated: snapshot.truncated, coverage: { text: { state: coverageText.state } },
+            observation_ref: snapshot.observation_ref, page_ref: snapshot.page_ref }
+        };
+        active.snapshot = projected;
+        return projected;
+      }
+      if (request.method === "output.write") {
+        if (active.output || !active.snapshot || !isObject(request.input) || Buffer.byteLength(canonical(request.input), "utf8") > 1_048_576) return fail("managed_site_output_invalid");
+        const output = request.input;
+        const page = output.source_refs;
+        const evidence = output.evidence_refs;
+        const snapshot = active.snapshot.snapshot as JsonObject;
+        const pageValue = active.snapshot.page as JsonObject;
+        if (!schemaValid(output, active.sitePackage.output_schema) || !Array.isArray(page) || page.length !== 1 || !isObject(page[0]) ||
+            page[0].ref_id !== pageValue.page_ref || page[0].source_kind !== "harbor_page" || !Array.isArray(evidence) || evidence.length !== 1 ||
+            !isObject(evidence[0]) || evidence[0].ref_id !== snapshot.observation_ref || evidence[0].evidence_kind !== "snapshot_ref" ||
+            evidence[0].producer !== "harbor" || evidence[0].redaction !== "summary_only") {
+          active.failure_code = "site_task_output_schema_invalid";
+          return fail("managed_task_output_invalid");
+        }
+        const post = evaluatePostCheck(output, active.sitePackage.post_check, {
+          sourceRef: String(pageValue.page_ref), evidenceRef: String(snapshot.observation_ref)
+        });
+        active.output = output;
+        active.postCheck = post.postCheck;
+        return { accepted: true };
+      }
+      return fail("managed_site_broker_method_forbidden");
+    } catch (error) {
+      if (!active.failure_code) active.failure_code = error instanceof ManagedAccessError ? error.code : "managed_task_runtime_unavailable";
+      throw error;
+    }
+  }
+  async function cancelWorkerTicket(runId: string): Promise<void> {
+    const active = [...activeTickets.values()].find(item => item.run_id === runId);
+    if (!active) return;
+    deactivateWorkerTicket(active);
+  }
+  async function executeScriptTask(credentialHash: string, request: ParsedRequest, principalId: string, profileRef: string, origin: string,
+      runId: string, deadlineAt: number, sitePackage: ActiveManagedSiteTicket["sitePackage"], taskFacts: ReturnType<typeof assertPinnedTask>, initialSummary: JsonObject) {
+    const script = sitePackage.script;
+    const canRunScript = options.workerIdentity?.mode === "distinct_uid_hardened" &&
+      Number.isSafeInteger(options.workerIdentity.owner_uid) && Number.isSafeInteger(options.workerIdentity.agent_uid) &&
+      options.workerIdentity.owner_uid !== options.workerIdentity.agent_uid && options.workerIdentity.owner_socket_acl === "verified";
+    if (!script || !canRunScript || !sitePackage.code_admission_ref) {
+      const failed = await finishFailure(runId, "worker_identity_unavailable", "failed", "not_dispatched", {
+        sourceRef: request.target!.target_ref,
+        failure: publicFailure("runtime_execution", "worker_identity_unavailable", "pre_admission", "retry_only_after_hardened_agent_worker_is_available")
+      });
+      return response(failed, request.operation);
+    }
+    const ticketId = randomUUID();
+    const active: ActiveManagedSiteTicket = {
+      ticket_id: ticketId, run_id: runId, credential_hash: credentialHash, input: request, principal_id: principalId,
+      profile_ref: profileRef, origin, deadline_at: deadlineAt, package: request.package!, sitePackage, taskFacts,
+      target_ref: request.target!.target_ref, cancelled: false, dispatched: false, worker_started: false, snapshot_started: false
+    };
+    activeTickets.set(ticketId, active);
+    const ticket: JsonObject = {
+      ticket_id: ticketId, run_id: runId,
+      package: { package_ref: sitePackage.package_ref, revision_ref: sitePackage.revision_ref, package_digest: sitePackage.package_digest,
+        task_ref: sitePackage.task_ref, source_ref: sitePackage.source_ref, lock_ref: sitePackage.lock_ref,
+        capability_ref: sitePackage.capability.capability_ref, capability_version: sitePackage.capability.version,
+        source_admission_ref: sitePackage.source_admission_ref, code_admission_ref: sitePackage.code_admission_ref },
+      script: { script_ref: script.script_ref, script_version: script.version, script_sha256: script.sha256,
+        runtime_kind: script.runtime_kind, entrypoint: script.entrypoint, broker: script.broker,
+        broker_capabilities: script.broker_capabilities, source: script.source.toString("utf8") },
+      authorization: { principal_id: principalId, connection_id: request.connection_id, grant_id: request.grant_id, profile_ref: profileRef, origin },
+      target: { target_type: request.target!.target_type, target_ref: request.target!.target_ref },
+      input: { schema_ref: taskFacts.inputSchemaRef, value: {} }, context: { run_id: runId, task_ref: sitePackage.task_ref }, deadline_at: deadlineAt
+    };
+    const current = await store.getRunRecord(runId);
+    if (!current || current.status !== "running") {
+      deactivateWorkerTicket(active);
+      return current ? response(current, request.operation) : fail("managed_task_operation_unavailable");
+    }
+    active.timer = setTimeout(() => { void settleWorkerTimeout(active).catch(() => undefined); }, Math.max(0, deadlineAt - Date.now()));
+    active.timer.unref?.();
+    return { ...response(current, request.operation), worker_execution: { ticket } };
+  }
+  async function finalizeWorker(active: ActiveManagedSiteTicket): Promise<JsonObject> {
+    const latest = await store.getRunRecord(active.run_id);
+    if (!latest || terminalRunRecordStatuses.has(latest.status)) {
+      deactivateWorkerTicket(active);
+      return latest ? response(latest, "task.submit") : fail("managed_task_operation_unavailable");
+    }
+    if (!active.snapshot || !active.output || !active.postCheck) return fail("managed_site_output_missing");
+    const snapshot = active.snapshot.snapshot as JsonObject;
+    const evidenceRef = String(snapshot.observation_ref);
+    if (active.postCheck.status !== "passed") {
+      const failed = await finishFailure(active.run_id, "site_task_post_check_failed", "failed", active.dispatched ? "dispatched" : "not_dispatched", {
+        evidenceRef, sourceRef: active.target_ref, postCheck: active.postCheck,
+        failure: publicFailure("result_projection", "site_task_post_check_failed", "verification", "query_original_run_only")
+      });
+      deactivateWorkerTicket(active);
+      return response(failed, "task.submit");
+    }
+    const completed = await completeRunWithResult(store, active.run_id, {
+      result_ref: `managed-site-task-result:${active.run_id}`, result_kind: active.taskFacts.resultKind,
+      output_schema_id: active.taskFacts.outputSchemaRef, data: active.output, source_refs: [active.target_ref],
+      evidence_refs: [evidenceRef], post_check: active.postCheck,
+      persisted_public_summary: { ...latest.public_result_summary, dispatch_state: active.dispatched ? "dispatched" : "not_dispatched" },
+      persist_result_envelope: true
+    });
+    deactivateWorkerTicket(active);
+    return response(completed.run_record, "task.submit");
+  }
+  async function failWorker(active: ActiveManagedSiteTicket, code: string): Promise<JsonObject> {
+    const latest = await store.getRunRecord(active.run_id);
+    if (!latest || terminalRunRecordStatuses.has(latest.status)) {
+      deactivateWorkerTicket(active);
+      return latest ? response(latest, "task.submit") : fail("managed_task_operation_unavailable");
+    }
+    const failureCode = active.failure_code ?? code;
+    const dispatchState = active.dispatched ? "dispatched" : "not_dispatched";
+    const unknown = active.outcome_uncertain || active.dispatched && !active.snapshot;
+    const status = unknown ? "unknown_outcome" : "failed";
+    const failed = await finishFailure(active.run_id, failureCode, status, dispatchState, {
+      ...(active.snapshot && isObject(active.snapshot.snapshot) && typeof active.snapshot.snapshot.observation_ref === "string"
+        ? { evidenceRef: active.snapshot.snapshot.observation_ref } : {}),
+      sourceRef: active.target_ref, ...(active.postCheck === undefined ? {} : { postCheck: active.postCheck }),
+      failure: publicFailure(unknown ? "write_outcome" : "runtime_execution", failureCode,
+        unknown ? "reconciliation" : "execution", "query_original_run_only")
+    });
+    deactivateWorkerTicket(active);
+    return response(failed, "task.submit");
+  }
+  async function workerComplete(credentialHash: string, value: unknown): Promise<JsonObject> {
+    const active = await requireWorkerTicket(credentialHash, value);
+    return finalizeWorker(active);
+  }
+  async function workerFailure(credentialHash: string, value: unknown): Promise<JsonObject> {
+    const request = object(value, ["ticket_id", "code"]);
+    const ticketId = string(request.ticket_id, 128);
+    const active = activeTickets.get(ticketId);
+    if (!active || active.credential_hash !== credentialHash || typeof request.code !== "string" ||
+        !/^(?:managed_site_[a-z0-9_]+|managed_task_[a-z0-9_]+|managed_access_[a-z0-9_]+|worker_identity_unavailable|owner_socket_acl_unavailable)$/.test(request.code)) return fail("managed_task_ticket_inactive");
+    await options.accessStore.authenticateCredential(credentialHash);
+    return failWorker(active, request.code);
+  }
+  async function settleWorkerTimeout(active: ActiveManagedSiteTicket): Promise<void> {
+    if (activeTickets.get(active.ticket_id) !== active) return;
+    const run = await store.getRunRecord(active.run_id);
+    if (!run || terminalRunRecordStatuses.has(run.status)) { deactivateWorkerTicket(active); return; }
+    // Once output.write was accepted Core has the exact snapshot and validated
+    // output. Finalize that known read result without another Harbor call.
+    if (!active.cancelled && active.snapshot && active.output && active.postCheck) {
+      await finalizeWorker(active);
+      return;
+    }
+    await failWorker(active, "managed_task_timeout");
   }
   async function stopRun(input: ParsedRequest, principalId: string, run: RunRecord): Promise<RunRecord> {
     const stopKeyHash = digest(`${principalId}\0${input.idempotency_key!}`);
@@ -295,6 +627,7 @@ export function createManagedTaskService(options: {
         const previousKeys = isObject(current.public_result_summary?.stop_idempotency) ? current.public_result_summary!.stop_idempotency as JsonObject : {};
         const stopKeys = { ...previousKeys, [stopKeyHash]: requestHash };
         const summary = { ...current.public_result_summary, stop_idempotency: stopKeys };
+        await cancelWorkerTicket(current.run_id);
         if (terminalRunRecordStatuses.has(current.status)) {
           return store.updateRunRecord(current.run_id, { public_result_summary: summary });
         }
@@ -313,7 +646,11 @@ export function createManagedTaskService(options: {
   }
 
   return {
-    async operate(credentialHash: string, rawHttpBody: unknown) {
+    workerStarted,
+    broker: workerBroker,
+    workerComplete,
+    workerFailure,
+    async operate(credentialHash: string, rawHttpBody: unknown, executionContext: { agentSocketIngressVerified?: boolean } = {}) {
       const input = parseRequest(rawHttpBody);
       const principal = await options.accessStore.authenticateCredential(credentialHash);
       if (input.operation !== "task.submit") {
@@ -326,9 +663,7 @@ export function createManagedTaskService(options: {
       const pkg = request.package!;
       const profileRef = request.task_scope.profile_refs[0]!;
       const origin = request.task_scope.origins[0]!;
-      if (pkg.package_ref !== approvedManagedSiteTaskPackage.package_ref || pkg.revision_ref !== approvedManagedSiteTaskPackage.revision_ref ||
-          pkg.package_digest !== approvedManagedSiteTaskPackage.package_digest || pkg.task_ref !== approvedManagedSiteTaskPackage.task_ref ||
-          request.task_scope.skill_refs[0] !== pkg.package_ref || request.task_scope.source_refs[0] !== pkg.revision_ref ||
+      if (request.task_scope.skill_refs[0] !== pkg.package_ref || request.task_scope.source_refs[0] !== pkg.revision_ref ||
           request.target!.target_type !== taskTargetType) return fail("managed_access_denied");
 
       await authorize(credentialHash, request, profileRef, origin, pkg.package_ref, pkg.revision_ref);
@@ -350,12 +685,19 @@ export function createManagedTaskService(options: {
         if (previous) {
           const facts = summaryFacts(previous);
           if (!facts || facts.principal_id !== principal.principal_id || facts.request_hash !== requestHash) return fail("managed_access_idempotency_conflict");
-          return { kind: "existing" as const, run: previous };
+          return { kind: "existing" as const, run: await recoverOrphanedScriptRun(previous) };
         }
 
         const sitePackage = await options.skillLibraryService.resolveManagedSiteTask(pkg);
+        if (sitePackage.package_ref !== pkg.package_ref || sitePackage.revision_ref !== pkg.revision_ref ||
+            sitePackage.package_digest !== pkg.package_digest || sitePackage.task_ref !== pkg.task_ref) return fail("managed_skill_revision_unavailable");
         const taskFacts = assertPinnedTask(sitePackage.task, sitePackage);
-        if (origin !== taskFacts.origin || request.input!.schema_ref !== taskFacts.inputSchemaRef || request.target!.target_type !== String((sitePackage.task.applicability as JsonObject).target_type)) return fail("managed_access_denied");
+        if (origin !== taskFacts.origin || request.input!.schema_ref !== taskFacts.inputSchemaRef || !schemaValid({}, sitePackage.input_schema) ||
+            request.target!.target_type !== String((sitePackage.task.applicability as JsonObject).target_type)) return fail("managed_access_denied");
+        // A task's AccountSystem dependency is part of its admission inputs. Resolve
+        // the enabled owner-local revision before the first durable Run write so
+        // recovery and result queries retain the exact definition this Run used.
+        const accountSystem = await resolveTaskAccountSystem(taskFacts.accountSystemRef);
         const taskIntentValue = {
           schema_version: "webenvoy.task-intent.v0", intent_id: `task-intent-${runRef}`, correlation_id: runRef, entrypoint: "api",
           user_intent: { summary: request.intent!.summary },
@@ -373,7 +715,13 @@ export function createManagedTaskService(options: {
           package_digest: sitePackage.package_digest, task_ref: sitePackage.task_ref, source_ref: sitePackage.source_ref,
           capability_ref: taskIntentCapabilityRef, profile_ref: profileRef, origin, target_type: request.target!.target_type,
           target_ref: request.target!.target_ref, input_schema_ref: taskFacts.inputSchemaRef, input_carrier: "none", input: inputSummary,
-          task_intent: taskIntent, dispatch_state: "not_dispatched"
+          task_intent: taskIntent, dispatch_state: "not_dispatched",
+          ...(accountSystem === undefined ? {} : { account_system: accountSystem }),
+          ...(sitePackage.script ? {
+            script_execution: true, script_ref: sitePackage.script.script_ref, script_version: sitePackage.script.version,
+            script_sha256: sitePackage.script.sha256, script_runtime_kind: sitePackage.script.runtime_kind,
+            source_admission_ref: sitePackage.source_admission_ref, code_admission_ref: sitePackage.code_admission_ref
+          } : {})
         };
         await store.createRunRecord({
           run_id: runRef, task_intent_ref: taskIntentRef, entrypoint_ref: "entrypoint:api", status: "admitted",
@@ -387,6 +735,17 @@ export function createManagedTaskService(options: {
       });
       if (setup.kind === "existing") return response(setup.run, request.operation);
       const { sitePackage, taskFacts, initialSummary } = setup;
+      if (sitePackage.script) {
+        if (executionContext.agentSocketIngressVerified !== true) {
+          const failed = await finishFailure(runRef, "managed_site_worker_host_unavailable", "failed", "not_dispatched", {
+            sourceRef: request.target!.target_ref,
+            failure: publicFailure("runtime_execution", "managed_site_worker_host_unavailable", "pre_admission", "retry_only_through_verified_agent_socket")
+          });
+          return response(failed, request.operation);
+        }
+        return executeScriptTask(credentialHash, request, principal.principal_id, profileRef, origin,
+          runRef, deadlineAt, sitePackage, taskFacts, initialSummary);
+      }
 
       let browserResult: unknown;
       try {

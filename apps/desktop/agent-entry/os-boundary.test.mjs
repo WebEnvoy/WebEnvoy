@@ -76,9 +76,17 @@ test('owner data directory is an actual owner-only directory', async () => {
 test('bundle boundary disables writable assets and parents while allowing missing optional assets', { skip: process.platform !== 'darwin' || process.arch !== 'arm64' }, async () => {
   const ownerUid = process.getuid?.();
   const agentUid = Number(execFileSync('/usr/bin/id', ['-u', 'nobody'], { encoding: 'utf8' }).trim());
+  const agentName = execFileSync('/usr/bin/id', ['-nu', String(agentUid)], { encoding: 'utf8' }).trim();
+  const grantSocketAccess = (path) => {
+    execFileSync('/bin/chmod', ['+a', `user:${agentName} allow read,write`, path]);
+    const acl = execFileSync('/bin/ls', ['-le', path], { encoding: 'utf8' }).split('\n').filter(line => /^\s*\d+:/.test(line));
+    assert.deepEqual(acl.map(line => line.trim()), [`0: user:${agentName} allow read,write`]);
+  };
   if (!Number.isSafeInteger(ownerUid) || ownerUid < 1 || !Number.isSafeInteger(agentUid) || agentUid < 1 || ownerUid === agentUid) return;
   const root = await mkdtemp(join(tmpdir(), 'webenvoy-bundle-boundary-'));
-  const assets = ['agent-manifest.json', 'agent-entry/cli.mjs', 'agent-entry/client.mjs', 'agent-entry/service.mjs', 'bin/webenvoy', 'runtime/node'];
+  const assets = ['agent-manifest.json', 'agent-entry/cli.mjs', 'agent-entry/client.mjs', 'agent-entry/service.mjs',
+    'agent-entry/managed-site-worker.mjs', 'agent-entry/managed-site-script-thread.mjs', 'agent-entry/managed-site-worker-supervisor.mjs',
+    'bin/webenvoy', 'runtime/node'];
   const optional = 'agent-entry/skill-assets/optional.txt';
   let ownerServer;
   let agentServer;
@@ -118,7 +126,8 @@ test('bundle boundary disables writable assets and parents while allowing missin
     await chmod(ownerSocket, 0o600);
     agentServer = createServer();
     await new Promise((resolve, reject) => { agentServer.once('error', reject); agentServer.listen(agentSocket, resolve); });
-    await chmod(agentSocket, 0o666);
+    await chmod(agentSocket, 0o600);
+    grantSocketAccess(agentSocket);
     const live = verifyLiveOsBoundary({ dataDir, ownerUid, agentUid, ownerSocketPath: ownerSocket, agentSocketPath: agentSocket, installRoot: root, requireAgentSocket: true });
     assert.equal(live.state, 'supported', JSON.stringify(live));
     assert.equal(live.mode, 'distinct_uid_hardened');
@@ -146,7 +155,8 @@ test('bundle boundary disables writable assets and parents while allowing missin
     assert.ok(missingAgent.reason_codes.includes('agent_socket_unavailable'));
     agentServer = createServer();
     await new Promise((resolve, reject) => { agentServer.once('error', reject); agentServer.listen(agentSocket, resolve); });
-    await chmod(agentSocket, 0o666);
+    await chmod(agentSocket, 0o600);
+    grantSocketAccess(agentSocket);
     assert.equal(verifyLiveOsBoundary({ dataDir, ownerUid, agentUid, ownerSocketPath: ownerSocket, agentSocketPath: agentSocket, installRoot: root, requireAgentSocket: true }).state, 'supported');
   } finally {
     if (ownerServer) await new Promise(resolve => ownerServer.close(resolve));

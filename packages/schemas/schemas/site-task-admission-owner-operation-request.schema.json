@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/core/site-task-admission-owner-operation-request.v1.schema.json",
+  "title": "WebEnvoy owner managed site task admission operation request",
+  "description": "Owner-only selection, inspection, source/code admission and revocation for a private local Git authoring checkout.",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/$defs/selectRepository" }, { "$ref": "#/$defs/listRepositories" }, { "$ref": "#/$defs/inspectCandidate" },
+    { "$ref": "#/$defs/candidateDiff" }, { "$ref": "#/$defs/admitSource" },
+    { "$ref": "#/$defs/sourceRefOperation" }, { "$ref": "#/$defs/listAdmissions" }
+  ],
+  "$defs": {
+    "base": { "type": "object", "required": ["schema_version", "operation"], "properties": { "schema_version": { "const": "webenvoy.site-task-admission-owner-operation/v1" }, "operation": { "type": "string" } } },
+    "ref": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "selectRepository": { "allOf": [{ "$ref": "#/$defs/base" }, { "type": "object", "required": ["path"], "properties": { "operation": { "const": "select_authoring_repository" }, "path": { "type": "string", "minLength": 1, "maxLength": 4096 } } }], "unevaluatedProperties": false },
+    "listRepositories": { "type": "object", "additionalProperties": false, "required": ["schema_version", "operation"], "properties": { "schema_version": { "const": "webenvoy.site-task-admission-owner-operation/v1" }, "operation": { "const": "list_authoring_repositories" } } },
+    "inspectCandidate": { "allOf": [{ "$ref": "#/$defs/base" }, { "type": "object", "required": ["repository_ref", "package_ref", "base_revision_ref", "task_ref"], "properties": { "operation": { "const": "inspect_candidate" }, "repository_ref": { "$ref": "#/$defs/ref" }, "package_ref": { "type": "string", "pattern": "^lode://site-skill/[A-Za-z0-9._/-]+$" }, "base_revision_ref": { "$ref": "#/$defs/ref" }, "task_ref": { "$ref": "#/$defs/ref" } } }], "unevaluatedProperties": false },
+    "candidateDiff": { "allOf": [{ "$ref": "#/$defs/base" }, { "type": "object", "required": ["candidate_ref"], "properties": { "operation": { "const": "candidate_diff" }, "candidate_ref": { "$ref": "#/$defs/ref" } } }], "unevaluatedProperties": false },
+    "admitSource": { "allOf": [{ "$ref": "#/$defs/base" }, { "type": "object", "required": ["candidate_ref"], "properties": { "operation": { "const": "admit_source" }, "candidate_ref": { "$ref": "#/$defs/ref" } } }], "unevaluatedProperties": false },
+    "sourceRefOperation": { "allOf": [{ "$ref": "#/$defs/base" }, { "type": "object", "required": ["admission_ref"], "properties": { "operation": { "enum": ["admit_code", "revoke_code", "revoke_source"] }, "admission_ref": { "$ref": "#/$defs/ref" } } }], "unevaluatedProperties": false },
+    "listAdmissions": { "type": "object", "additionalProperties": false, "required": ["schema_version", "operation"], "properties": { "schema_version": { "const": "webenvoy.site-task-admission-owner-operation/v1" }, "operation": { "const": "list_admissions" }, "package_ref": { "type": "string", "pattern": "^lode://site-skill/[A-Za-z0-9._/-]+$" } } }
+  },
+  "x-webenvoy": {
+    "owner": "Core owner managed site task source admission",
+    "status": "accepted-v1",
+    "schema_version": "webenvoy.site-task-admission-owner-operation/v1",
+    "compatibility_boundary": "Only the owner selects an absolute local Git checkout path. Agent input and candidate admission use opaque refs; paths and caller-supplied pins are not accepted for inspect/admit/run operations.",
+    "source_adrs": ["docs/contracts/site-task-admission-owner-api-v1.md", "docs/specs/site-skill-execution-v1.md", "docs/specs/skill-library-lifecycle-v1.md"],
+    "field_owners": { "path": "owner local checkout selection", "package_ref": "Core-approved static base package", "candidate_ref": "Core local source candidate check", "admission_ref": "Core source admission receipt" }
+  }
+}

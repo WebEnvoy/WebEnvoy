@@ -210,7 +210,9 @@ MCP tool arguments 与 CLI request-file 不接受 `connection_id`；Connector �
 `webenvoy_connect` context 取得连接，在发送到 `POST /managed-tasks/operations` 的
 HTTP JSON body 中加入必填的字符串字段 `connection_id`。直接 API 消费者先用当前
 Agent credential 调用既有 `POST /agent-connections`，再在每次 HTTP JSON body 的同一
-字段提交返回的 connection ID；不引入额外 header 或隐式元数据。Core 从 bearer
+字段提交返回的 connection ID；调用者不提交额外的 ingress header 或隐式元数据。对于
+脚本 submit，Agent service 只会在每次请求重新核验 Agent socket ACL 后添加 Core 内部
+校验的 ingress header（见下文）；它表示受限本机 socket 路径，不表示特定 MCP/CLI 身份。Core 从 bearer
 credential 识别 Principal，核对所带 connection 是否属于该 Principal、仍有效且未撤销，
 再取与其匹配的单一 Grant；缺失或无法确定 connection 时返回既有 connection error，不能
 在多个活动 connection 中猜选。`connection_id` 是本次认证上下文，不是后续 query/stop
@@ -220,6 +222,22 @@ credential 识别 Principal，核对所带 connection 是否属于该 Principal�
 就是各自参数字段加必填 `connection_id`。Connector 必须拒绝工具参数/request-file 中
 试图注入该字段的请求；Core 独立校验 HTTP 字段，不因其来自 Connector 而信任。
 Core 仍按既有 Principal/Connection/Grant 关系记录和审计。
+
+script-backed `task.submit` 仅当请求经当前已验证的 Agent ingress socket 到达时才返回
+可选的 `worker_execution.ticket`。owner service 在每次请求重新核验 Agent socket ACL 后，
+用仅供 Core 内部校验的 owner supervisor credential 标记该 ingress；这只证明请求经过受限
+本机 Agent socket，不证明 MCP/CLI 进程身份。绕过本机 Agent socket 直连 Core API 的
+script-backed submit 在创建 Run 后以 `managed_site_worker_host_unavailable` 和
+`not_dispatched` 终结，不返回脚本或 ticket。非脚本 task 的既有调用不依赖 worker ingress。
+
+收到 ticket 的本机 API 消费者须把它当作固定 ABI 的一次性 worker handoff：在
+`deadline_at` 前由受支持的 Agent UID host 调用 `worker/started`，按唯一 broker
+协议调用 Core，再报告完成或失败。ticket 包含已准入的脚本字节，不含 Agent/owner
+credential；MCP 和 CLI 在内部消费 ticket，只向模型或命令调用者返回最终 Run。不能运行
+worker 的 API 客户端不得把 `running` 当成完成：未派发的 ticket 到期后安全失败并以原
+idempotency key 查询；已经记录 `dispatched` 的 Run 在 Core 重启后以 `unknown_outcome`
+保留并只查询原 Run，不能创建新 ticket 或重放。
+
 
 #### submit 请求
 
@@ -432,20 +450,33 @@ lifecycle、Grant/现场、egress 和 business gate。声明式检查不能成�
 脚本或新 workflow DSL 的入口。
 
 Lode `scripts/` 中的第三方或站点代码不得被 import、eval 或直接执行在 Core/Harbor
-进程内。本 v1 选定的实际执行方式是 Agent supervisor 启动的 **Agent-side managed
-worker** 子进程：worker 使用 S1 已分配的 Agent OS identity，Core/Harbor 只通过既有
-Agent channel 和下述 broker 交付受管调用。owner control socket 由 owner identity
-持有，宿主 ACL 排除 Agent identity。S2 不新建 runner、Agent/owner 身份或第二授权系统。
+进程内。本 v1 的 worker owner 是由上游 Agent 在 configured Agent UID 下启动的
+**installed MCP/CLI host**。它通过既有 Agent ingress socket 调用 Core 创建 Run 并取得
+一次性 ticket；Agent host 核对自身真实 UID、Core 的 hardened boundary、Agent socket
+ACL 和 owner control socket 的实际拒绝后，才创建、监督和清理同 UID 的 fixed-host 子进程。
+worker 只从 stdin 收到 Core 准入的固定脚本、schema-valid input 和不透明 context，再通过
+stdout/stderr-free 的受限 JSON IPC 向 Agent host 请求 Core broker。Core 不得自行 spawn
+worker；owner Runtime service 只代理 Agent route 和管理 Core/Harbor 子进程，不执行脚本。
+Agent host 保留其已有 Agent credential 并代送 broker 请求；worker 不得收到 bearer、owner
+或 supervisor secret、client credential 文件路径、owner socket 或继承文件描述符，也不持有
+另一份 Grant、Run 或浏览器现场真相。
 
-这是一项 **已准入 trusted code host**，不是面向任意不可信代码的通用 sandbox。OS 层
-只冻结可被实际证明的边界：Agent 与 owner 是不同的受管 OS identity，owner secret/
-control socket 的 ACL 不允许 Agent 读取或连接，worker 由 Agent supervisor 启停并清理。
-S1/宿主可以给 Agent identity 既有的本机文件或网络权限；S2 不把每个 task 的任意
-filesystem、DNS、socket 或出站逐项拒绝承诺给 S1，也不把 bearer、路由、环境变量、
-同 UID 约定路径或 API `grant_id` 当作 OS 隔离。包声明和 Grant 不能扩大 worker 的
-实际权限。若 identity、owner socket ACL 或 worker supervisor 边界无法在宿主证明，
-Core 在 Runtime gate 返回 `worker_identity_unavailable`/`owner_socket_acl_unavailable`
-并保持 `not_dispatched`；这是 fail-closed 的执行前结果，不是另建一个沙箱方案。
+worker 是 **已准入 trusted code host**，不是面向任意不可信代码的通用 sandbox。S1 的
+`trusted_local` 属于同一可信本地用户域，但不满足本节脚本 worker 的不同 OS identity
+要求；该模式下受管包脚本局部返回 `worker_identity_unavailable` 并保持
+`not_dispatched`。此拒绝不影响只调用正式 capability 的无脚本 task。该模式没有 OS
+进程隔离、owner socket ACL 隔离或抵御恶意同 UID host 的保证，不能把它描述为脚本
+sandbox。
+
+脚本 worker 只在 `distinct_uid_hardened` 下派发：Agent host 须用当前进程身份验证真实
+Agent UID，worker 须确实以该 UID 运行，owner data directory/control socket 须排除该 UID。
+若 Agent host 无法证明自身 UID，局部返回 `worker_identity_unavailable` 并保持
+`not_dispatched`，不得回退为 `trusted_local`；owner socket 实际可连接或 owner/socket ACL
+无法核验时局部返回 `owner_socket_acl_unavailable`。worker 由 Agent host 单独启停，只收一次性
+IPC ticket，不继承 owner/supervisor 环境或 socket descriptor。S1/宿主可保留 Agent identity 既有的
+其他本机文件或网络权限；S2 不把每个 task 的任意 filesystem、DNS、socket 或出站
+逐项拒绝承诺给 S1，也不把 bearer、路由、环境变量、同 UID 约定路径或 API `grant_id`
+当作 OS 隔离。包声明和 Grant 不能扩大 worker 的实际权限。
 
 ### 5.1 代码准入与固定 ABI
 
@@ -574,7 +605,7 @@ output schema 通过都只是 Runtime 或数据层事实。
 | 包在任务中更新 | admission 时固定旧 revision；更新只影响未来 Run。local modified 不被覆盖。 |
 | output schema 通过但分页遗漏 | `completeness=partial` 或 `unknown`，post-check 不通过；不能报告业务成功。 |
 | Lode digest 与受管 material 不一致 | Core 返回既有 managed asset integrity/local-modified failure；不执行 script，不回退到另一个包。 |
-| API Grant 有效但 Agent/owner OS identity 或 owner socket ACL 不成立 | 在 Runtime/worker gate 局部返回 `worker_identity_unavailable`/`owner_socket_acl_unavailable` 并保持 `not_dispatched`；API 授权不能制造 OS 权限。 |
+| API Grant 有效但脚本 worker 所需的 OS identity/ACL 无法证明 | `trusted_local` 对受管脚本局部返回 `worker_identity_unavailable`；`distinct_uid_hardened` 若无法证明实际 Agent worker UID 则返回 `worker_identity_unavailable`，owner socket ACL 不成立时返回 `owner_socket_acl_unavailable`，均保持 `not_dispatched` 且不降级；无脚本 capability task 仍按既有路径判定。API 授权不能制造 OS 权限。 |
 
 ## 10. Design Obligation disposition
 
@@ -584,7 +615,7 @@ output schema 通过都只是 Runtime 或数据层事实。
 | `DO-GRANT-WIRE` | `triggered` | v1.5 Grant 新增 `task.submit`/`task.query`/`task.stop`；site-task 使用五组 task scope，inline input carrier 的 schema/大小/敏感边界由本文件与 Lode package 合同约束。Grant 唯一 owner 是 [Grant Wire Contract V1](grant-wire-contract-v1.md#site-task-agent-projection-and-inline-input-contract-v15)。 |
 | `DO-NETWORK-CONTRACT` | `conditional` | v1 默认拒绝 script raw network，不新增公共 request/response payload；使用主动 Network、body、interception 或 modification 前必须由 S4 提供并接受 Network Runtime 合同。 |
 | `DO-CONSOLE-CONTRACT` | `not-triggered` | script 不新增 console/page-error public payload；只消费既有有界诊断或 failure。 |
-| `DO-PROVIDER-PRIVATE-SCHEMA` | `not-triggered` | 不持久化 Provider launch/context/handle/private environment bundle；worker 用既有 Harbor/runtime 边界。 |
+| `DO-PROVIDER-PRIVATE-SCHEMA` | `not-triggered` | 不持久化 Provider launch/context/handle/private environment bundle；worker 由 installed Agent MCP/CLI host 管理并通过 Core broker 访问既有 Harbor capability。 |
 | `DO-APP-IA` | `not-triggered` | 不新增完整 App Library、Activity、任务工作台或导航；沿用现有 owner/Agent/handback 入口。 |
 
 ## 11. 非目标、supersession 与集成顺序
@@ -603,13 +634,14 @@ broker 和 v1.5 Grant extension 已在本候选中显式触发并链接其 owner
 
 包合同可以先于本执行合同接受；正式消费者必须等待两份合同各自接受，并与
 [S1 命令及信任合同](https://github.com/WebEnvoy/WebEnvoy/blob/4fd5ca525eecd3fa124bae31ceb4943d28c6a1ec/docs/specs/cli-integration-v1.md)
-对齐。实现 Work Item 再提供准确的 Lode manifest、code-admission 记录、第 5 节的
-worker 实际权限及 owner 隔离、Grant/Run schema、installed Agent 和 live site 证据。
+对齐。实现 Work Item 再提供准确的 Lode manifest、code-admission 记录、第 5 节的实际
+`installation.os_boundary.mode`、worker UID/生命周期和 secret/descriptor 传递核验、
+Grant/Run schema、installed Agent 和 live site 证据。
 接受本规格不授予安装、运行、外发、合并或发布授权。
 
 后续真实站点验收至少绑定同一候选 SHA、Lode package `revision_ref`/source commit/
 package digest、WebEnvoy/Harbor/Provider 版本、正式安装身份、Principal/Grant/Profile/
-Instance/Page、worker 的实际权限、owner 隔离与清理证据，并由真实第三方 Agent 经过
+Instance/Page、实际 `installation.os_boundary.mode`、worker 的 UID/进程生命周期、secret/descriptor 传递核验和清理证据，并由真实第三方 Agent 经过
 Plugin 完成 install/enable、task discovery、正常执行、fresh target、分页完整性、
 post-check 和 query/reconcile。响应丢失的 write 必须证明原 Run/operation 对账而无重放；
 知识-only、未准入、local modified、不可用和 unknown 必须保留各自状态。fixture、mock、

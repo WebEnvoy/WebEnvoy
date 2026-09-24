@@ -1,0 +1,35 @@
+{
+  "schema": "site-task-admission-owner-operation-request.schema.json",
+  "cases": [
+    {
+      "name": "Agent cannot pass an authoring path while inspecting a candidate",
+      "instance": {
+        "schema_version": "webenvoy.site-task-admission-owner-operation/v1",
+        "operation": "inspect_candidate",
+        "repository_ref": "webenvoy:site-task-authoring-repository/00000000-0000-4000-8000-000000000001",
+        "package_ref": "lode://site-skill/github/trending",
+        "base_revision_ref": "lode://site-skill/github/trending@1.0.0#0dcd6232cdfd9c88982792d2ce88a39d528a6433",
+        "task_ref": "read-daily-trending-top5",
+        "path": "/tmp/untrusted"
+      }
+    },
+    {
+      "name": "Agent cannot self-assert a package pin during source admission",
+      "instance": {
+        "schema_version": "webenvoy.site-task-admission-owner-operation/v1",
+        "operation": "admit_source",
+        "candidate_ref": "webenvoy:site-task-candidate/00000000-0000-4000-8000-000000000001#sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "package_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    {
+      "name": "Agent cannot request arbitrary code execution for another path",
+      "instance": {
+        "schema_version": "webenvoy.site-task-admission-owner-operation/v1",
+        "operation": "admit_code",
+        "admission_ref": "webenvoy.source-admission/site-skill-package/v1#sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "script_path": "/tmp/custom.mjs"
+      }
+    }
+  ]
+}

@@ -20,7 +20,7 @@ import {
 } from "./authorization-decision-journal.js";
 import { normalizeStoredTargetRef } from "./public-target-reference.js";
 import { normalizeNonSensitiveText } from "./sensitive-field-taxonomy.js";
-import { approvedManagedSiteTaskCapabilityRef, approvedManagedSiteTaskCapabilityVersion, approvedManagedSiteTaskLockRef, approvedManagedSiteTaskPackage, approvedManagedSiteTaskSourceRef } from "./site-skill-package.js";
+import { approvedManagedSiteTaskCapabilityRef, approvedManagedSiteTaskCapabilityVersion } from "./site-skill-package.js";
 import {
   FileOwnershipError,
   isFileOwnershipOwnerAlive,
@@ -728,6 +728,26 @@ function assertRunRecord(record: RunRecord): void {
   }
 }
 
+function persistedManagedSiteTaskPinIsConsistent(record: RunRecord): boolean {
+  const summary = record.public_result_summary;
+  if (!summary || summary.task_kind !== "managed_site_task" || typeof summary.package_ref !== "string" ||
+      typeof summary.revision_ref !== "string" || typeof summary.package_digest !== "string" ||
+      typeof summary.source_ref !== "string" || typeof summary.task_ref !== "string" ||
+      typeof summary.input_schema_ref !== "string" || summary.input_carrier !== "none" ||
+      record.package_ref !== summary.package_ref || !/^lode:\/\/site-skill\/[A-Za-z0-9._/-]+$/.test(summary.package_ref) ||
+      !/^sha256:[a-f0-9]{64}$/.test(summary.package_digest) || !/^[A-Za-z0-9._-]{1,256}$/.test(summary.task_ref)) return false;
+  const revision = /^(.+)@([0-9]+\.[0-9]+\.[0-9]+)#([a-f0-9]{40})$/.exec(summary.revision_ref);
+  const source = /^lode:\/\/source\/(.+)@([0-9]+\.[0-9]+\.[0-9]+)#([a-f0-9]{40})$/.exec(summary.source_ref);
+  const lock = record.capability_lock_ref;
+  return Boolean(revision && revision[1] === summary.package_ref && source &&
+    /^lode:\/\/lock\/site-skill\/[A-Za-z0-9._/-]+@[0-9]+\.[0-9]+\.[0-9]+$/.test(lock ?? "") &&
+    record.capability_ref === approvedManagedSiteTaskCapabilityRef &&
+    record.capability_version === approvedManagedSiteTaskCapabilityVersion &&
+    record.capability_source_ref === summary.source_ref &&
+    typeof summary.target_ref === "string" && summary.target_ref.length > 0 &&
+    typeof summary.origin === "string" && typeof summary.profile_ref === "string");
+}
+
 function findForbiddenRunRecordField(value: unknown): string | undefined {
   if (!value || typeof value !== "object") return undefined;
   if (Array.isArray(value)) {
@@ -1055,13 +1075,7 @@ export function createFileRunRecordStore(options: FileRunRecordStoreOptions): Fi
         const record = await getRunRecord(runId);
         if (!record) throw new Error("run record not found");
         const managedSiteTask = record.capability_ref === approvedManagedSiteTaskCapabilityRef &&
-          record.package_ref === approvedManagedSiteTaskPackage.package_ref &&
-          record.capability_version === approvedManagedSiteTaskCapabilityVersion &&
-          record.capability_source_ref === approvedManagedSiteTaskSourceRef &&
-          record.capability_lock_ref === approvedManagedSiteTaskLockRef &&
-          record.public_result_summary?.task_kind === "managed_site_task" &&
-          record.public_result_summary?.task_ref === approvedManagedSiteTaskPackage.task_ref &&
-          record.public_result_summary?.package_digest === approvedManagedSiteTaskPackage.package_digest;
+          persistedManagedSiteTaskPinIsConsistent(record);
         if (record.capability_ref !== "harbor:managed-browser" && !managedSiteTask || record.status !== "running") {
           throw new Error("run_managed_browser_runtime_binding_unavailable");
         }

@@ -1,0 +1,9 @@
+# Managed AccountSystem Agent Read V1
+
+Status: Accepted for #475. Owner: WebEnvoy Core. Request and response schemas: [`managed-account-system-agent-operation-request.schema.json`](../../packages/schemas/schemas/managed-account-system-agent-operation-request.schema.json) and [`managed-account-system-agent-operation-response.schema.json`](../../packages/schemas/schemas/managed-account-system-agent-operation-response.schema.json).
+
+The authenticated Core route is `POST /managed-account-systems/operations`. Its request is the fixed operation `account_system.read`, an Agent connection and Grant ref, and a pinned Lode `template_ref`. Agent-facing Plugin input contains only `template_ref`; the host supplies the authenticated connection and selected Grant. Core maps this fixed read to the existing `skill.inspect` access check and requires the exact template ref in both `skill_refs` and `source_refs`. Caller-supplied scopes, operation names, local definition refs, paths, or revisions are rejected. This adds no Grant dimension or operation.
+
+Core resolves the currently enabled local definition for the requested template and returns its exact `local_definition_ref`, `local_revision_ref`, `template_ref`, template digest, public source fields, and public site metadata. The response contains no identity method, shared-login relationship, selector, credential, Profile ref, or page content. It always reports `identity_state: "unknown"` and `evaluation_state: "not_evaluated"`; importing a public template or reading this projection does not authenticate an account or bind an Account to a Profile.
+
+Missing or disabled local definitions and insufficient Grant scope fail closed. Public tasks that do not declare an AccountSystem dependency, including the GitHub Trending read, do not call this route or read the local definition store.

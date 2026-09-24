@@ -5,21 +5,51 @@ import { ManagedAccessError } from "./managed-access.js";
 
 type JsonObject = Record<string, unknown>;
 
-/** The first Core-admitted fixed site package. */
+/** Fixed Core-admitted site packages; this is code admission, not an open registry. */
 export const approvedManagedSiteTaskPackage = {
   package_ref: "lode://site-skill/controlled-local/page-summary",
   package_path: "sites/controlled-local/page-summary",
   task_ref: "read-page-summary",
   revision_ref: "lode://site-skill/controlled-local/page-summary@1.0.0#48ba83eff3d8321eae1699155e6be5a64b8efc5d",
-  package_digest: "sha256:b5454650c8d143de8cd87392fd2a91f55225b0862224e681754ed1a41279acd8"
+  package_digest: "sha256:b5454650c8d143de8cd87392fd2a91f55225b0862224e681754ed1a41279acd8",
+  manifest_sha256: "4bfddd6ba7b38844f9d31c61737783dc41bb17efdf205c78aa9766e3599ba063",
+  source_repository: "WebEnvoy/Lode",
+  source_path: "sites/controlled-local/page-summary",
+  source_commit: "48ba83eff3d8321eae1699155e6be5a64b8efc5d",
+  source_ref: "lode://source/site-skill/controlled-local/page-summary@1.0.0#48ba83eff3d8321eae1699155e6be5a64b8efc5d",
+  lock_ref: "lode://lock/site-skill/controlled-local/page-summary@1.0.0",
+  capability_asset_ref: "lode://site-capability/controlled-local/managed-page-snapshot@1.0.0",
+  script: undefined
 } as const;
+export const approvedGitHubTrendingSiteTaskPackage = {
+  package_ref: "lode://site-skill/github/trending",
+  package_path: "sites/github/trending",
+  task_ref: "read-daily-trending-top5",
+  revision_ref: "lode://site-skill/github/trending@1.0.0#0dcd6232cdfd9c88982792d2ce88a39d528a6433",
+  package_digest: "sha256:54333c70f2e69dd1fe94c938280d37465438cc6aed9c1edd1aa985f530704b52",
+  manifest_sha256: "3599aa94b3b6fa7fcba563448f7d10458a81650f6316bc002d3096b9b93061cc",
+  source_repository: "WebEnvoy/Lode",
+  source_path: "sites/github/trending",
+  source_commit: "0dcd6232cdfd9c88982792d2ce88a39d528a6433",
+  source_ref: "lode://source/site-skill/github/trending@1.0.0#0dcd6232cdfd9c88982792d2ce88a39d528a6433",
+  lock_ref: "lode://lock/site-skill/github/trending@1.0.0",
+  capability_asset_ref: "lode://site-capability/github/managed-page-snapshot@1.0.0",
+  script: {
+    script_ref: "lode://script/site-skill/github/trending/read-daily-top5@1.0.0",
+    path: "scripts/read-daily-trending-top5.mjs",
+    version: "1.0.0",
+    sha256: "sha256:d73b66d5711ddd5a4e9295d8df4677f431b62d3f44b513698e095a2a31ffb0ab",
+    runtime_kind: "webenvoy.site-skill-script-abi/v1",
+    entrypoint: "run",
+    broker: "webenvoy.site-skill-broker/v1",
+    broker_capabilities: ["runtime.invoke", "output.write"]
+  }
+} as const;
+export const approvedManagedSiteTaskPackages = [approvedManagedSiteTaskPackage, approvedGitHubTrendingSiteTaskPackage] as const;
 export const approvedManagedSiteTaskSourceRef = "lode://source/site-skill/controlled-local/page-summary@1.0.0#48ba83eff3d8321eae1699155e6be5a64b8efc5d" as const;
 export const approvedManagedSiteTaskCapabilityRef = "lode:capability/managed-page-snapshot" as const;
 export const approvedManagedSiteTaskCapabilityVersion = "1.0.0" as const;
 export const approvedManagedSiteTaskLockRef = "lode://lock/site-skill/controlled-local/page-summary@1.0.0" as const;
-// Raw-byte pin also rejects duplicate JSON keys, which JSON.parse would erase
-// before the canonical package digest is calculated.
-export const approvedManagedSiteTaskManifestSha256 = "4bfddd6ba7b38844f9d31c61737783dc41bb17efdf205c78aa9766e3599ba063" as const;
 
 export type SiteSkillPackagePin = {
   package_ref: string;
@@ -27,16 +57,50 @@ export type SiteSkillPackagePin = {
   task_ref: string;
   revision_ref: string;
   package_digest: string;
+  manifest_sha256: string;
+  source_repository: string;
+  source_path: string;
+  source_commit: string;
+  source_ref: string;
+  lock_ref: string;
+  capability_asset_ref: string;
+  script: {
+    script_ref: string;
+    path: string;
+    version: string;
+    sha256: string;
+    runtime_kind: "webenvoy.site-skill-script-abi/v1";
+    entrypoint: "run";
+    broker: "webenvoy.site-skill-broker/v1";
+    broker_capabilities: readonly ["runtime.invoke", "output.write"];
+  } | undefined;
 };
+
+export function managedSiteScriptCodeAdmissionRef(pin: SiteSkillPackagePin): string {
+  if (!pin.script) throw new ManagedAccessError("managed_skill_code_admission_unavailable");
+  const value = {
+    package_ref: pin.package_ref,
+    revision_ref: pin.revision_ref,
+    package_digest: pin.package_digest,
+    script_ref: pin.script.script_ref,
+    script_sha256: pin.script.sha256
+  };
+  const canonical = JSON.stringify(Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right))));
+  return `webenvoy.code-admission/site-skill-script/v1#sha256:${digest(canonical)}`;
+}
 
 export type VerifiedSiteTask = {
   package_ref: string;
   revision_ref: string;
   version: string;
   package_digest: string;
+  source_repository: string;
+  package_path: string;
   source_ref: string;
   lock_ref: string;
   source_commit: string;
+  source_admission_ref?: string;
+  code_admission_ref?: string;
   task_ref: string;
   capability: {
     capability_ref: string;
@@ -46,6 +110,17 @@ export type VerifiedSiteTask = {
     lock_ref: string;
     operation_id: string;
     action: string;
+  };
+  script?: {
+    script_ref: string;
+    version: string;
+    sha256: string;
+    runtime_kind: string;
+    entrypoint: string;
+    broker: string;
+    broker_capabilities: string[];
+    path: string;
+    source: Buffer;
   };
   task: JsonObject;
   input_schema: JsonObject;
@@ -169,14 +244,14 @@ export async function verifySiteSkillPackageRoot(lodeAssetsPath: string, pin: Si
       entry.revision_ref !== pin.revision_ref || entry.package_digest !== pin.package_digest ||
       !Array.isArray(entry.task_refs) || !entry.task_refs.includes(pin.task_ref)) return fail("managed_skill_source_corrupt");
   const manifestBytes = await readRegular(root, manifestPath, maxManifestBytes);
-  if (digest(manifestBytes) !== approvedManagedSiteTaskManifestSha256) return fail("managed_skill_source_corrupt");
+  if (digest(manifestBytes) !== pin.manifest_sha256) return fail("managed_skill_source_corrupt");
   const manifest = parseJson(manifestBytes);
   const source = object(manifest.source), lockLocator = object(manifest.package_lock), integrity = object(manifest.integrity);
   if (manifest.manifest_version !== "lode.site-skill-package.manifest.v1" || manifest.package_type !== "site-skill" ||
       manifest.package_ref !== pin.package_ref || manifest.revision_ref !== pin.revision_ref ||
-      source.package_path !== packagePath || typeof source.commit !== "string" || !/^[a-f0-9]{40}$/.test(source.commit) ||
-      source.source_ref !== approvedManagedSiteTaskSourceRef || typeof manifest.version !== "string" ||
-      lockLocator.path !== "package-lock.json" || typeof lockLocator.lock_ref !== "string") return fail("managed_skill_source_corrupt");
+      source.repository !== pin.source_repository || source.package_path !== pin.source_path || source.commit !== pin.source_commit ||
+      source.source_ref !== pin.source_ref || typeof manifest.version !== "string" ||
+      lockLocator.path !== "package-lock.json" || lockLocator.lock_ref !== pin.lock_ref) return fail("managed_skill_source_corrupt");
   if (pin.revision_ref !== `${pin.package_ref}@${manifest.version}#${source.commit}`) return fail("managed_skill_source_corrupt");
   const lockPath = safeRelative(lockLocator.path);
   const declared = integrity.files;
@@ -224,13 +299,36 @@ export async function verifySiteSkillPackageRoot(lodeAssetsPath: string, pin: Si
   const taskFile = files.find(item => item.path === safeRelative(taskLocator.path));
   if (!capabilityFile || !taskFile) return fail("managed_skill_source_corrupt");
   const capability = parseJson(capabilityFile.bytes);
-  if (capability.capability_ref !== capabilityRef || capability.capability_id !== "managed-page-snapshot" || capability.version !== "1.0.0" ||
+  if (capabilityRef !== pin.capability_asset_ref || capability.capability_ref !== capabilityRef || capability.capability_id !== "managed-page-snapshot" || capability.version !== "1.0.0" ||
       capability.source_ref !== source.source_ref || capability.lock_ref !== lockLocator.lock_ref || capability.operation_id !== "instance.snapshot" || capability.action !== "read" ||
       lock.capability_ref !== capabilityRef || !Array.isArray(object(manifest.compatibility).required_capabilities) ||
       canonicalJson(object(manifest.compatibility).required_capabilities) !== canonicalJson([{ ref: capabilityRef, version: "1.0.0" }])) return fail("managed_skill_source_corrupt");
   const task = parseJson(taskFile.bytes);
-  if (task.task_ref !== pin.task_ref || task.operation_id !== capability.operation_id || task.action !== capability.action ||
-      object(task.entrypoint).kind !== "capability_refs" || canonicalJson(object(task.entrypoint).capability_refs) !== canonicalJson([capabilityRef])) return fail("managed_skill_source_corrupt");
+  const taskEntrypoint = object(task.entrypoint);
+  let verifiedScript: VerifiedSiteTask["script"];
+  if (pin.script) {
+    const scripts = Array.isArray(manifest.scripts) ? manifest.scripts.map(value => object(value)) : [];
+    const scriptDecls = scripts.filter(item => item.script_ref === pin.script!.script_ref);
+    const scriptFile = files.find(item => item.path === pin.script!.path);
+    if (scripts.length !== 1 || scriptDecls.length !== 1 || !scriptFile || scriptFile.sha256 !== pin.script.sha256 ||
+        task.task_ref !== pin.task_ref || task.operation_id !== capability.operation_id || task.action !== capability.action ||
+        taskEntrypoint.script_ref !== pin.script.script_ref || taskEntrypoint.script_version !== pin.script.version ||
+        taskEntrypoint.script_sha256 !== pin.script.sha256 || taskEntrypoint.runtime_kind !== pin.script.runtime_kind ||
+        taskEntrypoint.broker !== pin.script.broker || canonicalJson(taskEntrypoint.capability_refs) !== canonicalJson([capabilityRef])) return fail("managed_skill_source_corrupt");
+    const declaration = scriptDecls[0]!;
+    if (declaration.path !== pin.script.path || declaration.version !== pin.script.version || declaration.sha256 !== pin.script.sha256 ||
+        declaration.runtime_kind !== pin.script.runtime_kind || declaration.entrypoint !== pin.script.entrypoint || declaration.broker !== pin.script.broker ||
+        canonicalJson(declaration.broker_capabilities) !== canonicalJson(pin.script.broker_capabilities) || declaration.source_commit !== pin.source_commit ||
+        declaration.output_schema_ref !== object(task.outputs).schema_ref || declaration.input_schema_ref !== object(task.inputs).schema_ref ||
+        canonicalJson(declaration.capability_refs) !== canonicalJson([capabilityRef]) ||
+        !Array.isArray(object(manifest.compatibility).required_capabilities)) return fail("managed_skill_source_corrupt");
+    verifiedScript = { script_ref: pin.script.script_ref, version: pin.script.version, sha256: pin.script.sha256,
+      runtime_kind: pin.script.runtime_kind, entrypoint: pin.script.entrypoint, broker: pin.script.broker,
+      broker_capabilities: [...pin.script.broker_capabilities], path: pin.script.path, source: scriptFile.bytes };
+  } else if (task.task_ref !== pin.task_ref || task.operation_id !== capability.operation_id || task.action !== capability.action ||
+      Object.keys(taskEntrypoint).some(key => key !== "kind" && key !== "capability_refs") ||
+      taskEntrypoint.kind !== "capability_refs" || canonicalJson(taskEntrypoint.capability_refs) !== canonicalJson([capabilityRef]) ||
+      Array.isArray(manifest.scripts) && manifest.scripts.length !== 0) return fail("managed_skill_source_corrupt");
   const inputRef = string(object(task.inputs).schema_ref), outputRef = string(object(task.outputs).schema_ref);
   const verification = object(task.verification), checkRef = string(verification.post_check_ref);
   const asset = (role: string, field: string, ref: string) => {
@@ -248,14 +346,20 @@ export async function verifySiteSkillPackageRoot(lodeAssetsPath: string, pin: Si
       postCheck.schema_version !== "lode.post-check.v0") return fail("managed_skill_source_corrupt");
   return {
     package_ref: pin.package_ref, revision_ref: pin.revision_ref, version: String(manifest.version), package_digest: pin.package_digest,
+    source_repository: String(source.repository), package_path: packagePath,
     source_ref: String(source.source_ref), lock_ref: String(lockLocator.lock_ref), source_commit: String(source.commit), task_ref: pin.task_ref,
     capability: { capability_ref: capabilityRef, capability_id: String(capability.capability_id), version: String(capability.version), source_ref: String(capability.source_ref), lock_ref: String(capability.lock_ref), operation_id: String(capability.operation_id), action: String(capability.action) },
+    ...(verifiedScript === undefined ? {} : { script: verifiedScript }),
     task, input_schema: inputSchema, output_schema: outputSchema, post_check: postCheck, manifest_bytes: manifestBytes, skill_text: skillFile.bytes, files
   };
 }
 
-export async function resolveApprovedSiteTaskPackage(lodeAssetsPath: string | undefined): Promise<VerifiedSiteTask> {
+export function approvedManagedSiteTaskPackageFor(packageRef: string) {
+  return approvedManagedSiteTaskPackages.find(pin => pin.package_ref === packageRef);
+}
+
+export async function resolveApprovedSiteTaskPackage(lodeAssetsPath: string | undefined, pin: SiteSkillPackagePin = approvedManagedSiteTaskPackage): Promise<VerifiedSiteTask> {
   const root = lodeAssetsPath ?? process.env.WEBENVOY_LODE_ASSETS_PATH;
   if (!root) return fail("managed_skill_source_missing");
-  return verifySiteSkillPackageRoot(root, approvedManagedSiteTaskPackage);
+  return verifySiteSkillPackageRoot(root, pin);
 }
