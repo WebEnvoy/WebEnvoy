@@ -152,7 +152,6 @@ jobs:
         env:
           LIVE_BROWSER_EVIDENCE_PATH: ${{ env.LIVE_BROWSER_EVIDENCE_PATH }}
           SITE_TASK_EVIDENCE_PATH: ${{ env.SITE_TASK_EVIDENCE_PATH }}
-          WEBENVOY_PROVIDER_SNAPSHOT_PROGRESS: "1"
         run: node apps/desktop/scripts/standalone-live-browser-check.mjs "$PACKAGE_ROOT" "$MATERIAL_ROOT"
 
       - name: Upload live acceptance evidence

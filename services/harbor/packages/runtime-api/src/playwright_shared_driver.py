@@ -1317,8 +1317,6 @@ class Driver:
 
     @staticmethod
     def _record_snapshot_phase(phase: str, outcome: str, started_ns: int | None = None) -> int:
-        if os.environ.get("WEBENVOY_PROVIDER_SNAPSHOT_PROGRESS") != "1":
-            return time.monotonic_ns()
         phases = {"candidate_capture", "page_text", "batch_verification", "control_cleanup", "response_projection"}
         outcomes = {"started", "completed", "error", "unavailable"}
         if phase not in phases or outcome not in outcomes:

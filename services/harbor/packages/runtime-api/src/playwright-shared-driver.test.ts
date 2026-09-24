@@ -135,8 +135,6 @@ playwright.async_api = async_api; sys.modules["playwright"] = playwright; sys.mo
 spec = importlib.util.spec_from_file_location("playwright_shared_driver", sys.argv[1])
 module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
 
-previous_progress = os.environ.get("WEBENVOY_PROVIDER_SNAPSHOT_PROGRESS")
-os.environ["WEBENVOY_PROVIDER_SNAPSHOT_PROGRESS"] = "1"
 progress_output = io.StringIO()
 with contextlib.redirect_stdout(progress_output):
     started = module.Driver._record_snapshot_phase("candidate_capture", "started")
@@ -146,8 +144,6 @@ assert len(progress_events) == 2, progress_events
 assert all(event["id"] == 0 and event["event"] == "provider_snapshot_phase" and event["stage"] == "provider_snapshot" for event in progress_events), progress_events
 assert all(event["phase"] == "candidate_capture" and "page_text" not in event for event in progress_events), progress_events
 assert [event["outcome"] for event in progress_events] == ["started", "completed"], progress_events
-if previous_progress is None: os.environ.pop("WEBENVOY_PROVIDER_SNAPSHOT_PROGRESS")
-else: os.environ["WEBENVOY_PROVIDER_SNAPSHOT_PROGRESS"] = previous_progress
 
 class Handle:
     def __init__(self, index, role="button", name=None, name_source="none", description=None):
