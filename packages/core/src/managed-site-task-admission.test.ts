@@ -184,6 +184,12 @@ test("owner source/code admission pins a clean Git candidate, preserves lifecycl
     assert.equal(revokedSource.active, false);
     assert.equal(await store.resolveAdmitted(request), undefined);
     assert.equal((await store.listAdmitted(packageRef)).length, 0);
+    const receiptsAfterRevocation = await store.listAdmissions(packageRef) as Json[];
+    assert.equal(receiptsAfterRevocation.length, 1, "revocation preserves the historical admission receipt");
+    assert.equal(receiptsAfterRevocation[0]?.admission_ref, source.admission_ref);
+    assert.equal(receiptsAfterRevocation[0]?.active, false);
+    assert.equal(receiptsAfterRevocation[0]?.code_active, false);
+    assert.equal(receiptsAfterRevocation[0]?.code_admission_ref, admitted.code_admission_ref);
 
     await writeFile(skillPath, `${await readFile(skillPath, "utf8")}Unadmitted authoring change.\n`);
     await commit(root, "tamper a non-generated package source file");
