@@ -556,6 +556,9 @@ context)`；Run 只保存 schema ref、carrier、是否有值和摘要，不保�
 `{ok,status,url,body,response_ref,content_type}`；受审兼容 wrapper 可在内存中
 投影 `Response.ok/status/text()/json()`，不把 raw body、header、Cookie 或
 endpoint 送给 Agent。
+Lode `data_handling.external_egress` 使用既有 `declared` 值，表示本任务需要向
+声明的公共目标发送 URL/query/header；精确模式由 `network_read.transport` 固定为
+`program_anonymous_https`。两者都不是授权，不能扩展到凭据或其他目标。
 
 随后 `output.write` 只接受符合 pinned output schema 的 normalized output，
 `source_refs` 恰含 `{ref_id:<本次 response_ref>,source_kind:"public_http_response"}`，
