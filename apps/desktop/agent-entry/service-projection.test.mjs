@@ -43,6 +43,9 @@ test('owner session projection exposes only bounded provider stage diagnostics',
     code: 'request_timeout', page_text: 'private page content', stack: 'user:password@private.example'
   }));
   diagnostics.push({ stage: 'provider_snapshot', outcome: 'error', duration_ms: 1, observed_at: observedAt, code: 'https://user:password@private.example' });
+  diagnostics.splice(-1, 0, ...['candidate_query', 'control_read', 'accessibility_semantics'].map(phase => ({
+    stage: 'provider_snapshot', phase, outcome: 'started', duration_ms: 0, observed_at: observedAt, code: 'control_index_32'
+  })));
   const value = {
     ...terminalFacts(), lifecycle_state: 'active', control_owner: 'core_task', control_generation: 4,
     control_lock: { owner: 'core_task', state: 'held', holder_ref: 'holder:one' },
@@ -54,6 +57,9 @@ test('owner session projection exposes only bounded provider stage diagnostics',
   assert.ok(result.provider_operation_diagnostics.some(item => item.stage === 'page_relation_refresh'));
   assert.ok(result.provider_operation_diagnostics.some(item => item.stage === 'provider_snapshot'));
   assert.ok(result.provider_operation_diagnostics.some(item => item.phase === 'candidate_capture' && item.outcome === 'started'));
+  for (const phase of ['candidate_query', 'control_read', 'accessibility_semantics']) {
+    assert.ok(result.provider_operation_diagnostics.some(item => item.phase === phase && item.code === 'control_index_32'));
+  }
   assert.equal(JSON.stringify(result).includes('private page content'), false);
   assert.equal(JSON.stringify(result).includes('password'), false);
   assert.ok(result.provider_operation_diagnostics.every(item => Object.keys(item).every(key =>

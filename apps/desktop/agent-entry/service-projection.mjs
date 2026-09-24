@@ -11,7 +11,7 @@ const projectLock = value => value && typeof value === 'object' && !Array.isArra
   : undefined;
 
 const providerDiagnosticStages = new Set(['page_list_request', 'page_relation_refresh', 'provider_snapshot']);
-const providerDiagnosticPhases = new Set(['candidate_capture', 'page_text', 'batch_verification', 'control_cleanup', 'response_projection']);
+const providerDiagnosticPhases = new Set(['candidate_capture', 'candidate_query', 'control_read', 'accessibility_semantics', 'page_text', 'batch_verification', 'control_cleanup', 'response_projection']);
 const providerDiagnosticOutcomes = new Set(['started', 'completed', 'unavailable', 'timeout', 'error']);
 const projectProviderOperationDiagnostics = value => Array.isArray(value) ? value.slice(-12).flatMap(item => {
   if (!item || typeof item !== 'object' || Array.isArray(item) || !providerDiagnosticStages.has(item.stage) ||
