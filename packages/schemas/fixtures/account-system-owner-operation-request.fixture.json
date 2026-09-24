@@ -1,0 +1,6 @@
+{
+  "$schema": "account-system-owner-operation-request.schema.json",
+  "schema_version": "webenvoy.account-system-owner-operation/v1",
+  "operation": "import_template",
+  "template_ref": "lode://account-system/github@1.0.0"
+}

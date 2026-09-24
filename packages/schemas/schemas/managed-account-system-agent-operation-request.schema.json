@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/core/managed-account-system-agent-operation-request.v1.schema.json",
+  "title": "WebEnvoy managed AccountSystem Agent operation request",
+  "description": "Authenticated Agent read-only projection request. The operation is fixed and authorizes through the existing skill.inspect Grant scope.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "operation", "connection_id", "grant_id", "template_ref"],
+  "properties": {
+    "schema_version": { "const": "webenvoy.account-system-agent-operation/v1" },
+    "operation": { "const": "account_system.read" },
+    "connection_id": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "grant_id": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "template_ref": { "type": "string", "pattern": "^lode://account-system/[a-z0-9][a-z0-9._-]*@[0-9]+\\.[0-9]+\\.[0-9]+$" }
+  },
+  "x-webenvoy": {
+    "owner": "Core managed AccountSystem Agent projection",
+    "status": "accepted-v1",
+    "schema_version": "webenvoy.account-system-agent-operation/v1",
+    "compatibility_boundary": "Read-only public metadata projection of the enabled Core-local definition. Core maps this fixed operation to an exact existing skill.inspect Grant scope; this schema adds no Grant dimension and implies no login state.",
+    "source_adrs": ["docs/specs/account-system-local-definition-v1.md", "docs/specs/skill-library-lifecycle-v1.md"],
+    "field_owners": { "operation": "Core managed AccountSystem API", "template_ref": "Lode fixed template index and Core local definition store", "connection_id": "Core managed access connection", "grant_id": "Core existing Grant" }
+  }
+}

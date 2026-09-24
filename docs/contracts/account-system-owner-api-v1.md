@@ -1,0 +1,9 @@
+# Core Owner AccountSystem API V1
+
+Status: Accepted for #475. Owner: WebEnvoy Core. Wire schema: [`account-system-owner-operation-request.schema.json`](../../packages/schemas/schemas/account-system-owner-operation-request.schema.json). The API changes only Core-local public AccountSystem definitions; it does not discover accounts, bind an Account to a Profile, infer login state, or perform account reads or writes.
+
+The sole route is `POST /owner/account-systems/operations`. It uses the existing Core supervisor Bearer credential and the shared owner gate. Agent credentials cannot access the route. Bodies are limited to 64 KiB and reject unknown fields. Every operation returns `{ "ok": true, "result": ... }`; errors return `{ "ok": false, "error": { "code": ... } }` without local paths or sensitive material.
+
+Operations are `import_template`, `list`, `create_draft`, `update_draft`, `check_draft`, `pin_draft`, `enable`, `disable`, `rollback`, and `resolve`. Import names an immutable approved Lode template ref. Draft pin, enable, disable, and rollback require the current record version. Pinning does not enable. `resolve` can inspect an exact historical revision only with `historical: true`; normal resolution refuses a disabled or non-current revision. Core validates the selected template index and exact template bytes before import and validates every edited definition against the pinned public template shape.
+
+The API never accepts an Agent-provided template file, local path, credential, cookie, selector, executable code, Profile ref, or asserted authenticated state. A template import creates an enabled local metadata definition but is not a browser authorization or an Account/Profile binding. An AccountSystem-dependent task must independently resolve the enabled local revision before Run creation; tasks that do not declare an AccountSystem reference never consult this store.

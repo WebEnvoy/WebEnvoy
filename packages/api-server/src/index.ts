@@ -17,6 +17,7 @@ import {
   createHttpManagedFileOwnerClient,
   createLocalLodePackageResolver,
   createLocalTaskTurnInputPolicyResolver,
+  createFileAccountSystemDefinitionStore,
   recoverInterruptedCoreTaskSessions,
   ManagedAccessError
 } from "@webenvoy/core-runtime";
@@ -107,6 +108,14 @@ if (import.meta.url === entrypoint) {
             }
           }
         })
+    })
+    : undefined;
+  const runtimeDataRoot = process.env.WEBENVOY_RUNTIME_DATA_DIR;
+  const lodeAssetsPath = process.env.WEBENVOY_LODE_ASSETS_PATH;
+  const accountSystemDefinitionService = runtimeDataRoot && lodeAssetsPath
+    ? createFileAccountSystemDefinitionStore({
+        directory: join(runtimeDataRoot, "core", "account-systems"),
+        lodeAssetsPath
       })
     : undefined;
   const managedRecoveryService = runRecordStore && process.env.WEBENVOY_HARBOR_RUNTIME_URL
@@ -128,10 +137,12 @@ if (import.meta.url === entrypoint) {
         ...(skillAssetsPath === undefined ? {} : { sourceManifestPath: join(skillAssetsPath, "manifest.json") }) })
     : undefined;
   const managedTaskService = managedAccessStore && runRecordStore && managedSkillService && managedBrowserService
-    ? createManagedTaskService({ accessStore: managedAccessStore, runRecordStore, skillLibraryService: managedSkillService, managedBrowserService })
+    ? createManagedTaskService({ accessStore: managedAccessStore, runRecordStore, skillLibraryService: managedSkillService, managedBrowserService,
+      })
     : undefined;
   const server = createApiServer({
     supervisorToken,
+    ...(accountSystemDefinitionService === undefined ? {} : { accountSystemDefinitionService }),
     ...(managedAccessStore === undefined ? {} : { managedAccessStore }),
     ...(managedBrowserService === undefined ? {} : { managedBrowserService }),
     ...(managedSkillService === undefined ? {} : { managedSkillService }),

@@ -1,0 +1,40 @@
+{
+  "schema": "managed-account-system-agent-operation-response.schema.json",
+  "cases": [
+    {
+      "name": "projection cannot infer authentication",
+      "instance": {
+        "ok": true,
+        "result": {
+          "schema_version": "webenvoy.account-system-agent-projection.v1",
+          "local_definition_ref": "webenvoy:account-system/00000000-0000-4000-8000-000000000001",
+          "local_revision_ref": "webenvoy:account-system-revision/00000000-0000-4000-8000-000000000001@1#sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "template_ref": "lode://account-system/github@1.0.0",
+          "template_sha256": "sha256:8b022fc329a6f75887e465ab561c83ba74d2ab2af1ef0e51a41f3d06b1b4c777",
+          "source": { "publisher": "WebEnvoy", "repository": "WebEnvoy/Lode", "path": "account-systems/github/1.0.0.json", "version": "1.0.0" },
+          "site": { "account_system_id": "github", "version": "1.0.0", "display_name": "GitHub", "related_domains": ["github.com"], "products": ["GitHub.com"], "login_entry": { "label": "Sign in", "url": "https://github.com/login" }, "admin_entry_points": [] },
+          "identity_state": "authenticated",
+          "evaluation_state": "not_evaluated"
+        }
+      }
+    },
+    {
+      "name": "projection excludes identity methods and private selectors",
+      "instance": {
+        "ok": true,
+        "result": {
+          "schema_version": "webenvoy.account-system-agent-projection.v1",
+          "local_definition_ref": "webenvoy:account-system/00000000-0000-4000-8000-000000000001",
+          "local_revision_ref": "webenvoy:account-system-revision/00000000-0000-4000-8000-000000000001@1#sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "template_ref": "lode://account-system/github@1.0.0",
+          "template_sha256": "sha256:8b022fc329a6f75887e465ab561c83ba74d2ab2af1ef0e51a41f3d06b1b4c777",
+          "source": { "publisher": "WebEnvoy", "repository": "WebEnvoy/Lode", "path": "account-systems/github/1.0.0.json", "version": "1.0.0" },
+          "site": { "account_system_id": "github", "version": "1.0.0", "display_name": "GitHub", "related_domains": ["github.com"], "products": ["GitHub.com"], "login_entry": { "label": "Sign in", "url": "https://github.com/login" }, "admin_entry_points": [] },
+          "identity_state": "unknown",
+          "evaluation_state": "not_evaluated",
+          "identity_method": { "selector": "input[name=email]" }
+        }
+      }
+    }
+  ]
+}

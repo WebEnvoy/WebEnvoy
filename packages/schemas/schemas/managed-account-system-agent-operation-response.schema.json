@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/core/managed-account-system-agent-operation-response.v1.schema.json",
+  "title": "WebEnvoy managed AccountSystem Agent operation response",
+  "description": "Successful, bounded read-only projection of an enabled Core-local AccountSystem definition.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ok", "result"],
+  "properties": {
+    "ok": { "const": true },
+    "result": { "$ref": "#/$defs/projection" }
+  },
+  "$defs": {
+    "text": { "type": "string", "minLength": 1, "maxLength": 2048 },
+    "publicUrl": { "type": "string", "format": "uri", "pattern": "^https://" },
+    "entryPoint": {
+      "type": "object", "additionalProperties": false, "required": ["label", "url"],
+      "properties": { "label": { "$ref": "#/$defs/text" }, "url": { "$ref": "#/$defs/publicUrl" } }
+    },
+    "source": {
+      "type": "object", "additionalProperties": false, "required": ["publisher", "repository", "path", "version"],
+      "properties": {
+        "publisher": { "$ref": "#/$defs/text" }, "repository": { "$ref": "#/$defs/text" },
+        "path": { "$ref": "#/$defs/text" }, "version": { "$ref": "#/$defs/text" }
+      }
+    },
+    "site": {
+      "type": "object", "additionalProperties": false,
+      "required": ["account_system_id", "version", "display_name", "related_domains", "products", "login_entry", "admin_entry_points"],
+      "properties": {
+        "account_system_id": { "$ref": "#/$defs/text" }, "version": { "$ref": "#/$defs/text" },
+        "display_name": { "$ref": "#/$defs/text" },
+        "related_domains": { "type": "array", "items": { "$ref": "#/$defs/text" }, "minItems": 1, "maxItems": 128, "uniqueItems": true },
+        "products": { "type": "array", "items": { "$ref": "#/$defs/text" }, "minItems": 1, "maxItems": 256, "uniqueItems": true },
+        "login_entry": { "$ref": "#/$defs/entryPoint" },
+        "admin_entry_points": { "type": "array", "items": { "$ref": "#/$defs/entryPoint" }, "maxItems": 128 }
+      }
+    },
+    "projection": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "local_definition_ref", "local_revision_ref", "template_ref", "template_sha256", "source", "site", "identity_state", "evaluation_state"],
+      "properties": {
+        "schema_version": { "const": "webenvoy.account-system-agent-projection.v1" },
+        "local_definition_ref": { "type": "string", "pattern": "^webenvoy:account-system/[0-9a-f-]{36}$" },
+        "local_revision_ref": { "type": "string", "pattern": "^webenvoy:account-system-revision/[0-9a-f-]{36}@[1-9][0-9]*#sha256:[a-f0-9]{64}$" },
+        "template_ref": { "type": "string", "pattern": "^lode://account-system/[a-z0-9][a-z0-9._-]*@[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "template_sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "source": { "$ref": "#/$defs/source" }, "site": { "$ref": "#/$defs/site" },
+        "identity_state": { "const": "unknown" }, "evaluation_state": { "const": "not_evaluated" }
+      }
+    }
+  },
+  "x-webenvoy": {
+    "owner": "Core managed AccountSystem Agent projection",
+    "status": "accepted-v1",
+    "schema_version": "webenvoy.account-system-agent-projection.v1",
+    "compatibility_boundary": "This response contains only public site metadata and local/template provenance. It cannot establish authenticated identity; identity method, shared-login relationships, credentials, selectors, Profile refs and private page content are excluded.",
+    "source_adrs": ["docs/specs/account-system-local-definition-v1.md"],
+    "field_owners": { "local_definition_ref": "Core local AccountSystem store", "local_revision_ref": "Core immutable local revision", "template_ref": "Lode source template pin", "identity_state": "Core fixed unknown projection" }
+  }
+}
