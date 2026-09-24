@@ -294,9 +294,9 @@ async function runGithubTrendingAcceptance({ ownerData, agentHost, clientFile, p
     expected_revision_ref: null, expected_record_version: installed.result.skill.record_version }));
   const enabled = runJson(cli, ['agent', 'skills', '--client-file', clientFile, '--request-file', enableFile], true, 'github_skill_enable');
   assert.equal(enabled.ok, true, `github_skill_enable:${enabled.failure?.code ?? enabled.error?.code}`);
-  const readFile = join(agentHost, `${prefix}-skill-read.json`);
-  await agentWrite(readFile, skillRequest('skill.read'));
-  const read = runJson(cli, ['agent', 'skills', '--client-file', clientFile, '--request-file', readFile], true, 'github_skill_read');
+  const skillReadFile = join(agentHost, `${prefix}-skill-read.json`);
+  await agentWrite(skillReadFile, skillRequest('skill.read'));
+  const read = runJson(cli, ['agent', 'skills', '--client-file', clientFile, '--request-file', skillReadFile], true, 'github_skill_read');
   assert.equal(read.ok, true, `github_skill_read:${read.failure?.code ?? read.error?.code}`);
   assert.equal(read.result.revision.revision_ref, site.revision_ref);
   assert.equal(read.result.receipt.content_sha256, site.integrity.files.find(item => item.path === 'SKILL.md')?.sha256);
