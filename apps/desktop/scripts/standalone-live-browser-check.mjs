@@ -228,11 +228,11 @@ async function runGithubTrendingAcceptance({ ownerData, agentHost, clientFile, p
   assert.equal(site.source.source_ref, fixedPin.source_ref);
   assert.equal(site.source.commit, fixedPin.source_commit);
   assert.equal(script.sha256, fixedPin.script.sha256);
-  execFileSync('/usr/bin/git', ['-C', lodeRoot, 'merge-base', '--is-ancestor', site.source.commit, lodeCommit]);
-  const sourceScriptBytes = execFileSync('/usr/bin/git', ['-C', lodeRoot, 'show', `${site.source.commit}:${site.source.package_path}/${script.path}`]);
-  assert.equal(sha(sourceScriptBytes), script.sha256.slice('sha256:'.length), 'locked_lode_script_bytes_mismatch');
   const verified = await core.verifySiteSkillPackageRoot(lodeAssetsRoot, fixedPin);
   assert.equal(verified.script?.sha256, script.sha256);
+  const sourceScriptBytes = await readFile(join(lodeRoot, verified.package_path, verified.script.path));
+  assert.equal(sha(sourceScriptBytes), script.sha256.slice('sha256:'.length), 'locked_lode_script_bytes_mismatch');
+  assert.deepEqual(sourceScriptBytes, verified.script.source, 'packaged_script_differs_from_locked_lode_checkout');
   const admissionFields = {
     package_ref: fixedPin.package_ref, revision_ref: fixedPin.revision_ref, package_digest: fixedPin.package_digest,
     source_ref: fixedPin.source_ref, source_commit: fixedPin.source_commit
