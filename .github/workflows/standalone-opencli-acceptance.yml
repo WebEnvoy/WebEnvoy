@@ -59,6 +59,7 @@ jobs:
           repository: WebEnvoy/Lode
           ref: ${{ steps.lode.outputs.ref }}
           path: .runtime-sources/lode
+          fetch-depth: 0
           persist-credentials: false
       - name: Verify exact source inputs
         shell: bash
