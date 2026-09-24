@@ -27,7 +27,7 @@ const upstreamSetupArgs = [
 ];
 const cli = async (command, data = join(directory, 'data'), extra = []) => JSON.parse((await run(executable, [join(root, 'agent-entry/cli.mjs'), command, '--data-dir', data, '--host-dir', join(directory, 'host'), ...extra], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, timeout: 30000 })).stdout);
 const { ensureRuntime, localRequest } = await import(pathToFileURL(join(root, 'agent-entry/client.mjs')));
-const { verifyBundle } = await import(pathToFileURL(join(root, 'agent-entry/bundle.mjs')));
+const { INSTALLED_SKILL_VERSION, verifyBundle } = await import(pathToFileURL(join(root, 'agent-entry/bundle.mjs')));
 const data = join(directory, 'data');
 let running = false;
 let owner;
@@ -107,6 +107,7 @@ try {
   await writeFile(required, 'corrupt');
   await assert.rejects(ensureRuntime(data), /asset_integrity_failed/);
   await writeFile(required, original);
+  assert.equal((await verifyBundle()).skill_version, INSTALLED_SKILL_VERSION, 'the installed manifest must report the verified SKILL revision');
   await rename(required, required + '.held');
   await assert.rejects(ensureRuntime(data), /ENOENT/);
   await rename(required + '.held', required);

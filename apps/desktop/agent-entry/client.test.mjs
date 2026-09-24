@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { createInterface } from 'node:readline';
 import { Ajv2020 } from '../../../packages/schemas/node_modules/ajv/dist/2020.js';
 import { localRequest, runManagedSiteWorker } from './client.mjs';
-import { REQUIRED_AGENT_ASSETS, REQUIRED_DRIVER_ASSETS, root, sha } from './bundle.mjs';
+import { INSTALLED_SKILL_VERSION, REQUIRED_AGENT_ASSETS, REQUIRED_DRIVER_ASSETS, root, sha } from './bundle.mjs';
 
 async function stopChild(child) {
   if (!child || child.exitCode !== null) return;
@@ -334,7 +334,7 @@ test('MCP describe does not start Runtime and does not fall back for an old Runt
       await copyFile(agentAssetSource(name), target);
     }
     await installMockClient(bundleRoot);
-    const manifest = { schema: 'webenvoy-installed-agent/v1', version: '0.2.0', skill_version: '0.2.0', files: Object.fromEntries(await Promise.all(files.map(async name => [name, sha(await readFile(join(bundleRoot, name)))]))) };
+    const manifest = { schema: 'webenvoy-installed-agent/v1', version: '0.2.0', skill_version: INSTALLED_SKILL_VERSION, files: Object.fromEntries(await Promise.all(files.map(async name => [name, sha(await readFile(join(bundleRoot, name)))]))) };
     await writeFile(join(bundleRoot, 'agent-manifest.json'), JSON.stringify(manifest));
     await writeFixtureClient(clientPath, dataDir, socketPath);
     const requests = [];
@@ -395,7 +395,7 @@ test('MCP validates capability description states and forwards correction guidan
       await copyFile(agentAssetSource(name), target);
     }
     await installMockClient(bundleRoot);
-    const manifest = { schema: 'webenvoy-installed-agent/v1', version: '0.2.0', skill_version: '0.2.0',
+    const manifest = { schema: 'webenvoy-installed-agent/v1', version: '0.2.0', skill_version: INSTALLED_SKILL_VERSION,
       host: { electron_version: process.versions.electron ?? null, executable_sha256: sha(await readFile(process.execPath)) },
       files: Object.fromEntries(await Promise.all(files.map(async name => [name, sha(await readFile(join(bundleRoot, name)))]))) };
     await writeFile(join(bundleRoot, 'agent-manifest.json'), JSON.stringify(manifest));
@@ -513,7 +513,7 @@ test('MCP status omits private Camoufox artifact binding while preserving runtim
       await copyFile(agentAssetSource(name), target);
     }
     await installMockClient(bundleRoot);
-    const manifest = { schema: 'webenvoy-installed-agent/v1', version: '0.2.0', skill_version: '0.2.0', files: Object.fromEntries(await Promise.all(files.map(async name => [name, sha(await readFile(join(bundleRoot, name)))]))) };
+    const manifest = { schema: 'webenvoy-installed-agent/v1', version: '0.2.0', skill_version: INSTALLED_SKILL_VERSION, files: Object.fromEntries(await Promise.all(files.map(async name => [name, sha(await readFile(join(bundleRoot, name)))]))) };
     await writeFile(join(bundleRoot, 'agent-manifest.json'), JSON.stringify(manifest));
     const status = {
       ready: true,

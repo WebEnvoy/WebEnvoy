@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import test from 'node:test';
-import { REQUIRED_AGENT_ASSETS, REQUIRED_DRIVER_ASSETS, sha } from './bundle.mjs';
+import { INSTALLED_SKILL_VERSION, REQUIRED_AGENT_ASSETS, REQUIRED_DRIVER_ASSETS, sha } from './bundle.mjs';
 
 const entryRoot = dirname(fileURLToPath(import.meta.url));
 const fixtureSupervisor = `
@@ -180,7 +180,7 @@ async function makeBundle() {
   ];
   const files = Object.fromEntries(await Promise.all(names.map(async name => [name, sha(await readFile(join(bundleRoot, name)))])));
   await writeFile(join(bundleRoot, 'agent-manifest.json'), JSON.stringify({
-    schema: 'webenvoy-installed-agent/v1', version: '0.2.0', skill_version: '0.2.0', files
+    schema: 'webenvoy-installed-agent/v1', version: '0.2.0', skill_version: INSTALLED_SKILL_VERSION, files
   }));
   return bundleRoot;
 }

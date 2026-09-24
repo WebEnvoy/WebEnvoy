@@ -18,6 +18,7 @@ export const REQUIRED_AGENT_ASSETS = [
 ];
 export const INSTALLED_AGENT_MANIFEST_SCHEMA = 'webenvoy-installed-agent/v1';
 export const STANDALONE_MANIFEST_SCHEMA = 'webenvoy-installed-standalone/v1';
+export const INSTALLED_SKILL_VERSION = '0.3.0';
 export async function files(directory, prefix = '') {
   const out = {};
   for (const name of (await readdir(directory)).sort()) {
@@ -34,7 +35,7 @@ export async function verifyBundle(bundleRoot = root, options = {}) {
   const checkHost = options.checkHost ?? true;
   const manifest = JSON.parse(await readFile(join(bundleRoot, 'agent-manifest.json'), 'utf8'));
   const standalone = manifest.schema === STANDALONE_MANIFEST_SCHEMA;
-  if (![INSTALLED_AGENT_MANIFEST_SCHEMA, STANDALONE_MANIFEST_SCHEMA].includes(manifest.schema) || manifest.skill_version !== '0.2.0') throw new Error('asset_version_mismatch: reinstall the matching bundle');
+  if (![INSTALLED_AGENT_MANIFEST_SCHEMA, STANDALONE_MANIFEST_SCHEMA].includes(manifest.schema) || manifest.skill_version !== INSTALLED_SKILL_VERSION) throw new Error('asset_version_mismatch: reinstall the matching bundle');
   if (standalone) await verifyStandaloneRuntime(bundleRoot, manifest, hostExecutable);
   else if (checkHost && process.versions.electron && sha(await readFile(hostExecutable)) !== manifest.host?.executable_sha256) throw new Error('runtime_host_integrity_failed');
   const required = ['agent-entry/mcp.mjs', 'agent-entry/client.mjs', 'agent-entry/service.mjs', 'agent-entry/bundle.mjs', 'agent-entry/skills/webenvoy-browser/SKILL.md', 'dist-electron/runtime/core/start-runtime.mjs', 'dist-electron/runtime/harbor/start-runtime.mjs', ...REQUIRED_AGENT_ASSETS, ...REQUIRED_DRIVER_ASSETS];
@@ -61,6 +62,9 @@ export async function verifyBundle(bundleRoot = root, options = {}) {
     const path = join(bundleRoot, name);
     if (!(await lstat(path)).isFile() || sha(await readFile(path)) !== hash) throw new Error(`asset_integrity_failed: ${name}; reinstall the matching bundle`);
   }
+  const skillText = await readFile(join(bundleRoot, 'agent-entry/skills/webenvoy-browser/SKILL.md'), 'utf8');
+  const skillVersion = skillText.match(/^metadata:\s*\n\s+version:\s*([^\s]+)\s*$/m)?.[1];
+  if (skillVersion !== manifest.skill_version) throw new Error('asset_version_mismatch: SKILL and bundle manifest versions differ');
   let optionalUnavailable = 0, optionalSkillUnavailable = 0;
   for (const [name, hash] of Object.entries(manifest.optional_files ?? {})) {
     if (!(name.startsWith('dist-electron/lode/') || name.startsWith('agent-entry/skill-assets/')) || name.includes('..')) throw new Error('asset_manifest_invalid');

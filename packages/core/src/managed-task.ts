@@ -10,6 +10,7 @@ import { completeRunWithFailure, completeRunWithResult, type ResultEnvelope } fr
 import { validateTaskIntent } from "./task-submission.js";
 import { isValidRunId } from "./run-id.js";
 import { normalizePublicOrigin, normalizeStoredTargetRef } from "./public-target-reference.js";
+import { ProgramPublicHttpError, parseProgramPublicHttpPolicy, readProgramPublicHttp, validateProgramPublicHttpCall, type ProgramPublicHttpPolicy, type ProgramPublicHttpResponse } from "./program-public-http.js";
 
 type JsonObject = Record<string, unknown>;
 type ParsedScope = ManagedTaskScope & { skill_refs: string[]; source_refs: string[]; profile_refs: string[]; origins: string[] };
@@ -22,7 +23,7 @@ type ParsedRequest = {
   idempotency_key?: string;
   package?: { package_ref: string; revision_ref: string; package_digest: string; task_ref: string };
   target?: { target_type: string; target_ref: string };
-  input?: { schema_ref: string; carrier: "none"; value?: unknown };
+  input?: { schema_ref: string; carrier: "none" | "webenvoy.managed-task-inline/v1"; value?: unknown };
   intent?: { summary: string; policy: { risk: string; execution_intent: string; timeout_ms?: number } };
   selector?: { run_id?: string; original_idempotency_key?: string };
 };
@@ -44,6 +45,9 @@ type ActiveManagedSiteTicket = {
   worker_started: boolean;
   snapshot_started: boolean;
   snapshot?: JsonObject;
+  network_started: boolean;
+  network_controller: AbortController | undefined;
+  public_response?: Pick<ProgramPublicHttpResponse, "response_ref" | "facts" | "url" | "status" | "content_type">;
   output?: JsonObject;
   postCheck?: PostCheckResult;
   failure_code?: string;
@@ -53,7 +57,7 @@ type ActiveManagedSiteTicket = {
 };
 
 const responseSchemaVersion = "webenvoy.managed-task-operation-result/v1" as const;
-const taskIntentCapabilityRef = "lode:capability/managed-page-snapshot";
+const pageTaskIntentCapabilityRef = "lode:capability/managed-page-snapshot";
 const taskTargetType = "web_page";
 const snapshotCompletenessBoundary = "Core requires one complete Harbor page snapshot before evaluating the pinned Lode task output and business post-check.";
 const postCheckBoundary = "Core evaluated the pinned Lode post-check against actual Harbor snapshot facts; it does not assert third-party processing.";
@@ -102,7 +106,9 @@ function parseRequest(value: unknown): ParsedRequest {
     "task.query": ["selector"],
     "task.stop": ["idempotency_key", "selector"]
   };
-  const input = object(value, [...required, ...(operation === "task.submit" ? ["idempotency_key", "package", "target", "input", "intent"] : operation === "task.query" ? ["selector"] : ["idempotency_key", "selector"])], required.concat(optionalByOperation[operation]));
+  const operationRequired = operation === "task.submit" ? ["idempotency_key", "package", "input", "intent"]
+    : operation === "task.query" ? ["selector"] : ["idempotency_key", "selector"];
+  const input = object(value, [...required, ...operationRequired], required.concat(optionalByOperation[operation]));
   if (input.schema_version !== "webenvoy.managed-task-operation/v1") return fail("managed_task_version_unsupported");
   const parsed: ParsedRequest = {
     schema_version: "webenvoy.managed-task-operation/v1",
@@ -118,13 +124,21 @@ function parseRequest(value: unknown): ParsedRequest {
     const package_digest = string(pkg.package_digest);
     if (!/^sha256:[a-f0-9]{64}$/.test(package_digest)) return fail("managed_task_invalid_input");
     parsed.package = { package_ref: string(pkg.package_ref), revision_ref: string(pkg.revision_ref), package_digest, task_ref: string(pkg.task_ref) };
-    const target = object(input.target, ["target_type", "target_ref"]);
-    const target_ref = string(target.target_ref, 2048);
-    if (target_ref.includes("://") || normalizeStoredTargetRef(target_ref) !== target_ref) return fail("managed_task_invalid_input");
-    parsed.target = { target_type: string(target.target_type), target_ref };
+    if (Object.hasOwn(input, "target")) {
+      const target = object(input.target, ["target_type", "target_ref"]);
+      const target_ref = string(target.target_ref, 2048);
+      if (target_ref.includes("://") || normalizeStoredTargetRef(target_ref) !== target_ref) return fail("managed_task_invalid_input");
+      parsed.target = { target_type: string(target.target_type), target_ref };
+    }
     const taskInput = object(input.input, ["schema_ref", "carrier"], ["value"]);
-    if (taskInput.carrier !== "none" || Object.hasOwn(taskInput, "value")) return fail("managed_task_invalid_input");
-    parsed.input = { schema_ref: string(taskInput.schema_ref), carrier: "none" };
+    if (taskInput.carrier === "none") {
+      if (Object.hasOwn(taskInput, "value")) return fail("managed_task_invalid_input");
+      parsed.input = { schema_ref: string(taskInput.schema_ref), carrier: "none" };
+    } else if (taskInput.carrier === "webenvoy.managed-task-inline/v1" && Object.hasOwn(taskInput, "value")) {
+      const serialized = canonical(taskInput.value);
+      if (Buffer.byteLength(serialized, "utf8") > 65_536) return fail("managed_task_invalid_input");
+      parsed.input = { schema_ref: string(taskInput.schema_ref), carrier: "webenvoy.managed-task-inline/v1", value: taskInput.value };
+    } else return fail("managed_task_invalid_input");
     const intent = object(input.intent, ["summary", "policy"]);
     const policy = object(intent.policy, ["risk", "execution_intent"], ["timeout_ms"]);
     if (typeof intent.summary !== "string" || !intent.summary.length || Buffer.byteLength(intent.summary, "utf8") > 256 || /[\u0000-\u001f\u007f]/.test(intent.summary) ||
@@ -157,20 +171,47 @@ function assertScopeMatches(input: ParsedRequest, facts: { package_ref: string; 
   if (input.task_scope.skill_refs[0] !== facts.package_ref || input.task_scope.source_refs[0] !== facts.revision_ref ||
       input.task_scope.profile_refs[0] !== facts.profile_ref || input.task_scope.origins[0] !== facts.origin) return fail("managed_task_operation_unavailable");
 }
-function assertPinnedTask(task: JsonObject, sitePackage: Awaited<ReturnType<ReturnType<typeof createFileSkillLibraryService>["resolveManagedSiteTask"]>>): { origin: string; inputSchemaRef: string; outputSchemaRef: string; resultKind: string; checkRef: string; accountSystemRef?: string } {
+function assertPinnedTask(task: JsonObject, sitePackage: Awaited<ReturnType<ReturnType<typeof createFileSkillLibraryService>["resolveManagedSiteTask"]>>): {
+  kind: "page_snapshot" | "program_public_read"; operationId: string; targetType: string; targetRef: string; origin: string;
+  inputSchemaRef: string; inputCarrier: "none" | "webenvoy.managed-task-inline/v1"; maxInputBytes: number;
+  outputSchemaRef: string; resultKind: string; checkRef: string; networkRead?: ProgramPublicHttpPolicy; accountSystemRef?: string
+} {
   const applicability = isObject(task.applicability) ? task.applicability : {};
+  const dataHandling = isObject(task.data_handling) ? task.data_handling : {};
   const inputs = isObject(task.inputs) ? task.inputs : {};
   const outputs = isObject(task.outputs) ? task.outputs : {};
   const verification = isObject(task.verification) ? task.verification : {};
   const origins = applicability.origins;
   const origin = Array.isArray(origins) && origins.length === 1 && typeof origins[0] === "string" ? origins[0] : undefined;
-  if (task.task_ref !== sitePackage.task_ref || task.operation_id !== "instance.snapshot" || task.action !== "read" ||
-      applicability.target_type !== taskTargetType || !origin || inputs.carrier !== "none" || inputs.max_bytes !== 0 ||
-      outputs.completeness !== "required" || typeof outputs.result_kind !== "string" || typeof inputs.schema_ref !== "string" ||
-      typeof outputs.schema_ref !== "string" || typeof verification.post_check_ref !== "string" ||
-      sitePackage.capability.operation_id !== "instance.snapshot" || sitePackage.capability.action !== "read") return fail("managed_skill_source_corrupt");
+  const common = task.task_ref === sitePackage.task_ref && task.action === "read" && !!origin && outputs.completeness === "required" &&
+    typeof outputs.result_kind === "string" && typeof inputs.schema_ref === "string" && typeof outputs.schema_ref === "string" &&
+    typeof verification.post_check_ref === "string" && sitePackage.capability.action === "read" && sitePackage.capability.operation_id === task.operation_id;
+  if (!common) return fail("managed_skill_source_corrupt");
+  let kind: "page_snapshot" | "program_public_read";
+  let inputCarrier: "none" | "webenvoy.managed-task-inline/v1";
+  let maxInputBytes: number;
+  let networkRead: ProgramPublicHttpPolicy | undefined;
+  let targetRef = "";
+  if (task.operation_id === "instance.snapshot" && applicability.target_type === taskTargetType && inputs.carrier === "none" && inputs.max_bytes === 0 &&
+      !Object.hasOwn(task, "network_read") && sitePackage.script?.broker !== "webenvoy.site-skill-broker/v1.1") {
+    kind = "page_snapshot";
+    inputCarrier = "none";
+    maxInputBytes = 0;
+  } else if (task.operation_id === "network.public_read" && applicability.target_type === "public_http_origin" &&
+      inputs.carrier === "webenvoy.managed-task-inline/v1" && Number.isSafeInteger(inputs.max_bytes) && Number(inputs.max_bytes) >= 0 && Number(inputs.max_bytes) <= 65_536 &&
+      dataHandling.external_egress === "declared" && sitePackage.script?.broker === "webenvoy.site-skill-broker/v1.1" &&
+      canonical(sitePackage.script.broker_capabilities) === canonical(["network.read", "output.write"])) {
+    kind = "program_public_read";
+    inputCarrier = "webenvoy.managed-task-inline/v1";
+    maxInputBytes = Number(inputs.max_bytes);
+    targetRef = origin;
+    try { networkRead = parseProgramPublicHttpPolicy(task.network_read, origin); }
+    catch { return fail("managed_skill_source_corrupt"); }
+  } else return fail("managed_skill_source_corrupt");
   const accountSystemRef = applicability.account_system_ref === undefined ? undefined : string(applicability.account_system_ref, 512);
-  return { origin, inputSchemaRef: inputs.schema_ref, outputSchemaRef: outputs.schema_ref, resultKind: outputs.result_kind, checkRef: verification.post_check_ref,
+  return { kind, operationId: string(task.operation_id), targetType: string(applicability.target_type), targetRef,
+    origin, inputSchemaRef: string(inputs.schema_ref), inputCarrier, maxInputBytes, outputSchemaRef: string(outputs.schema_ref),
+    resultKind: string(outputs.result_kind), checkRef: string(verification.post_check_ref), ...(networkRead ? { networkRead } : {}),
     ...(accountSystemRef === undefined ? {} : { accountSystemRef }) };
 }
 function schemaValid(value: unknown, schemaValue: unknown): boolean {
@@ -258,12 +299,12 @@ function evaluatePostCheck(output: JsonObject, check: JsonObject, facts: { sourc
   };
   return { passed, postCheck };
 }
-function summaryFacts(run: RunRecord): { package_ref: string; revision_ref: string; profile_ref: string; origin: string; source_ref: string; task_ref: string; package_digest: string; input_schema_ref: string; input_carrier: "none"; principal_id: string; grant_id: string; request_hash: string; target_ref: string; target_type: string } | undefined {
+function summaryFacts(run: RunRecord): { package_ref: string; revision_ref: string; profile_ref: string; origin: string; source_ref: string; task_ref: string; package_digest: string; input_schema_ref: string; input_carrier: "none" | "webenvoy.managed-task-inline/v1"; principal_id: string; grant_id: string; request_hash: string; target_ref: string; target_type: string } | undefined {
   const summary = run.public_result_summary;
   if (!summary || summary.task_kind !== "managed_site_task" ||
       typeof summary.package_ref !== "string" || typeof summary.revision_ref !== "string" || typeof summary.profile_ref !== "string" ||
       typeof summary.origin !== "string" || typeof summary.source_ref !== "string" || typeof summary.task_ref !== "string" ||
-      typeof summary.package_digest !== "string" || typeof summary.input_schema_ref !== "string" || summary.input_carrier !== "none" ||
+      typeof summary.package_digest !== "string" || typeof summary.input_schema_ref !== "string" || !["none", "webenvoy.managed-task-inline/v1"].includes(String(summary.input_carrier)) ||
       typeof summary.principal_id !== "string" || typeof summary.grant_id !== "string" || typeof summary.request_hash !== "string" ||
       typeof summary.target_ref !== "string" || typeof summary.target_type !== "string") return undefined;
   return summary as ReturnType<typeof summaryFacts> extends infer T ? Exclude<T, undefined> : never;
@@ -279,7 +320,9 @@ function response(run: RunRecord, operation: ManagedTaskOperation, operationRef 
     operation_ref: operationRef,
     run: { run_id: run.run_id, task_intent_ref: run.task_intent_ref, package_ref: run.package_ref ?? "", status: run.status,
       dispatch_state: summary?.dispatch_state === "dispatched" ? "dispatched" as const : "not_dispatched" as const },
-    input: { schema_ref: typeof input.schema_ref === "string" ? input.schema_ref : "unavailable", carrier: "none" as const, value_present: false as const },
+    input: { schema_ref: typeof input.schema_ref === "string" ? input.schema_ref : "unavailable",
+      carrier: input.carrier === "webenvoy.managed-task-inline/v1" ? "webenvoy.managed-task-inline/v1" as const : "none" as const,
+      value_present: input.value_present === true },
     result: isObject(result) ? result as unknown as ResultEnvelope : null,
     failure: failureOverride !== undefined ? failureOverride : run.failure ?? null
   };
@@ -292,7 +335,7 @@ export function createManagedTaskService(options: {
   accessStore: FileManagedAccessStore;
   runRecordStore: FileRunRecordStore;
   skillLibraryService: Pick<ReturnType<typeof createFileSkillLibraryService>, "resolveManagedSiteTask">;
-  managedBrowserService: Pick<ReturnType<typeof createManagedBrowserService>, "executeTaskSnapshot">;
+  managedBrowserService?: Pick<ReturnType<typeof createManagedBrowserService>, "executeTaskSnapshot">;
   workerIdentity?: { owner_uid: number; agent_uid: number; mode: string; owner_socket_acl: string };
   accountSystemDefinitionService?: {
     resolveTemplate(templateRef: string): Promise<unknown>;
@@ -303,6 +346,7 @@ export function createManagedTaskService(options: {
   const activeTickets = new Map<string, ActiveManagedSiteTicket>();
   function deactivateWorkerTicket(active: ActiveManagedSiteTicket): void {
     active.cancelled = true;
+    active.network_controller?.abort();
     if (active.timer !== undefined) clearTimeout(active.timer);
     if (activeTickets.get(active.ticket_id) === active) activeTickets.delete(active.ticket_id);
   }
@@ -409,6 +453,8 @@ export function createManagedTaskService(options: {
       await options.accessStore.authenticateCredential(credentialHash);
       await revalidateWorkerTicket(active);
       if (request.method === "runtime.invoke") {
+        if (active.taskFacts.kind !== "page_snapshot") return fail("managed_site_capability_not_admitted");
+        if (!options.managedBrowserService) return fail("managed_task_browser_unavailable");
         if (active.snapshot_started || !isObject(request.input) || Object.keys(request.input).length !== 2 ||
             request.input.operation_id !== "instance.snapshot" || request.input.action !== "read") return fail("managed_site_capability_not_admitted");
         active.snapshot_started = true;
@@ -459,22 +505,91 @@ export function createManagedTaskService(options: {
         active.snapshot = projected;
         return projected;
       }
+      if (request.method === "network.read") {
+        const policy = active.taskFacts.networkRead;
+        if (active.taskFacts.kind !== "program_public_read" || !policy || active.network_started || active.snapshot_started) return fail("managed_site_capability_not_admitted");
+        validateProgramPublicHttpCall(policy, request.input);
+        active.network_started = true;
+        const controller = new AbortController();
+        active.network_controller = controller;
+        let run = await store.getRunRecord(active.run_id);
+        if (!run || run.status !== "running") return fail("managed_task_ticket_inactive");
+        try {
+          const result = await readProgramPublicHttp(policy, request.input, {
+            async beforeDispatch(_url, hop) {
+              await revalidateWorkerTicket(active);
+              const current = await store.getRunRecord(active.run_id);
+              if (!current || current.status !== "running") return fail("managed_task_ticket_inactive");
+              const previousHttp = isObject(current.public_result_summary?.program_public_http) ? current.public_result_summary!.program_public_http as JsonObject : {};
+              const previousHops = Array.isArray(previousHttp.request_hops) ? previousHttp.request_hops : [];
+              if (previousHops.length !== hop.hop_index) return fail("managed_task_network_state_invalid");
+              // Persist dispatch and a query-free path/hash before opening the socket. A restart can never replay this request.
+              await store.updateRunRecord(active.run_id, { public_result_summary: {
+                ...current.public_result_summary, dispatch_state: "dispatched",
+                program_public_http: { ...previousHttp, request_hops: [...previousHops, hop] }
+              } });
+              active.dispatched = true;
+            }
+          }, controller.signal);
+          let current: RunRecord | undefined;
+          try { current = await store.getRunRecord(active.run_id); }
+          catch {
+            active.dispatched = true;
+            active.outcome_uncertain = true;
+            active.failure_code = "managed_task_network_evidence_unavailable";
+            throw new ProgramPublicHttpError(active.failure_code, "dispatched", true);
+          }
+          if (!current || current.status !== "running") return fail("managed_task_ticket_inactive");
+          const previousHttp = isObject(current.public_result_summary?.program_public_http) ? current.public_result_summary!.program_public_http as JsonObject : {};
+          const persistedResponse = { response_ref: result.response_ref, ...result.facts };
+          try {
+            await store.updateRunRecord(active.run_id, { public_result_summary: {
+              ...current.public_result_summary, program_public_http: { ...previousHttp, response: persistedResponse }
+            } });
+          } catch {
+            active.dispatched = true;
+            active.outcome_uncertain = true;
+            active.failure_code = "managed_task_network_evidence_unavailable";
+            throw new ProgramPublicHttpError(active.failure_code, "dispatched", true);
+          }
+          active.public_response = { response_ref: result.response_ref, facts: result.facts, url: result.url, status: result.status, content_type: result.content_type };
+          return { ok: result.ok, status: result.status, url: result.url, body: result.body, response_ref: result.response_ref, content_type: result.content_type };
+        } catch (error) {
+          if (error instanceof ProgramPublicHttpError) {
+            if (error.dispatch_state === "dispatched") active.dispatched = true;
+            if (error.outcome_uncertain) active.outcome_uncertain = true;
+            active.failure_code = error.code;
+          } else if (!active.failure_code) active.failure_code = "managed_task_network_unavailable";
+          throw error;
+        } finally {
+          if (active.network_controller === controller) active.network_controller = undefined;
+        }
+      }
       if (request.method === "output.write") {
-        if (active.output || !active.snapshot || !isObject(request.input) || Buffer.byteLength(canonical(request.input), "utf8") > 1_048_576) return fail("managed_site_output_invalid");
+        const pageTask = active.taskFacts.kind === "page_snapshot";
+        const publicReadTask = active.taskFacts.kind === "program_public_read";
+        if (active.output || (pageTask ? !active.snapshot : !active.public_response) || !isObject(request.input) || Buffer.byteLength(canonical(request.input), "utf8") > 1_048_576) return fail("managed_site_output_invalid");
         const output = request.input;
         const page = output.source_refs;
         const evidence = output.evidence_refs;
-        const snapshot = active.snapshot.snapshot as JsonObject;
-        const pageValue = active.snapshot.page as JsonObject;
-        if (!schemaValid(output, active.sitePackage.output_schema) || !Array.isArray(page) || page.length !== 1 || !isObject(page[0]) ||
-            page[0].ref_id !== pageValue.page_ref || page[0].source_kind !== "harbor_page" || !Array.isArray(evidence) || evidence.length !== 1 ||
-            !isObject(evidence[0]) || evidence[0].ref_id !== snapshot.observation_ref || evidence[0].evidence_kind !== "snapshot_ref" ||
-            evidence[0].producer !== "harbor" || evidence[0].redaction !== "summary_only") {
+        const snapshot = active.snapshot && active.snapshot.snapshot as JsonObject | undefined;
+        const pageValue = active.snapshot && active.snapshot.page as JsonObject | undefined;
+        const responseRef = active.public_response?.response_ref;
+        const pageRefsValid = pageTask && !!pageValue && !!snapshot && Array.isArray(page) && page.length === 1 && isObject(page[0]) &&
+          page[0].ref_id === pageValue.page_ref && page[0].source_kind === "harbor_page" && Array.isArray(evidence) && evidence.length === 1 &&
+          isObject(evidence[0]) && evidence[0].ref_id === snapshot.observation_ref && evidence[0].evidence_kind === "snapshot_ref" &&
+          evidence[0].producer === "harbor" && evidence[0].redaction === "summary_only";
+        const publicReadRefsValid = publicReadTask && typeof responseRef === "string" && Array.isArray(page) && page.length === 1 && isObject(page[0]) &&
+          page[0].ref_id === responseRef && page[0].source_kind === "public_http_response" && Array.isArray(evidence) && evidence.length === 1 &&
+          isObject(evidence[0]) && evidence[0].ref_id === responseRef && evidence[0].evidence_kind === "public_http_response" &&
+          evidence[0].producer === "core" && evidence[0].redaction === "summary_only";
+        if (!schemaValid(output, active.sitePackage.output_schema) || !(pageRefsValid || publicReadRefsValid)) {
           active.failure_code = "site_task_output_schema_invalid";
           return fail("managed_task_output_invalid");
         }
         const post = evaluatePostCheck(output, active.sitePackage.post_check, {
-          sourceRef: String(pageValue.page_ref), evidenceRef: String(snapshot.observation_ref)
+          sourceRef: publicReadRefsValid ? responseRef! : String(pageValue!.page_ref),
+          evidenceRef: publicReadRefsValid ? responseRef! : String(snapshot!.observation_ref)
         });
         active.output = output;
         active.postCheck = post.postCheck;
@@ -492,14 +607,14 @@ export function createManagedTaskService(options: {
     deactivateWorkerTicket(active);
   }
   async function executeScriptTask(credentialHash: string, request: ParsedRequest, principalId: string, profileRef: string, origin: string,
-      runId: string, deadlineAt: number, sitePackage: ActiveManagedSiteTicket["sitePackage"], taskFacts: ReturnType<typeof assertPinnedTask>, initialSummary: JsonObject) {
+      runId: string, deadlineAt: number, sitePackage: ActiveManagedSiteTicket["sitePackage"], taskFacts: ReturnType<typeof assertPinnedTask>, initialSummary: JsonObject, targetRef: string) {
     const script = sitePackage.script;
     const canRunScript = options.workerIdentity?.mode === "distinct_uid_hardened" &&
       Number.isSafeInteger(options.workerIdentity.owner_uid) && Number.isSafeInteger(options.workerIdentity.agent_uid) &&
       options.workerIdentity.owner_uid !== options.workerIdentity.agent_uid && options.workerIdentity.owner_socket_acl === "verified";
     if (!script || !canRunScript || !sitePackage.code_admission_ref) {
       const failed = await finishFailure(runId, "worker_identity_unavailable", "failed", "not_dispatched", {
-        sourceRef: request.target!.target_ref,
+        sourceRef: targetRef,
         failure: publicFailure("runtime_execution", "worker_identity_unavailable", "pre_admission", "retry_only_after_hardened_agent_worker_is_available")
       });
       return response(failed, request.operation);
@@ -508,7 +623,7 @@ export function createManagedTaskService(options: {
     const active: ActiveManagedSiteTicket = {
       ticket_id: ticketId, run_id: runId, credential_hash: credentialHash, input: request, principal_id: principalId,
       profile_ref: profileRef, origin, deadline_at: deadlineAt, package: request.package!, sitePackage, taskFacts,
-      target_ref: request.target!.target_ref, cancelled: false, dispatched: false, worker_started: false, snapshot_started: false
+      target_ref: targetRef, cancelled: false, dispatched: false, worker_started: false, snapshot_started: false, network_started: false, network_controller: undefined
     };
     activeTickets.set(ticketId, active);
     const ticket: JsonObject = {
@@ -521,8 +636,9 @@ export function createManagedTaskService(options: {
         runtime_kind: script.runtime_kind, entrypoint: script.entrypoint, broker: script.broker,
         broker_capabilities: script.broker_capabilities, source: script.source.toString("utf8") },
       authorization: { principal_id: principalId, connection_id: request.connection_id, grant_id: request.grant_id, profile_ref: profileRef, origin },
-      target: { target_type: request.target!.target_type, target_ref: request.target!.target_ref },
-      input: { schema_ref: taskFacts.inputSchemaRef, value: {} }, context: { run_id: runId, task_ref: sitePackage.task_ref }, deadline_at: deadlineAt
+      ...(taskFacts.kind === "page_snapshot" ? { target: { target_type: taskFacts.targetType, target_ref: targetRef } } : {}),
+      input: { schema_ref: taskFacts.inputSchemaRef, value: request.input?.carrier === "webenvoy.managed-task-inline/v1" ? request.input.value : {} },
+      context: { run_id: runId, task_ref: sitePackage.task_ref }, deadline_at: deadlineAt
     };
     const current = await store.getRunRecord(runId);
     if (!current || current.status !== "running") {
@@ -539,12 +655,13 @@ export function createManagedTaskService(options: {
       deactivateWorkerTicket(active);
       return latest ? response(latest, "task.submit") : fail("managed_task_operation_unavailable");
     }
-    if (!active.snapshot || !active.output || !active.postCheck) return fail("managed_site_output_missing");
-    const snapshot = active.snapshot.snapshot as JsonObject;
-    const evidenceRef = String(snapshot.observation_ref);
+    const pageTask = active.taskFacts.kind === "page_snapshot";
+    if ((pageTask ? !active.snapshot : !active.public_response) || !active.output || !active.postCheck) return fail("managed_site_output_missing");
+    const evidenceRef = pageTask ? String((active.snapshot!.snapshot as JsonObject).observation_ref) : active.public_response!.response_ref;
+    const sourceRef = pageTask ? active.target_ref : active.public_response!.response_ref;
     if (active.postCheck.status !== "passed") {
       const failed = await finishFailure(active.run_id, "site_task_post_check_failed", "failed", active.dispatched ? "dispatched" : "not_dispatched", {
-        evidenceRef, sourceRef: active.target_ref, postCheck: active.postCheck,
+        evidenceRef, sourceRef, postCheck: active.postCheck,
         failure: publicFailure("result_projection", "site_task_post_check_failed", "verification", "query_original_run_only")
       });
       deactivateWorkerTicket(active);
@@ -552,7 +669,7 @@ export function createManagedTaskService(options: {
     }
     const completed = await completeRunWithResult(store, active.run_id, {
       result_ref: `managed-site-task-result:${active.run_id}`, result_kind: active.taskFacts.resultKind,
-      output_schema_id: active.taskFacts.outputSchemaRef, data: active.output, source_refs: [active.target_ref],
+      output_schema_id: active.taskFacts.outputSchemaRef, data: active.output, source_refs: [sourceRef],
       evidence_refs: [evidenceRef], post_check: active.postCheck,
       persisted_public_summary: { ...latest.public_result_summary, dispatch_state: active.dispatched ? "dispatched" : "not_dispatched" },
       persist_result_envelope: true
@@ -568,12 +685,12 @@ export function createManagedTaskService(options: {
     }
     const failureCode = active.failure_code ?? code;
     const dispatchState = active.dispatched ? "dispatched" : "not_dispatched";
-    const unknown = active.outcome_uncertain || active.dispatched && !active.snapshot;
+    const unknown = active.outcome_uncertain || active.taskFacts.kind === "page_snapshot" && active.dispatched && !active.snapshot;
     const status = unknown ? "unknown_outcome" : "failed";
     const failed = await finishFailure(active.run_id, failureCode, status, dispatchState, {
       ...(active.snapshot && isObject(active.snapshot.snapshot) && typeof active.snapshot.snapshot.observation_ref === "string"
-        ? { evidenceRef: active.snapshot.snapshot.observation_ref } : {}),
-      sourceRef: active.target_ref, ...(active.postCheck === undefined ? {} : { postCheck: active.postCheck }),
+        ? { evidenceRef: active.snapshot.snapshot.observation_ref } : active.public_response ? { evidenceRef: active.public_response.response_ref } : {}),
+      sourceRef: active.public_response?.response_ref ?? active.target_ref, ...(active.postCheck === undefined ? {} : { postCheck: active.postCheck }),
       failure: publicFailure(unknown ? "write_outcome" : "runtime_execution", failureCode,
         unknown ? "reconciliation" : "execution", "query_original_run_only")
     });
@@ -599,7 +716,7 @@ export function createManagedTaskService(options: {
     if (!run || terminalRunRecordStatuses.has(run.status)) { deactivateWorkerTicket(active); return; }
     // Once output.write was accepted Core has the exact snapshot and validated
     // output. Finalize that known read result without another Harbor call.
-    if (!active.cancelled && active.snapshot && active.output && active.postCheck) {
+    if (!active.cancelled && (active.snapshot || active.public_response) && active.output && active.postCheck) {
       await finalizeWorker(active);
       return;
     }
@@ -663,8 +780,7 @@ export function createManagedTaskService(options: {
       const pkg = request.package!;
       const profileRef = request.task_scope.profile_refs[0]!;
       const origin = request.task_scope.origins[0]!;
-      if (request.task_scope.skill_refs[0] !== pkg.package_ref || request.task_scope.source_refs[0] !== pkg.revision_ref ||
-          request.target!.target_type !== taskTargetType) return fail("managed_access_denied");
+      if (request.task_scope.skill_refs[0] !== pkg.package_ref || request.task_scope.source_refs[0] !== pkg.revision_ref) return fail("managed_access_denied");
 
       await authorize(credentialHash, request, profileRef, origin, pkg.package_ref, pkg.revision_ref);
       const runRef = runId(principal.principal_id, request.idempotency_key!);
@@ -692,8 +808,12 @@ export function createManagedTaskService(options: {
         if (sitePackage.package_ref !== pkg.package_ref || sitePackage.revision_ref !== pkg.revision_ref ||
             sitePackage.package_digest !== pkg.package_digest || sitePackage.task_ref !== pkg.task_ref) return fail("managed_skill_revision_unavailable");
         const taskFacts = assertPinnedTask(sitePackage.task, sitePackage);
-        if (origin !== taskFacts.origin || request.input!.schema_ref !== taskFacts.inputSchemaRef || !schemaValid({}, sitePackage.input_schema) ||
-            request.target!.target_type !== String((sitePackage.task.applicability as JsonObject).target_type)) return fail("managed_access_denied");
+        const targetRef = taskFacts.kind === "page_snapshot" ? request.target?.target_ref : taskFacts.targetRef;
+        const taskInputValue = request.input!.carrier === "webenvoy.managed-task-inline/v1" ? request.input!.value : {};
+        if (origin !== taskFacts.origin || request.input!.schema_ref !== taskFacts.inputSchemaRef || request.input!.carrier !== taskFacts.inputCarrier ||
+            Buffer.byteLength(canonical(taskInputValue), "utf8") > taskFacts.maxInputBytes || !schemaValid(taskInputValue, sitePackage.input_schema) ||
+            taskFacts.kind === "page_snapshot" && (!request.target || request.target.target_type !== taskFacts.targetType) ||
+            taskFacts.kind === "program_public_read" && request.target !== undefined || !targetRef) return fail("managed_access_denied");
         // A task's AccountSystem dependency is part of its admission inputs. Resolve
         // the enabled owner-local revision before the first durable Run write so
         // recovery and result queries retain the exact definition this Run used.
@@ -701,20 +821,25 @@ export function createManagedTaskService(options: {
         const taskIntentValue = {
           schema_version: "webenvoy.task-intent.v0", intent_id: `task-intent-${runRef}`, correlation_id: runRef, entrypoint: "api",
           user_intent: { summary: request.intent!.summary },
-          capability: { ref: taskIntentCapabilityRef, version: sitePackage.capability.version, source_ref: sitePackage.capability.source_ref, lock_ref: sitePackage.capability.lock_ref },
-          input: { summary: "No inline input" }, scope: { target_type: request.target!.target_type, target_ref: request.target!.target_ref },
+          capability: { ref: taskFacts.kind === "page_snapshot" ? pageTaskIntentCapabilityRef : sitePackage.capability.capability_ref,
+            version: sitePackage.capability.version, source_ref: sitePackage.capability.source_ref, lock_ref: sitePackage.capability.lock_ref },
+          input: { summary: request.input!.carrier === "none" ? "No inline input" : "Inline task parameters supplied; the value is not persisted." },
+          scope: { target_type: taskFacts.targetType, target_ref: targetRef },
           policy: request.intent!.policy, resource_requirement_refs: [], evidence_policy_ref: taskFacts.checkRef
         };
         const taskIntent = validateTaskIntent(taskIntentValue);
         if (!isObject(taskIntent) || (taskIntent as JsonObject).schema_version !== "webenvoy.task-intent.v0" || typeof (taskIntent as JsonObject).intent_id !== "string") return fail("managed_task_task_intent_invalid");
         const taskIntentRef = String((taskIntent as JsonObject).intent_id);
-        const inputSummary = { schema_ref: taskFacts.inputSchemaRef, carrier: "none", value_present: false };
+        const inputSummary = { schema_ref: taskFacts.inputSchemaRef, carrier: request.input!.carrier,
+          value_present: request.input!.carrier === "webenvoy.managed-task-inline/v1",
+          ...(request.input!.carrier === "webenvoy.managed-task-inline/v1" ? { value_sha256: `sha256:${digest(canonical(request.input!.value))}` } : {}) };
+        const capabilityRef = taskFacts.kind === "page_snapshot" ? pageTaskIntentCapabilityRef : sitePackage.capability.capability_ref;
         const initialSummary = {
           task_kind: "managed_site_task", principal_id: principal.principal_id, connection_id: request.connection_id, grant_id: request.grant_id,
           operation: "task.submit", request_hash: requestHash, package_ref: sitePackage.package_ref, revision_ref: sitePackage.revision_ref,
           package_digest: sitePackage.package_digest, task_ref: sitePackage.task_ref, source_ref: sitePackage.source_ref,
-          capability_ref: taskIntentCapabilityRef, profile_ref: profileRef, origin, target_type: request.target!.target_type,
-          target_ref: request.target!.target_ref, input_schema_ref: taskFacts.inputSchemaRef, input_carrier: "none", input: inputSummary,
+          capability_ref: capabilityRef, operation_id: taskFacts.operationId, profile_ref: profileRef, origin, target_type: taskFacts.targetType,
+          target_ref: targetRef, input_schema_ref: taskFacts.inputSchemaRef, input_carrier: request.input!.carrier, input: inputSummary,
           task_intent: taskIntent, dispatch_state: "not_dispatched",
           ...(accountSystem === undefined ? {} : { account_system: accountSystem }),
           ...(sitePackage.script ? {
@@ -725,30 +850,31 @@ export function createManagedTaskService(options: {
         };
         await store.createRunRecord({
           run_id: runRef, task_intent_ref: taskIntentRef, entrypoint_ref: "entrypoint:api", status: "admitted",
-          capability_ref: taskIntentCapabilityRef, capability_version: sitePackage.capability.version,
+          capability_ref: capabilityRef, capability_version: sitePackage.capability.version,
           capability_source_ref: sitePackage.capability.source_ref, capability_lock_ref: sitePackage.capability.lock_ref,
-          package_ref: sitePackage.package_ref, scope_target_ref: request.target!.target_ref,
+          package_ref: sitePackage.package_ref, scope_target_ref: targetRef,
           admission: { decision: "accepted", action_risk: "read", resource_requirement_refs: [] }, public_result_summary: initialSummary
         });
         await store.updateRunRecord(runRef, { status: "running" });
-        return { kind: "created" as const, sitePackage, taskFacts, initialSummary };
+        return { kind: "created" as const, sitePackage, taskFacts, targetRef, initialSummary };
       });
       if (setup.kind === "existing") return response(setup.run, request.operation);
-      const { sitePackage, taskFacts, initialSummary } = setup;
+      const { sitePackage, taskFacts, targetRef, initialSummary } = setup;
       if (sitePackage.script) {
         if (executionContext.agentSocketIngressVerified !== true) {
           const failed = await finishFailure(runRef, "managed_site_worker_host_unavailable", "failed", "not_dispatched", {
-            sourceRef: request.target!.target_ref,
+            sourceRef: targetRef,
             failure: publicFailure("runtime_execution", "managed_site_worker_host_unavailable", "pre_admission", "retry_only_through_verified_agent_socket")
           });
           return response(failed, request.operation);
         }
         return executeScriptTask(credentialHash, request, principal.principal_id, profileRef, origin,
-          runRef, deadlineAt, sitePackage, taskFacts, initialSummary);
+          runRef, deadlineAt, sitePackage, taskFacts, initialSummary, targetRef);
       }
 
       let browserResult: unknown;
       try {
+        if (!options.managedBrowserService) throw new ManagedAccessError("managed_task_browser_unavailable");
         const remainingMs = deadlineAt - Date.now();
         if (remainingMs <= 0) throw new ManagedAccessError("managed_task_timeout");
         let timeoutTimer: ReturnType<typeof setTimeout> | undefined;

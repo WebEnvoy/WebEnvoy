@@ -8,10 +8,20 @@ import { spawn } from 'node:child_process';
 import test from 'node:test';
 import definitions from '../../../packages/core/src/managed-capability-definitions.json' with { type: 'json' };
 import { validateManagedTaskRequest, validateOperationRequest } from './request-validation.mjs';
+import { INSTALLED_SKILL_VERSION } from './bundle.mjs';
 
 const entryRoot = dirname(fileURLToPath(import.meta.url));
 const cliPath = join(entryRoot, 'cli.mjs');
 const installationLink = join(entryRoot, '../webenvoy-installation.json');
+
+test('installed bundle version tracks the installed SKILL metadata and both package manifests', async () => {
+  const skill = await readFile(join(entryRoot, 'skills/webenvoy-browser/SKILL.md'), 'utf8');
+  assert.equal(skill.match(/^metadata:\s*\n\s+version:\s*([^\s]+)\s*$/m)?.[1], INSTALLED_SKILL_VERSION);
+  for (const file of ['../scripts/package-agent.mjs', '../scripts/package-standalone.mjs']) {
+    const source = await readFile(join(entryRoot, file), 'utf8');
+    assert.match(source, /skill_version:\s*INSTALLED_SKILL_VERSION/);
+  }
+});
 
 async function runCli(args) {
   return await new Promise((resolveResult, reject) => {
@@ -56,6 +66,17 @@ test('managed-task CLI validator accepts only the fixed S2 envelope and operatio
     intent: { summary: 'Read the catalog.', policy: { risk: 'read', execution_intent: 'read' } }
   };
   assert.deepEqual(validateManagedTaskRequest({ ...common, operation: 'task.submit' }), { ...common, operation: 'task.submit' });
+  const publicRead = { ...common, target: undefined,
+    task_scope: { operations: ['task.submit'], skill_refs: ['lode://site-skill/github/opencli-trending-repos'],
+      source_refs: ['lode://site-skill/github/opencli-trending-repos@0.1.0#0123456789abcdef0123456789abcdef01234567'],
+      profile_refs: ['profile:public-read'], origins: ['https://github.com'] },
+    package: { package_ref: 'lode://site-skill/github/opencli-trending-repos',
+      revision_ref: 'lode://site-skill/github/opencli-trending-repos@0.1.0#0123456789abcdef0123456789abcdef01234567',
+      package_digest: `sha256:${'b'.repeat(64)}`, task_ref: 'read-trending' },
+    input: { schema_ref: 'lode://schema/github/opencli-trending-input@0.1.0', carrier: 'webenvoy.managed-task-inline/v1', value: { since: 'daily' } } };
+  delete publicRead.target;
+  assert.deepEqual(validateManagedTaskRequest({ ...publicRead, operation: 'task.submit' }), { ...publicRead, operation: 'task.submit' },
+    'the installed CLI task envelope permits a pinned public-origin task without a fabricated Page target');
   assert.throws(() => validateManagedTaskRequest({ ...common, operation: 'task.submit', connection_id: 'connection:caller' }), /managed_task_invalid_input/);
   assert.throws(() => validateManagedTaskRequest({ ...common, schema_version: 'webenvoy.managed-task-operation/v2', operation: 'task.submit' }), /managed_task_version_unsupported/);
   assert.throws(() => validateManagedTaskRequest({ ...common, operation: 'task.submit', task_scope: { ...common.task_scope, operations: ['task.query'] } }), /managed_task_invalid_input/);
@@ -188,7 +209,8 @@ test('Agent task help documents the managed task API and recovery selector', asy
   const stop = await runCli(['help', 'agent', 'task', 'stop']);
   assert.equal(submit.code, 0);
   assert.match(submit.stdout, /POST\s+\/managed-tasks\/operations/);
-  assert.match(submit.stdout, /Core checks the current Grant and Page target/);
+  assert.match(submit.stdout, /Page tasks supply the current opaque Page target/);
+  assert.match(submit.stdout, /program-side public-read tasks omit target/);
   assert.match(submit.stdout, /verified distinct non-admin\s+Agent UID/);
   assert.match(submit.stdout, /trusted_local refuses script dispatch/);
   assert.equal(query.code, 0);
@@ -247,16 +269,26 @@ test('owner site-task admission CLI sends owner Git inspection through Core and 
       '--package-ref', 'lode://site-skill/github/trending',
       '--base-revision-ref', 'lode://site-skill/github/trending@1.0.0#' + 'c'.repeat(40),
       '--task-ref', 'read-daily-trending-top5']);
+    const firstAdmission = await runCli(['site-task-admission', 'inspect-candidate', '--data-dir', dir,
+      '--repository-ref', 'webenvoy:site-task-authoring-repository/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      '--package-ref', 'lode://site-skill/github/opencli-trending-repos', '--first-admission',
+      '--task-ref', 'read-opencli-trending']);
     assert.equal(help.code, 0);
-    assert.match(help.stdout, /private Git worktree/);
-    assert.match(help.stdout, /Code admission is a separate owner/);
+    assert.match(help.stdout, /--first-admission/);
+    assert.match(help.stdout, /Script code admission is a separate owner/);
     assert.equal(result.code, 0);
+    assert.equal(firstAdmission.code, 0);
     assert.equal(JSON.parse(result.stdout).result.candidate_ref.startsWith('webenvoy:site-task-candidate/'), true);
+    assert.equal(JSON.parse(firstAdmission.stdout).result.candidate_ref.startsWith('webenvoy:site-task-candidate/'), true);
     assert.deepEqual(requests, [{ path: '/owner/site-task-admissions/operations', method: 'POST', body: {
       schema_version: 'webenvoy.site-task-admission-owner-operation/v1', operation: 'inspect_candidate',
       repository_ref: 'webenvoy:site-task-authoring-repository/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       package_ref: 'lode://site-skill/github/trending',
       base_revision_ref: 'lode://site-skill/github/trending@1.0.0#' + 'c'.repeat(40), task_ref: 'read-daily-trending-top5'
+    } }, { path: '/owner/site-task-admissions/operations', method: 'POST', body: {
+      schema_version: 'webenvoy.site-task-admission-owner-operation/v1', operation: 'inspect_candidate',
+      repository_ref: 'webenvoy:site-task-authoring-repository/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      package_ref: 'lode://site-skill/github/opencli-trending-repos', base_revision_ref: null, task_ref: 'read-opencli-trending'
     } }]);
   } finally {
     await new Promise(resolve => server.close(resolve));

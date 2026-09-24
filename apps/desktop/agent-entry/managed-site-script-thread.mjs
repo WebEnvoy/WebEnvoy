@@ -1,13 +1,14 @@
 import { createContext, Script, SourceTextModule } from 'node:vm';
 import { parentPort, workerData } from 'node:worker_threads';
 
-const maxFrameBytes = 4 * 1024 * 1024;
+const maxFrameBytes = 32 * 1024 * 1024;
 const maxSourceBytes = 1024 * 1024;
 const maxOutputBytes = 1024 * 1024;
 const scriptExecutionTimeoutMs = 2_000;
 let nextId = 0;
 let outputAttempted = false;
 let snapshotAttempted = false;
+let networkReadAttempted = false;
 let requestCapabilities = new Set();
 const pendingBrokerCalls = new Map();
 
@@ -19,11 +20,12 @@ function emit(frame) {
 }
 
 function assertRequest(value) {
+  const pageRead = value.broker_capabilities?.[0] === 'runtime.invoke' && value.broker_capabilities?.[1] === 'output.write';
+  const publicRead = value.broker_capabilities?.[0] === 'network.read' && value.broker_capabilities?.[1] === 'output.write';
   if (Object.keys(value).some(key => !['source', 'input', 'context', 'broker_capabilities', 'execution_timeout_ms'].includes(key)) ||
       typeof value.source !== 'string' || Buffer.byteLength(value.source) > maxSourceBytes ||
       !Object.hasOwn(value, 'input') || !value.context || typeof value.context !== 'object' || Array.isArray(value.context) ||
-      !Array.isArray(value.broker_capabilities) || value.broker_capabilities.length !== 2 ||
-      value.broker_capabilities[0] !== 'runtime.invoke' || value.broker_capabilities[1] !== 'output.write' ||
+      !Array.isArray(value.broker_capabilities) || value.broker_capabilities.length !== 2 || !(pageRead || publicRead) ||
       !Number.isSafeInteger(value.execution_timeout_ms) || value.execution_timeout_ms < 1 || value.execution_timeout_ms > 60_000) {
     throw new Error('managed_site_worker_request_invalid');
   }
@@ -55,6 +57,9 @@ async function broker(method, encodedInput) {
         value.operation_id !== 'instance.snapshot' || value.action !== 'read') {
       throw new Error('managed_site_capability_not_admitted');
     }
+  } else if (method === 'network.read') {
+    if (networkReadAttempted || Buffer.byteLength(encodedInput) > 4096) throw new Error('managed_site_capability_call_already_used');
+    networkReadAttempted = true;
   } else if (method === 'input.read') {
     if (encodedInput !== 'null') throw new Error('managed_site_input_invalid');
   } else if (method === 'output.write') {
@@ -97,21 +102,25 @@ async function main() {
 
   Object.defineProperties(sandbox, {
     __siteBridge: { value: broker, configurable: true },
-    __siteRun: { value: module.namespace.run, configurable: true }
+    __siteRun: { value: module.namespace.run, configurable: true },
+    __siteCapabilities: { value: JSON.stringify([...requestCapabilities]), configurable: true }
   });
   new Script(`
     (() => {
       const bridge = globalThis.__siteBridge;
       const run = globalThis.__siteRun;
+      const caps = new Set(JSON.parse(globalThis.__siteCapabilities));
       delete globalThis.__siteBridge;
       delete globalThis.__siteRun;
+      delete globalThis.__siteCapabilities;
       const call = async (method, value) => {
         const encoded = JSON.stringify(value);
         if (typeof encoded !== 'string') throw new Error('managed_site_broker_input_invalid');
         return JSON.parse(await bridge(method, encoded));
       };
       const broker = Object.freeze({
-        runtime: Object.freeze({ invoke: value => call('runtime.invoke', value) }),
+        ...(caps.has('runtime.invoke') ? { runtime: Object.freeze({ invoke: value => call('runtime.invoke', value) }) } : {}),
+        ...(caps.has('network.read') ? { network: Object.freeze({ read: value => call('network.read', value) }) } : {}),
         output: Object.freeze({ write: value => call('output.write', value) })
       });
       globalThis.__invokeApprovedSiteTask = (inputJson, contextJson) => run(JSON.parse(inputJson), broker, JSON.parse(contextJson));

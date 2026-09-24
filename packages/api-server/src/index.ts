@@ -165,8 +165,9 @@ if (import.meta.url === entrypoint) {
       (workerMode === "trusted_local" || workerMode === "distinct_uid_hardened") && typeof ownerSocketAcl === "string"
     ? { owner_uid: ownerUid, agent_uid: agentUid, mode: workerMode, owner_socket_acl: ownerSocketAcl }
     : undefined;
-  const managedTaskService = managedAccessStore && runRecordStore && managedSkillService && managedBrowserService
-    ? createManagedTaskService({ accessStore: managedAccessStore, runRecordStore, skillLibraryService: managedSkillService, managedBrowserService,
+  const managedTaskService = managedAccessStore && runRecordStore && managedSkillService
+    ? createManagedTaskService({ accessStore: managedAccessStore, runRecordStore, skillLibraryService: managedSkillService,
+        ...(managedBrowserService === undefined ? {} : { managedBrowserService }),
         ...(accountSystemDefinitionService === undefined ? {} : { accountSystemDefinitionService }),
         ...(workerIdentity === undefined ? {} : { workerIdentity }) })
     : undefined;

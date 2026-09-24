@@ -4,7 +4,10 @@ import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 
 const maxTicketBytes = 2 * 1024 * 1024;
-const maxFrameBytes = 4 * 1024 * 1024;
+// A 4 MiB decoded HTTP response can expand to at most 6x when JSON escapes
+// control characters. Keep the worker protocol bounded while allowing that
+// one broker response to cross the process boundary intact.
+const maxFrameBytes = 32 * 1024 * 1024;
 
 function object(value) { return Boolean(value && typeof value === 'object' && !Array.isArray(value)); }
 function sha256(value) { return createHash('sha256').update(value).digest('hex'); }
@@ -59,7 +62,7 @@ function lineQueue(stream) {
 }
 
 function assertTicket(ticket) {
-  if (!exactKeys(ticket, ['ticket_id', 'run_id', 'package', 'script', 'authorization', 'target', 'input', 'context', 'deadline_at']) ||
+  if (!exactKeys(ticket, ['ticket_id', 'run_id', 'package', 'script', 'authorization', 'input', 'context', 'deadline_at'], ['target']) ||
       typeof ticket.ticket_id !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/.test(ticket.ticket_id) ||
       typeof ticket.run_id !== 'string' || typeof ticket.deadline_at !== 'number' || !Number.isSafeInteger(ticket.deadline_at) ||
       ticket.deadline_at <= Date.now() || ticket.deadline_at > Date.now() + 60_000 ||
@@ -69,10 +72,14 @@ function assertTicket(ticket) {
       !/^sha256:[a-f0-9]{64}$/.test(ticket.script.script_sha256) ||
       sha256(ticket.script.source) !== ticket.script.script_sha256.slice('sha256:'.length) ||
       ticket.script.runtime_kind !== 'webenvoy.site-skill-script-abi/v1' || ticket.script.entrypoint !== 'run' ||
-      ticket.script.broker !== 'webenvoy.site-skill-broker/v1' || !Array.isArray(ticket.script.broker_capabilities) ||
-      ticket.script.broker_capabilities.length !== 2 || ticket.script.broker_capabilities[0] !== 'runtime.invoke' || ticket.script.broker_capabilities[1] !== 'output.write' ||
+      !Array.isArray(ticket.script.broker_capabilities) || ticket.script.broker_capabilities.length !== 2 ||
       !exactKeys(ticket.authorization, ['principal_id', 'connection_id', 'grant_id', 'profile_ref', 'origin']) ||
-      !exactKeys(ticket.target, ['target_type', 'target_ref']) || ticket.target.target_type !== 'web_page' ||
+      (ticket.script.broker === 'webenvoy.site-skill-broker/v1' &&
+        (ticket.script.broker_capabilities[0] !== 'runtime.invoke' || ticket.script.broker_capabilities[1] !== 'output.write' ||
+          !exactKeys(ticket.target, ['target_type', 'target_ref']) || ticket.target.target_type !== 'web_page')) ||
+      (ticket.script.broker === 'webenvoy.site-skill-broker/v1.1' &&
+        (ticket.script.broker_capabilities[0] !== 'network.read' || ticket.script.broker_capabilities[1] !== 'output.write' || Object.hasOwn(ticket, 'target'))) ||
+      !['webenvoy.site-skill-broker/v1', 'webenvoy.site-skill-broker/v1.1'].includes(ticket.script.broker) ||
       !exactKeys(ticket.input, ['schema_ref', 'value']) || !object(ticket.context) || ticket.context.run_id !== ticket.run_id ||
       Buffer.byteLength(JSON.stringify(ticket)) > maxTicketBytes) throw new Error('managed_site_worker_ticket_invalid');
 }
@@ -140,10 +147,10 @@ export function createManagedSiteWorkerSupervisor({ installRoot, ownerUid, agent
               !ticket.script.broker_capabilities.includes(frame.method)) throw new Error('managed_site_worker_protocol_invalid');
           try {
             const result = await onBroker({ ticket_id: ticket.ticket_id, method: frame.method, input: frame.input });
-            if (frame.method === 'runtime.invoke') brokerDispatched = true;
+            if (frame.method === 'runtime.invoke' || frame.method === 'network.read') brokerDispatched = true;
             child.stdin.write(`${JSON.stringify({ type: 'broker.response', id: frame.id, ok: true, result: result ?? null })}\n`);
           } catch (error) {
-            if (frame.method === 'runtime.invoke' && error?.dispatch_state !== 'not_dispatched') brokerDispatched = true;
+            if ((frame.method === 'runtime.invoke' || frame.method === 'network.read') && error?.dispatch_state !== 'not_dispatched') brokerDispatched = true;
             child.stdin.write(`${JSON.stringify({ type: 'broker.response', id: frame.id, ok: false, code: errorCode(error, 'managed_site_broker_denied') })}\n`);
           }
           continue;

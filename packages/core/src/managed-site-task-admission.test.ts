@@ -156,6 +156,8 @@ test("owner source/code admission pins a clean Git candidate, preserves lifecycl
     const store = createFileManagedSiteTaskAdmissionStore({ directory: join(directory, "owner-state"), managedDataRoot: join(directory, "managed"), runtime });
     const selected = await store.selectAuthoringRepository({ path: root }) as Json;
     assert.equal(Object.hasOwn(selected, "path"), false, "owner repository path never leaves Core state");
+    await assert.rejects(store.inspectCandidate({ repository_ref: selected.repository_ref, package_ref: packageRef, base_revision_ref: null, task_ref: taskRef }),
+      /managed_site_task_base_revision_unapproved/, "first admission cannot bypass the existing base check for a statically approved package");
     const inspected = await store.inspectCandidate({ repository_ref: selected.repository_ref, package_ref: packageRef, base_revision_ref: basePin.revision_ref, task_ref: taskRef }) as Json;
     assert.equal(inspected.authoring_commit, authoringCommit);
     assert.equal(inspected.source_commit, sourceCommit);
@@ -207,6 +209,132 @@ test("owner source/code admission pins a clean Git candidate, preserves lifecycl
       store.inspectCandidate({ repository_ref: selected.repository_ref, package_ref: packageRef, base_revision_ref: basePin.revision_ref, task_ref: taskRef }),
       /managed_site_task_source_tree_mismatch/
     );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("owner can explicitly admit a first fixed package without a static base, with separate source and code receipts", async () => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), "webenvoy-site-task-first-admission-")));
+  const root = join(directory, "lode-worktree");
+  const firstPackageRef = "lode://site-skill/github/opencli-trending-repos";
+  const firstPackagePath = "sites/github/opencli-trending-repos";
+  const firstTaskRef = "read-opencli-trending";
+  const capabilityRef = "lode://site-capability/github/opencli-trending-repos@0.1.0";
+  const lockRef = "lode://lock/site-skill/github/opencli-trending-repos@0.1.0";
+  const sourceRefFor = (commitId: string) => "lode://source/site-skill/github/opencli-trending-repos@0.1.0#" + commitId;
+  const revisionRefFor = (commitId: string) => firstPackageRef + "@0.1.0#" + commitId;
+  const script = "export async function run(input, broker) { return { ok: true }; }\n";
+  const packageFiles = new Map<string, { role: string; bytes: Buffer }>();
+  const setFile = (path: string, role: string, value: string | Json) => {
+    packageFiles.set(path, { role, bytes: Buffer.from(typeof value === "string" ? value : JSON.stringify(value, null, 2) + "\n") });
+  };
+  setFile("SKILL.md", "entrypoint", "# Read OpenCLI Trending\n");
+  setFile("capabilities/public-http.json", "capability_declaration", {
+    capability_ref: capabilityRef, capability_id: "opencli-trending-repos", version: "0.1.0",
+    source_ref: sourceRefFor("0".repeat(40)), lock_ref: lockRef, operation_id: "network.public_read", action: "read"
+  });
+  setFile("package-lock.json", "package_lock", {
+    schema_version: "lode.site-skill-package.lock.v1", lock_ref: lockRef, package_ref: firstPackageRef,
+    revision_ref: revisionRefFor("0".repeat(40)), version: "0.1.0", source_ref: sourceRefFor("0".repeat(40)), capability_ref: capabilityRef
+  });
+  setFile("scripts/read.mjs", "script_source", script);
+
+  try {
+    await mkdir(root, { recursive: true });
+    await git(root, "init", "--quiet");
+    await git(root, "config", "user.name", "Site Admission Test");
+    await git(root, "config", "user.email", "site-admission@example.invalid");
+    await writeFile(join(root, "README.md"), "Lode source fixture\n");
+    await commit(root, "initialize Lode fixture");
+    for (const [path, item] of packageFiles) {
+      const absolute = join(root, firstPackagePath, path);
+      await mkdir(join(absolute, ".."), { recursive: true });
+      await writeFile(absolute, item.bytes);
+    }
+    const sourceCommit = await commit(root, "pin reviewed OpenCLI-derived sources");
+    setFile("capabilities/public-http.json", "capability_declaration", {
+      capability_ref: capabilityRef, capability_id: "opencli-trending-repos", version: "0.1.0",
+      source_ref: sourceRefFor(sourceCommit), lock_ref: lockRef, operation_id: "network.public_read", action: "read"
+    });
+    setFile("package-lock.json", "package_lock", {
+      schema_version: "lode.site-skill-package.lock.v1", lock_ref: lockRef, package_ref: firstPackageRef,
+      revision_ref: revisionRefFor(sourceCommit), version: "0.1.0", source_ref: sourceRefFor(sourceCommit), capability_ref: capabilityRef
+    });
+    for (const [path, item] of packageFiles) await writeFile(join(root, firstPackagePath, path), item.bytes);
+    const packageDigest = sha256("fixed-manifest-verified-package");
+    const manifest = {
+      manifest_version: "lode.site-skill-package.manifest.v1", package_type: "site-skill", package_ref: firstPackageRef,
+      revision_ref: revisionRefFor(sourceCommit), version: "0.1.0",
+      source: { repository: "WebEnvoy/Lode", package_path: firstPackagePath, commit: sourceCommit, source_ref: sourceRefFor(sourceCommit) },
+      package_lock: { path: "package-lock.json", lock_ref: lockRef },
+      integrity: { files: [...packageFiles.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([path, item]) => ({
+        path, role: item.role, bytes: item.bytes.length, sha256: sha256(item.bytes)
+      })), package_digest: packageDigest },
+      assets: [{ role: "capability_declaration", path: "capabilities/public-http.json", capability_ref: capabilityRef }],
+      scripts: [{
+        script_ref: "lode://script/site-skill/github/opencli-trending-repos/read@0.1.0", path: "scripts/read.mjs",
+        source_commit: sourceCommit, version: "0.1.0", sha256: sha256(script), runtime_kind: "webenvoy.site-skill-script-abi/v1",
+        entrypoint: "run", input_schema_ref: "lode://schema/site-skill/github/opencli-trending-repos/input@0.1.0",
+        output_schema_ref: "lode://schema/site-skill/github/opencli-trending-repos/output@0.1.0",
+        capability_refs: [capabilityRef], action: "read", broker: "webenvoy.site-skill-broker/v1.1", broker_capabilities: ["network.read", "output.write"],
+        target_binding: { target_type: "public_http_origin", requires_current_page: false }, timeout_ms: 10000, cancel: "cooperative",
+        data_handling: { input_sensitivity: "public", output_sensitivity: "public", external_egress: "declared" }
+      }]
+    };
+    await writeJson(join(root, firstPackagePath, "manifest.json"), manifest);
+    await mkdir(join(root, "registry"), { recursive: true });
+    await writeJson(join(root, "registry/local-packages.json"), { schema_version: "lode.local-package-index.v0",
+      entries: [{ package_ref: firstPackageRef, package_type: "site-skill", package_path: firstPackagePath,
+        manifest_path: firstPackagePath + "/manifest.json", revision_ref: revisionRefFor(sourceCommit),
+        package_digest: packageDigest, task_refs: [firstTaskRef] }] });
+    const authoringCommit = await commit(root, "materialize the immutable Lode source pin");
+    const runtime: SiteTaskAdmissionRuntime = {
+      approvedBasePackageFor() { return undefined; },
+      async verifyPackageRoot(lodeAssetsPath, pin) {
+        assert.equal(lodeAssetsPath, root);
+        const files = await Promise.all([...packageFiles.keys()].map(async path => {
+          const bytes = await readFile(join(root, firstPackagePath, path));
+          return { path, bytes, sha256: sha256(bytes) };
+        }));
+        return { package_ref: pin.package_ref, revision_ref: pin.revision_ref, package_digest: pin.package_digest,
+          source_ref: pin.source_ref, source_commit: pin.source_commit, task_ref: pin.task_ref, files };
+      },
+      scriptCodeAdmissionRef(pin) {
+        assert(pin.script);
+        return "webenvoy.code-admission/site-skill-script/v1#sha256:" +
+          createHash("sha256").update(canonical({ package_ref: pin.package_ref, revision_ref: pin.revision_ref,
+            package_digest: pin.package_digest, script_ref: pin.script.script_ref, script_sha256: pin.script.sha256 })).digest("hex");
+      }
+    };
+    const store = createFileManagedSiteTaskAdmissionStore({ directory: join(directory, "owner-state"), managedDataRoot: join(directory, "managed"), runtime });
+    const selected = await store.selectAuthoringRepository({ path: root }) as Json;
+    await assert.rejects(store.inspectCandidate({ repository_ref: selected.repository_ref, package_ref: firstPackageRef,
+      base_revision_ref: "lode://site-skill/github/other@1.0.0#" + "a".repeat(40), task_ref: firstTaskRef }),
+    /managed_site_task_base_revision_unapproved/, "a forged base cannot convert initial admission to an approved update");
+    const candidate = await store.inspectCandidate({ repository_ref: selected.repository_ref, package_ref: firstPackageRef,
+      base_revision_ref: null, task_ref: firstTaskRef }) as Json;
+    assert.equal(candidate.base_revision_ref, null);
+    assert.equal(candidate.authoring_commit, authoringCommit);
+    assert.equal(candidate.source_commit, sourceCommit);
+    assert(candidate.changed_paths.includes("scripts/read.mjs"));
+    const diff = await store.candidateDiff({ candidate_ref: candidate.candidate_ref }) as Json;
+    assert.match(String(diff.diff), /export async function run/);
+    assert.match(String(diff.diff), /registry\/local-packages\.json/);
+    const request = { package_ref: firstPackageRef, revision_ref: candidate.revision_ref, package_digest: candidate.package_digest, task_ref: firstTaskRef };
+    assert.equal(await store.resolveAdmitted(request), undefined, "inspection alone does not admit the package");
+    await assert.rejects(store.candidateDiff({ candidate_ref: candidate.candidate_ref.replace(/[a-f0-9]{64}$/, "f".repeat(64)) }),
+      /managed_site_task_source_candidate_unavailable/);
+    const sourceReceipt = await store.admitSource({ candidate_ref: candidate.candidate_ref }) as Json;
+    assert.equal(sourceReceipt.base_revision_ref, null);
+    assert.equal(sourceReceipt.code_active, false, "source admission does not imply script-code admission");
+    assert.equal((await store.resolveAdmitted(request))?.code_admission_ref, undefined);
+    assert.equal((await store.admitSource({ candidate_ref: candidate.candidate_ref }) as Json).admission_ref, sourceReceipt.admission_ref,
+      "the same explicit admission reuses its receipt");
+    const codeReceipt = await store.admitCode({ admission_ref: sourceReceipt.admission_ref }) as Json;
+    assert.equal(codeReceipt.code_active, true);
+    const restarted = createFileManagedSiteTaskAdmissionStore({ directory: join(directory, "owner-state"), managedDataRoot: join(directory, "managed"), runtime });
+    assert.equal((await restarted.resolveAdmitted(request))?.code_admission_ref, codeReceipt.code_admission_ref, "admission receipts survive restart");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

@@ -733,16 +733,22 @@ function persistedManagedSiteTaskPinIsConsistent(record: RunRecord): boolean {
   if (!summary || summary.task_kind !== "managed_site_task" || typeof summary.package_ref !== "string" ||
       typeof summary.revision_ref !== "string" || typeof summary.package_digest !== "string" ||
       typeof summary.source_ref !== "string" || typeof summary.task_ref !== "string" ||
-      typeof summary.input_schema_ref !== "string" || summary.input_carrier !== "none" ||
+      typeof summary.input_schema_ref !== "string" || !["none", "webenvoy.managed-task-inline/v1"].includes(String(summary.input_carrier)) ||
       record.package_ref !== summary.package_ref || !/^lode:\/\/site-skill\/[A-Za-z0-9._/-]+$/.test(summary.package_ref) ||
       !/^sha256:[a-f0-9]{64}$/.test(summary.package_digest) || !/^[A-Za-z0-9._-]{1,256}$/.test(summary.task_ref)) return false;
   const revision = /^(.+)@([0-9]+\.[0-9]+\.[0-9]+)#([a-f0-9]{40})$/.exec(summary.revision_ref);
   const source = /^lode:\/\/source\/(.+)@([0-9]+\.[0-9]+\.[0-9]+)#([a-f0-9]{40})$/.exec(summary.source_ref);
   const lock = record.capability_lock_ref;
+  const pageSnapshot = (summary.operation_id === undefined || summary.operation_id === "instance.snapshot") && summary.target_type === "web_page" &&
+    record.capability_ref === approvedManagedSiteTaskCapabilityRef && record.capability_version === approvedManagedSiteTaskCapabilityVersion && summary.input_carrier === "none";
+  const publicRead = summary.operation_id === "network.public_read" && summary.target_type === "public_http_origin" &&
+    record.capability_ref === summary.capability_ref && typeof summary.capability_ref === "string" &&
+    /^lode:\/\/site-capability\/[A-Za-z0-9._/-]+@[0-9]+\.[0-9]+\.[0-9]+$/.test(summary.capability_ref) &&
+    record.capability_version === String(summary.capability_ref).split("@").at(-1) &&
+    summary.input_carrier === "webenvoy.managed-task-inline/v1" && typeof summary.origin === "string" && summary.target_ref === summary.origin;
   return Boolean(revision && revision[1] === summary.package_ref && source &&
     /^lode:\/\/lock\/site-skill\/[A-Za-z0-9._/-]+@[0-9]+\.[0-9]+\.[0-9]+$/.test(lock ?? "") &&
-    record.capability_ref === approvedManagedSiteTaskCapabilityRef &&
-    record.capability_version === approvedManagedSiteTaskCapabilityVersion &&
+    (pageSnapshot || publicRead) &&
     record.capability_source_ref === summary.source_ref &&
     typeof summary.target_ref === "string" && summary.target_ref.length > 0 &&
     typeof summary.origin === "string" && typeof summary.profile_ref === "string");

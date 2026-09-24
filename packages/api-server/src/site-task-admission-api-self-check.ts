@@ -49,9 +49,23 @@ try {
     base_revision_ref: "lode://site-skill/github/trending@1.0.0#0dcd6232cdfd9c88982792d2ce88a39d528a6433",
     task_ref: "read-daily-trending-top5"
   } });
+  const firstAdmission = await post({
+    schema_version: "webenvoy.site-task-admission-owner-operation/v1", operation: "inspect_candidate",
+    repository_ref: "webenvoy:site-task-authoring-repository/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    package_ref: "lode://site-skill/github/opencli-trending-repos",
+    base_revision_ref: null,
+    task_ref: "read-opencli-trending"
+  }, ownerToken);
+  assert.equal(firstAdmission.status, 200, "an explicit null base is allowed only on the owner admission route");
+  assert.deepEqual(calls[2], { operation: "inspect_candidate", input: {
+    repository_ref: "webenvoy:site-task-authoring-repository/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    package_ref: "lode://site-skill/github/opencli-trending-repos",
+    base_revision_ref: null,
+    task_ref: "read-opencli-trending"
+  } });
   const extra = await post({ ...base, operation: "admit_source", candidate_ref: "candidate", package_digest: "sha256:untrusted" }, ownerToken);
   assert.equal(extra.status, 400);
-  assert.equal(calls.length, 2, "invalid owner input never reaches the admission service");
+  assert.equal(calls.length, 3, "invalid owner input never reaches the admission service");
   const get = await fetch(route, { headers: { authorization: `Bearer ${ownerToken}` } });
   assert.equal(get.status, 405);
 } finally {

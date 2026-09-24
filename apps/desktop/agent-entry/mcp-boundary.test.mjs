@@ -10,6 +10,7 @@ import { createServer } from 'node:net';
 import { createServer as createHttpServer } from 'node:http';
 import test from 'node:test';
 import { agentDataSocket } from './os-boundary.mjs';
+import { INSTALLED_SKILL_VERSION } from './bundle.mjs';
 
 const sourceRoot = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(sourceRoot, '../../..');
@@ -44,7 +45,7 @@ async function makeBundle({ stubClient = false } = {}) {
     await writeFile(join(bundle, 'agent-entry/client.mjs'), clientStub);
     files['agent-entry/client.mjs'] = sha(clientStub);
   }
-  const manifest = { schema: 'webenvoy-installed-agent/v1', version: '0.2.0', skill_version: '0.2.0', files };
+  const manifest = { schema: 'webenvoy-installed-agent/v1', version: '0.2.0', skill_version: INSTALLED_SKILL_VERSION, files };
   await writeFile(join(bundle, 'agent-manifest.json'), JSON.stringify(manifest));
   return { bundle, manifest };
 }

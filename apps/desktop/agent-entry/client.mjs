@@ -7,7 +7,7 @@ import { agentDataSocket, ownerControlSocket, verifyAgentClientFile, verifyAgent
 import { root, verifyBundle } from './bundle.mjs';
 import { createManagedSiteWorkerSupervisor } from './managed-site-worker-supervisor.mjs';
 
-function requestSocket(socketPath, path, { method = 'GET', body, credential } = {}) {
+function requestSocket(socketPath, path, { method = 'GET', body, credential } = {}, maxResponseBytes = 1024 * 1024) {
   return new Promise((resolveResponse, reject) => {
     let settled = false;
     const fail = error => { if (!settled) { settled = true; reject(error); } };
@@ -19,7 +19,7 @@ function requestSocket(socketPath, path, { method = 'GET', body, credential } = 
       res.on('data', chunk => {
         const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
         bytes += value.length;
-        if (bytes > 1024 * 1024) { fail(new Error('response_too_large')); return req.destroy(); }
+        if (bytes > maxResponseBytes) { fail(new Error('response_too_large')); return req.destroy(); }
         chunks.push(value);
       });
       res.on('aborted', () => fail(new Error('runtime_response_aborted')));
@@ -50,7 +50,7 @@ export function agentRequest(endpointOrDataDir, path, options = {}) {
     verifyAgentIdentity(resolvedAgentUid);
   }
   verifyAgentSocket(socketPath, { ownerUid: resolvedOwnerUid, agentUid: resolvedAgentUid });
-  return requestSocket(socketPath, path, requestOptions);
+  return requestSocket(socketPath, path, requestOptions, path === '/managed-tasks/worker/broker' ? 32 * 1024 * 1024 : 1024 * 1024);
 }
 
 export function localRequest(client, path, options = {}) {
