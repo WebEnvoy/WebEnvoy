@@ -242,7 +242,7 @@ async function runGithubTrendingAcceptance({ ownerData, agentHost, clientFile, p
 
   const prefix = `github-trending-live-${Date.now()}`;
   const operations = ['instance.start', 'instance.observe', 'instance.snapshot', 'instance.stop', 'task.submit', 'task.query', 'task.stop',
-    'skill.list', 'skill.inspect', 'skill.install', 'skill.enable', 'skill.read'];
+    'skill.inspect', 'skill.install', 'skill.enable', 'skill.read'];
   const expiresAt = new Date(Date.now() + 1_800_000).toISOString();
   async function createGrant(name, body) {
     const grantPath = join(ownerData, `${name}.json`);
@@ -391,11 +391,15 @@ async function runGithubTrendingAcceptance({ ownerData, agentHost, clientFile, p
     package: { package_ref: site.package_ref, revision_ref: site.revision_ref, package_digest: site.integrity.package_digest,
       source_ref: site.source.source_ref, source_commit: site.source.commit, locked_lode_commit: lodeCommit,
       task_ref: task.task_ref, script_ref: script.script_ref, script_sha256: script.sha256, runtime_kind: script.runtime_kind,
-      source_admission_ref: sourceAdmissionRef, code_admission_ref: codeAdmissionRef, admission_kind: 'Core fixed approved source and code admission' },
+      source_admission_ref: sourceAdmissionRef, code_admission_ref: codeAdmissionRef, admission_kind: 'Core fixed approved source and code admission',
+      data_handling: task.data_handling },
     lifecycle: { inspected: true, installed: true, explicitly_enabled: true, read_receipt_ref: read.result.receipt.receipt_ref },
     refusals,
-    grant: { allowed_origins: [siteOrigin], profile_refs: [profileRef], task_operations: ['task.submit', 'task.query', 'task.stop'],
-      browser_operations: ['instance.start', 'instance.observe', 'instance.snapshot', 'instance.stop'], risk: 'read', external_egress: 'none' },
+    profile_creation_grant: { grant_id: creationGrantId, allowed_operations: ['profile.create'], allowed_origins: [siteOrigin],
+      max_created_profiles: 1, profile_permission_ceiling: { allowed_operations: operations, allowed_origins: [siteOrigin], controlled_interaction_origins: [] } },
+    grant: { grant_id: grantId, allowed_operations: operations, allowed_origins: [siteOrigin], profile_refs: [profileRef],
+      max_created_profiles: 0 },
+    task_policy: { risk: 'read', execution_intent: 'read', timeout_ms: 30_000 },
     consumer: { submit: 'installed WebEnvoy MCP tool webenvoy_task', query: 'installed WebEnvoy CLI agent task query',
       independent_check: 'acceptance harness only; not passed to the site script', real_model: false, third_party_agent: false, plugin_verified: false, account: false },
     run: { run_id: originalRunId, status: queried.run.status, dispatch_state: queried.run.dispatch_state,
