@@ -224,6 +224,7 @@ export type RunRecord = {
   output_schema_id?: string;
   projection_ref?: string;
   public_result_summary?: Record<string, unknown>;
+  public_result_payload?: unknown;
   source_refs?: string[];
   preview_result?: PreviewResult;
   evidence_refs?: string[];
@@ -283,6 +284,10 @@ export type RunRecordPatch = {
   policy_binding_snapshot?: PolicyBindingSnapshot;
   retention_state?: RetentionState;
 };
+
+export function publicRunResult(record: Pick<RunRecord, "public_result_summary" | "public_result_payload">): unknown {
+  return record.public_result_payload === undefined ? record.public_result_summary?.result : record.public_result_payload;
+}
 
 export type FileRunRecordStoreOptions = {
   directory: string;
@@ -532,6 +537,28 @@ function copyPublicResultSummary(value: Record<string, unknown>): Record<string,
   return JSON.parse(json) as Record<string, unknown>;
 }
 
+function storePublicResultSummary(value: Record<string, unknown>): { summary: Record<string, unknown>; payload?: unknown; separated: boolean } {
+  const json = JSON.stringify(value);
+  if (Buffer.byteLength(json, "utf8") <= 64 * 1024) return { summary: JSON.parse(json) as Record<string, unknown>, separated: false };
+  if (!Object.hasOwn(value, "result")) throw new Error("public_result_summary exceeds 64 KiB");
+  const summary = { ...value };
+  const payload = summary.result;
+  delete summary.result;
+  const summaryJson = JSON.stringify(summary);
+  if (Buffer.byteLength(summaryJson, "utf8") > 64 * 1024) throw new Error("public_result_summary exceeds 64 KiB");
+  const payloadJson = JSON.stringify(payload);
+  if (payloadJson === undefined || Buffer.byteLength(payloadJson, "utf8") > 256 * 1024) {
+    throw new Error("public_result_payload exceeds 256 KiB");
+  }
+  return { summary: JSON.parse(summaryJson) as Record<string, unknown>, payload: JSON.parse(payloadJson) as unknown, separated: true };
+}
+
+function copyPublicResultPayload(value: unknown): unknown {
+  const json = JSON.stringify(value);
+  if (json === undefined || Buffer.byteLength(json, "utf8") > 256 * 1024) throw new Error("public_result_payload exceeds 256 KiB");
+  return JSON.parse(json) as unknown;
+}
+
 function runRecordPath(directory: string, runId: string): string {
   return join(directory, `${validateRunId(runId)}.json`);
 }
@@ -605,6 +632,7 @@ function assertRunRecord(record: RunRecord): void {
     requireRef(record.projection_ref, "projection_ref");
   }
   if (record.public_result_summary !== undefined) copyPublicResultSummary(record.public_result_summary);
+  if (record.public_result_payload !== undefined) copyPublicResultPayload(record.public_result_payload);
   copyRefs(record.source_refs, "source_refs");
   if (record.preview_result !== undefined) {
     validatePreviewResult(record.preview_result);
@@ -744,7 +772,10 @@ function withOptionalFields(record: RunRecord, patch: RunRecordPatch): RunRecord
     next.projection_ref = requireRef(patch.projection_ref, "projection_ref");
   }
   if (patch.public_result_summary !== undefined) {
-    next.public_result_summary = copyPublicResultSummary(patch.public_result_summary);
+    const stored = storePublicResultSummary(patch.public_result_summary);
+    next.public_result_summary = stored.summary;
+    if (stored.separated) next.public_result_payload = stored.payload;
+    else if (Object.hasOwn(patch.public_result_summary, "result")) delete next.public_result_payload;
   }
   if (patch.source_refs !== undefined) {
     next.source_refs = copyRequiredRefs(patch.source_refs, "source_refs");
@@ -832,7 +863,9 @@ function makeRecord(input: CreateRunRecordInput, now: string): RunRecord {
     record.projection_ref = requireRef(input.projection_ref, "projection_ref");
   }
   if (input.public_result_summary !== undefined) {
-    record.public_result_summary = copyPublicResultSummary(input.public_result_summary);
+    const stored = storePublicResultSummary(input.public_result_summary);
+    record.public_result_summary = stored.summary;
+    if (stored.separated) record.public_result_payload = stored.payload;
   }
   if (input.source_refs !== undefined) {
     record.source_refs = copyRequiredRefs(input.source_refs, "source_refs");

@@ -475,6 +475,12 @@ try {
   await accessStore.setProfilePolicy({ idempotency_key: "controlled-declaration", ...policy, controlled_interaction_origins: [origin] });
   const snapshot = await service.submit(credentialHash, interactive);
   assert.equal(snapshot.status, "succeeded", JSON.stringify(snapshot));
+  const beforeSnapshotReplay = interactions;
+  const restartedStore = createFileRunRecordStore({ directory: runRecordStore.directory });
+  const restartedService = createManagedBrowserService({ accessStore, runRecordStore: restartedStore, executionPolicyConfigStore,
+    authorizationDecisionStore, harborBaseUrl: `http://127.0.0.1:${address.port}`, supervisorToken: "fixture-supervisor", recoveryService });
+  assert.deepEqual(await restartedService.submit(credentialHash, interactive), snapshot, "a completed result is queryable after Core restart");
+  assert.equal(interactions, beforeSnapshotReplay, "same-key result lookup after restart must not redispatch the observation");
   const continuation = await service.submit(credentialHash, { ...interactive, idempotency_key: "snapshot-continuation", observation_ref: "observation:1", cursor: "cursor:next", limit: 32 });
   assert.equal(continuation.status, "succeeded", JSON.stringify(continuation));
   assert.deepEqual(Object.fromEntries(["page_id", "page_ref", "document_generation", "observation_ref", "cursor", "limit"].map(key => [key, forwardedInteractionInputs.at(-1)![key]])), {
@@ -614,7 +620,12 @@ try {
   assert.equal(lost.status, "unknown_outcome"); assert.equal(lost.dispatch_state, "dispatched");
   assert.equal(interactions, 2);
   dropInteractionResponse = false;
-  assert.deepEqual(await service.submit(credentialHash, input), lost, "same key cannot replay input");
+  const afterLostRestart = await restartedService.query(credentialHash, lost.run_id);
+  assert.equal(afterLostRestart.status, "unknown_outcome", "Core restart preserves the original unknown result");
+  assert.equal(afterLostRestart.reconciliation, "completed");
+  assert.equal(interactions, 2, "query after Core restart may reconcile but cannot redispatch input");
+  assert.deepEqual(await restartedService.submit(credentialHash, input), afterLostRestart, "same key cannot replay input after Core restart");
+  assert.equal(interactions, 2);
   waitConditionTimeout = true;
   const timedOutWait = await service.submit(credentialHash, { ...interactiveWithoutLimit, idempotency_key: "wait-timeout", operation: "instance.wait",
     page_ref: "page:one", observation_ref: "observation:1", wait_for: "text", text: "never", timeout_ms: 50 });

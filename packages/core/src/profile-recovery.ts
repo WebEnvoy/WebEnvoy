@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { withFileOwnershipLock } from "./file-ownership.js";
-import type { FileRunRecordStore, RunRecord } from "./run-record-store.js";
+import { publicRunResult, type FileRunRecordStore, type RunRecord } from "./run-record-store.js";
 
 export const CORE_PROFILE_RECOVERY_SCHEMA = "webenvoy.profile-recovery-core.v1";
 export type RecoveryResult = { ok: boolean; operation_ref: string; status: string; run_id: string; reconciliation?: string; result?: Record<string, unknown>; failure?: { code: string; recovery_hint: string } };
@@ -27,9 +27,10 @@ function operationRef(kind: string, idempotencyKey: string): string { return `re
 function runId(operation: string): string { return `managed-recovery-${hash(operation).slice(0, 64)}`; }
 function failure(error: unknown): { code: string; recovery_hint: string } { return error instanceof ProfileRecoveryCoreError ? { code: error.code, recovery_hint: error.recovery_hint } : { code: "recovery_runtime_unavailable", recovery_hint: "query_operation_without_replay" }; }
 function response(run: RunRecord): RecoveryResult {
+  const result = publicRunResult(run);
   return { ok: run.status === "succeeded", operation_ref: String(run.public_result_summary?.operation_ref ?? run.run_id), status: String(run.public_result_summary?.recovery_status ?? run.status), run_id: run.run_id,
     ...(typeof run.public_result_summary?.reconciliation === "string" ? { reconciliation: run.public_result_summary.reconciliation } : {}),
-    ...(run.public_result_summary?.result && typeof run.public_result_summary.result === "object" ? { result: run.public_result_summary.result as ObjectValue } : {}),
+    ...(result && typeof result === "object" ? { result: result as ObjectValue } : {}),
     ...(run.failure && run.status !== "succeeded" ? { failure: { code: run.failure.code, recovery_hint: run.failure.recovery_hint } } : {}) };
 }
 function normalizeInspect(value: unknown): ObjectValue { const input = object(value); if (input.schema_version !== "harbor-profile-recovery/v1") return fail("recovery_contract_invalid"); return input; }
@@ -163,12 +164,12 @@ export function createManagedRecoveryService(options: { runRecordStore: FileRunR
         }
         return withFileOwnershipLock(join(directory, `${hash(planRef)}.lock`), 5_000, async () => {
           const planRun = (await store.listRunRecords()).find(run => {
-            const result = run.public_result_summary?.result as ObjectValue | undefined;
+            const result = publicRunResult(run) as ObjectValue | undefined;
             return run.status === "succeeded" && (result?.plan as ObjectValue | undefined)?.plan_ref === planRef;
           });
           if (!planRun) return fail("recovery_plan_not_found", "create_a_new_plan");
           const planSummary = planRun.public_result_summary!;
-          const storedPlan = (planSummary.result as ObjectValue).plan;
+          const storedPlan = (publicRunResult(planRun) as ObjectValue).plan;
           if (canonical(plan) !== canonical(storedPlan)) return fail("recovery_plan_changed", "review_and_confirm_the_original_plan");
           if (typeof planSummary.apply_operation_ref === "string") return fail("recovery_confirmation_already_consumed", "query_the_original_recovery_operation");
           const confirmedAt = Date.parse(confirmation.confirmed_at);
