@@ -373,7 +373,8 @@ async function runGithubTrendingAcceptance({ ownerData, agentHost, clientFile, p
       selector: { original_idempotency_key: submitKey }
     });
     failureStage = 'original_run_query';
-    queried = runJson(cli, ['agent', 'task', 'query', '--client-file', clientFile, '--request-file', queryFile], true, 'github_original_run_query');
+    queried = allowJson(cli, ['agent', 'task', 'query', '--client-file', clientFile, '--request-file', queryFile], true, 'github_original_run_query');
+    assert.equal(queried.ok, true, `github_original_run_query:${JSON.stringify(queried)}`);
     assert.equal(queried.run.run_id, originalRunId);
     failureStage = 'submitted_result_status';
     if (submitted.run.status !== 'succeeded') {
@@ -398,7 +399,7 @@ async function runGithubTrendingAcceptance({ ownerData, agentHost, clientFile, p
     assert.ok(startSkewMs <= 2_000, `independent_page_check_not_near_simultaneous:${startSkewMs}`);
     assert.deepEqual(queried.result, submitted.result);
   } catch (error) {
-    const queriedResult = queried?.result ?? submitted?.result;
+    const queriedResult = queried?.result;
     const failureCode = queried?.failure?.code ?? queriedResult?.failure?.code ?? submitted?.failure?.code ?? null;
     const evidence = {
       schema: 'webenvoy.live-site-skill-script-acceptance/v1', state: 'failed', page_url: pageUrl,
@@ -420,6 +421,7 @@ async function runGithubTrendingAcceptance({ ownerData, agentHost, clientFile, p
         ...(queriedResult ? { result_sha256: sha(JSON.stringify(queriedResult)) } : {}),
         query_addresses_original_run: queried?.run?.run_id === submitted.run.run_id,
         submitted_result_returned: submitted.result !== undefined,
+        ...(submitted.result === undefined ? {} : { submitted_result_sha256: sha(JSON.stringify(submitted.result)) }),
         ...(submitted.result === undefined ? {} : { queried_same_original_result: queried?.run?.run_id === submitted.run.run_id && JSON.stringify(queried?.result) === JSON.stringify(submitted.result) }) } } : {}),
       ...(independentPage ? { anonymous_independent_check: { state: 'observed', status: independentPage.status, url: independentPage.url,
         requested_at: new Date(independentPage.startedAt).toISOString(), completed_at: new Date(independentPage.completedAt).toISOString(),
