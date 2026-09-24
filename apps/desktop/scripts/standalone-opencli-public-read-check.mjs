@@ -162,7 +162,7 @@ try {
     const operations = ['task.submit', 'task.query', 'task.stop', 'skill.list', 'skill.inspect', 'skill.install', 'skill.enable', 'skill.read'];
     const createGrantId = await grant(`${sample.name}-create`, { profile_refs: [], allowed_operations: ['profile.create'], allowed_origins: [sample.origin],
       expires_at: new Date(Date.now() + 3_600_000).toISOString(), max_created_profiles: 1,
-      creation_template: { template_ref: `opencli-${sample.name}-profile`, provider_id: null,
+      creation_template: { template_ref: `opencli-${sample.name}-profile`, provider_id: 'camoufox',
         site: { site_id: sample.name, origin: sample.origin, display_name: sample.name }, language: 'en-US', timezone: 'UTC',
         permission_ceiling: { allowed_operations: operations, allowed_origins: [sample.origin], controlled_interaction_origins: [] } } });
     assert.ok(createGrantId);
