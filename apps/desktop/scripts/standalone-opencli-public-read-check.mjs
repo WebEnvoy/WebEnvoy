@@ -218,6 +218,14 @@ try {
       evidence.samples[sample.name] = { run_id: attempted.run.run_id, status: attempted.run.status,
         dispatch_state: attempted.run.dispatch_state, failure_code: attempted.failure?.code,
         original_query_same_run: original.run?.run_id === attempted.run.run_id };
+      if (sample.name === 'devto' && attempted.failure?.code === 'managed_task_network_content_type_denied') {
+        const probe = spawnSync('/usr/bin/curl', ['--silent', '--show-error', '--http1.1', '--max-time', '10',
+          '--output', '/dev/null', '--write-out', '%{http_code} %{content_type}',
+          '--header', 'accept: application/json', '--header', 'user-agent:',
+          'https://dev.to/api/articles/latest?per_page=2&page=1'], { encoding: 'utf8', timeout: 12_000 });
+        evidence.samples[sample.name].independent_public_probe = { exit_code: probe.status,
+          status_and_content_type: probe.stdout.trim().slice(0, 128) };
+      }
     }
     const completed = success(attempted, `${sample.name}:submit`);
     assert.equal(completed.run.status, 'succeeded', `${sample.name}:run_status`);
