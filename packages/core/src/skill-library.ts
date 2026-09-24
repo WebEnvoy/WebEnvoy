@@ -833,6 +833,9 @@ export function createFileSkillLibraryService(options: {
     const exactRequest = request && typeof request.package_ref === "string" && typeof request.revision_ref === "string" &&
       typeof request.package_digest === "string" && typeof request.task_ref === "string";
     if (!exactRequest) return fail("managed_skill_revision_unavailable");
+    const state = await readState();
+    const installed = findRecord(state, request.package_ref)?.revisions.find(revision => revision.revision_ref === request.revision_ref);
+    if (installed?.package_type === "site-skill" && installed.package_digest !== request.package_digest) return fail("managed_access_denied");
     const admitted = await options.managedSiteTaskAdmissionStore?.resolveAdmitted(request);
     let pin: SiteSkillPackagePin;
     let sitePackage: VerifiedSiteTask;
@@ -855,7 +858,6 @@ export function createFileSkillLibraryService(options: {
       sourceAdmissionRef = `webenvoy.source-admission/site-skill/v1#sha256:${digest(canonical({ package_ref: pin.package_ref, revision_ref: pin.revision_ref, package_digest: pin.package_digest, source_ref: pin.source_ref, source_commit: pin.source_commit }))}`;
       codeAdmissionRef = pin.script ? managedSiteScriptCodeAdmissionRef(pin) : undefined;
     }
-    const state = await readState();
     const record = findRecord(state, sitePackage.package_ref);
     if (!record) return fail("managed_skill_not_installed");
     if (!record.enabled || record.enabled_revision_ref !== sitePackage.revision_ref) return fail("managed_skill_disabled");

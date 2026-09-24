@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import test from "node:test";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -445,7 +445,54 @@ test("managed site task runs the pinned package through one durable Core Run", {
       await rejectsWithCode(managedTaskService.operate(credentialHash, wrongVersion), ["managed_task_version_unsupported"]);
       const wrongPin = submitRequest(pin, actor, "managed-task-wrong-pin");
       wrongPin.package.package_digest = `sha256:${"0".repeat(64)}`;
-      await rejectsWithCode(managedTaskService.operate(credentialHash, wrongPin), ["managed_access_denied", "managed_skill_revision_unavailable"]);
+      const runsBeforeWrongPin = await managedTaskRunCount(runRecordStore);
+      await rejectsWithCode(managedTaskService.operate(credentialHash, wrongPin), ["managed_access_denied"]);
+      assert.equal(await managedTaskRunCount(runRecordStore), runsBeforeWrongPin, "a conflicting installed package digest is denied before a durable Run");
+      assert.equal(snapshotCalls.length, callsBefore, "a conflicting installed package digest never reaches Harbor");
+
+      // Owner-local overlays use the same installed site-skill revision record;
+      // exercise that row shape without turning this test into an admission test.
+      const libraryStatePath = join(libraryDirectory, "skill-library.json");
+      const originalLibraryState = await readFile(libraryStatePath);
+      try {
+        const libraryState = JSON.parse(originalLibraryState.toString("utf8")) as Json;
+        const installedAsset = libraryState.assets.find((item: Json) => item.skill_ref === pin.package.package_ref) as Json;
+        const localSourceCommit = "e".repeat(40);
+        const localRevisionRef = `${pin.package.package_ref}@1.0.1#${localSourceCommit}`;
+        const localSourceRef = `lode://source/site-skill/controlled-local/page-summary@1.0.1#${localSourceCommit}`;
+        const localDigest = `sha256:${"1".repeat(64)}`;
+        installedAsset.revisions.push({
+          ...installedAsset.revisions[0], revision_ref: localRevisionRef, source_ref: localSourceRef,
+          source_commit: localSourceCommit, version: "1.0.1", package_digest: localDigest
+        });
+        installedAsset.enabled_revision_ref = localRevisionRef;
+        installedAsset.record_version += 1;
+        await writeFile(libraryStatePath, JSON.stringify(libraryState));
+
+        const localGrant = await makeGrant(actor.principal_id, "managed-task-local-overlay", profileRef, {
+          skill_scope: { skill_refs: [pin.package.package_ref], source_refs: [localRevisionRef] }
+        });
+        const localActor = { ...actor, grant_id: localGrant.grant_id };
+        const localPin = { ...pin, package: { ...pin.package, revision_ref: localRevisionRef, package_digest: localDigest } };
+        const conflictingOverlayRequest = submitRequest(localPin, localActor, "managed-task-local-overlay-wrong-pin");
+        conflictingOverlayRequest.package.package_digest = `sha256:${"0".repeat(64)}`;
+        await rejectsWithCode(managedTaskService.operate(credentialHash, conflictingOverlayRequest), ["managed_access_denied"]);
+        assert.equal(await managedTaskRunCount(runRecordStore), runsBeforeWrongPin, "a conflicting owner-local digest creates no Run");
+        assert.equal(snapshotCalls.length, callsBefore, "a conflicting owner-local digest never reaches Harbor");
+      } finally {
+        await writeFile(libraryStatePath, originalLibraryState);
+      }
+
+      const missingRevision = pin.package.revision_ref.replace(/[a-f0-9]{40}$/, "0".repeat(40));
+      const missingRevisionPin = { ...pin, package: { ...pin.package, revision_ref: missingRevision } };
+      const missingRevisionGrant = await makeGrant(actor.principal_id, "managed-task-missing-revision", profileRef, {
+        skill_scope: { skill_refs: [pin.package.package_ref], source_refs: [missingRevision] }
+      });
+      const missingRevisionActor = { ...actor, grant_id: missingRevisionGrant.grant_id };
+      const missingRevisionRequest = submitRequest(missingRevisionPin, missingRevisionActor, "managed-task-missing-revision");
+      await rejectsWithCode(managedTaskService.operate(credentialHash, missingRevisionRequest), ["managed_skill_revision_unavailable"]);
+      assert.equal(await managedTaskRunCount(runRecordStore), runsBeforeWrongPin, "an unavailable revision is rejected before a durable Run");
+      assert.equal(snapshotCalls.length, callsBefore, "an unavailable revision never reaches Harbor");
       const injectedInput = submitRequest(pin, actor, "managed-task-extra-input");
       injectedInput.input.value = { arbitrary: true };
       await rejectsWithCode(managedTaskService.operate(credentialHash, injectedInput), ["managed_task_invalid_input"]);
