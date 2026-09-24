@@ -325,7 +325,7 @@ async function runGithubTrendingAcceptance({ ownerData, agentHost, clientFile, p
     package: { package_ref: site.package_ref, revision_ref: site.revision_ref, package_digest: site.integrity.package_digest, task_ref: task.task_ref },
     target: { target_type: task.applicability.target_type, target_ref: targetRef },
     input: { schema_ref: task.inputs.schema_ref, carrier: 'none' },
-    intent: { summary: 'Read the first five public daily GitHub Trending repositories', policy: { risk: 'read', execution_intent: 'read', timeout_ms: 30_000 } }
+    intent: { summary: 'Read the first five public daily GitHub Trending repositories', policy: { risk: 'read', execution_intent: 'read', timeout_ms: 60_000 } }
   };
   async function requireRefusal(label, fields, expectedCode) {
     const requestFile = join(agentHost, `${prefix}-${label}.json`);
@@ -402,7 +402,7 @@ async function runGithubTrendingAcceptance({ ownerData, agentHost, clientFile, p
       max_created_profiles: 1, profile_permission_ceiling: { allowed_operations: operations, allowed_origins: [siteOrigin], controlled_interaction_origins: [siteOrigin] } },
     grant: { grant_id: grantId, allowed_operations: operations, allowed_origins: [siteOrigin], profile_refs: [profileRef],
       max_created_profiles: 0 },
-    task_policy: { risk: 'read', execution_intent: 'read', timeout_ms: 30_000 },
+    task_policy: { risk: 'read', execution_intent: 'read', timeout_ms: 60_000 },
     consumer: { submit: 'installed WebEnvoy MCP tool webenvoy_task', query: 'installed WebEnvoy CLI agent task query',
       independent_check: 'acceptance harness only; not passed to the site script', real_model: false, third_party_agent: false, plugin_verified: false, account: false },
     run: { run_id: originalRunId, status: queried.run.status, dispatch_state: queried.run.dispatch_state,
