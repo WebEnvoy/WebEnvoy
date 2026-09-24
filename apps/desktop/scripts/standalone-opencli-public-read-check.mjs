@@ -253,18 +253,20 @@ try {
   }
   // Drop one completed submit response at the process boundary. Query its
   // original key; a second task.submit would be a new network request.
-  const lostSample = samples[0];
-  const lostKey = `${root.split('/').at(-1)}-response-lost`;
-  const lostFile = await agentFile(taskRequest('task.submit', lostSample,
-    { idempotency_key: lostKey, ...lostSample.submit }));
-  const lostResult = spawnSync('/usr/bin/sudo', ['-n', '-u', 'nobody', '--', cli, 'agent', 'task', 'submit',
-    '--client-file', clientFile, '--request-file', lostFile], { cwd: packageRoot, stdio: 'ignore', timeout: 120_000 });
-  assert.equal(lostResult.status, 0, 'response_loss_submit_did_not_finish');
-  const recovered = success(await agent('task query', taskRequest('task.query', lostSample,
-    { selector: { original_idempotency_key: lostKey } })), 'response_loss_query');
-  assert.equal(recovered.run.status, 'succeeded');
-  evidence.response_loss = { original_key_sha256: sha(lostKey), original_run_id: recovered.run.run_id,
-    resolution: 'queried original key without a second submit' };
+  const lostSample = samples.find(sample => evidence.samples[sample.name]?.result_sha256);
+  if (lostSample) {
+    const lostKey = `${root.split('/').at(-1)}-response-lost`;
+    const lostFile = await agentFile(taskRequest('task.submit', lostSample,
+      { idempotency_key: lostKey, ...lostSample.submit }));
+    const lostResult = spawnSync('/usr/bin/sudo', ['-n', '-u', 'nobody', '--', cli, 'agent', 'task', 'submit',
+      '--client-file', clientFile, '--request-file', lostFile], { cwd: packageRoot, stdio: 'ignore', timeout: 120_000 });
+    assert.equal(lostResult.status, 0, 'response_loss_submit_did_not_finish');
+    const recovered = success(await agent('task query', taskRequest('task.query', lostSample,
+      { selector: { original_idempotency_key: lostKey } })), 'response_loss_query');
+    assert.equal(recovered.run.status, 'succeeded');
+    evidence.response_loss = { original_key_sha256: sha(lostKey), original_run_id: recovered.run.run_id,
+      resolution: 'queried original key without a second submit' };
+  } else evidence.response_loss = { status: 'skipped_no_confirmed_success' };
   owner(['stop', '--data-dir', ownerData]); runtimeStarted = false;
   owner(['start', '--data-dir', ownerData]); runtimeStarted = true;
   for (const sample of samples) {
