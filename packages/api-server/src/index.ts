@@ -167,6 +167,7 @@ if (import.meta.url === entrypoint) {
     : undefined;
   const managedTaskService = managedAccessStore && runRecordStore && managedSkillService && managedBrowserService
     ? createManagedTaskService({ accessStore: managedAccessStore, runRecordStore, skillLibraryService: managedSkillService, managedBrowserService,
+        ...(accountSystemDefinitionService === undefined ? {} : { accountSystemDefinitionService }),
         ...(workerIdentity === undefined ? {} : { workerIdentity }) })
     : undefined;
   const server = createApiServer({

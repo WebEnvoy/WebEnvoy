@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { access, chmod, lstat, mkdir, mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { join, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
+import { createInterface } from 'node:readline';
 
 // This check is intentionally CI-only. Default mode uses the existing nobody
 // account and sudo; --same-uid checks the trusted owner-user path. Neither mode
@@ -137,7 +138,7 @@ try {
   const queriedBeforeStop = runAsAgent(cli, ['agent', 'query', '--client-file', clientFile, '--idempotency-key', 'standalone-ci-profile-list']);
   const queryBeforeStop = lastJson(queriedBeforeStop.stdout, 'agent_query_before_stop');
   assert.equal(findString(queryBeforeStop, ['run_id']), findString(operationResult, ['run_id']), 'query must address the original Run');
-  const mcpQuery = runAgentMcpQuery(clientFile, 'standalone-ci-profile-list');
+  const mcpQuery = await runAgentMcpQuery(clientFile, findString(operationResult, ['run_id']));
   assert.equal(findString(mcpQuery, ['run_id']), findString(operationResult, ['run_id']), 'MCP query must address the original Run without replay');
   await assertAgentOwnerRouteDenied(clientFile);
 
@@ -201,29 +202,75 @@ function runAsAgentResult(command, args) {
 }
 
 // This is a fixed-package MCP stdio client check, not a real third-party Agent
-// or plugin_verified claim. It exercises the second public query entry point.
-function runAgentMcpQuery(clientPath, idempotencyKey) {
-  const messages = [
-    { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'standalone-boundary-check', version: '1' } } },
-    { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'webenvoy_connect', arguments: {} } },
-    { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'webenvoy_query', arguments: { idempotency_key: idempotencyKey } } }
-  ].map(message => JSON.stringify(message)).join('\n') + '\n';
+// or plugin_verified claim. It waits for each response before sending the next
+// request, as a real MCP client does, so connect completes before query starts.
+async function runAgentMcpQuery(clientPath, runId) {
   const mcpArgs = [join(packageRoot, 'agent-entry/mcp.mjs'), clientPath];
-  const result = spawnSync(sameUidMode ? fixedNode : '/usr/bin/sudo', sameUidMode ? mcpArgs : ['-n', '-u', 'nobody', '--', fixedNode, ...mcpArgs], {
+  const executable = sameUidMode ? fixedNode : '/usr/bin/sudo';
+  const args = sameUidMode ? mcpArgs : ['-n', '-u', 'nobody', '--', fixedNode, ...mcpArgs];
+  const child = spawn(executable, args, {
     cwd: packageRoot,
-    input: messages,
-    encoding: 'utf8',
-    timeout: 120_000,
+    stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...process.env, LC_ALL: 'C' }
   });
-  if (result.error) throw result.error;
-  if (result.status !== 0 || result.signal) throw new Error(`mcp_query_failed: status=${result.status ?? 'null'} signal=${result.signal ?? 'none'} stderr=${result.stderr || ''}`);
-  const response = String(result.stdout).trim().split('\n').map(line => JSON.parse(line)).find(message => message.id === 3);
-  if (!response) throw new Error('mcp_query_response_missing');
-  if (response.error || response.result?.isError) throw new Error(`mcp_query_refused:${JSON.stringify(response)}`);
-  const text = response.result?.content?.find(item => item?.type === 'text')?.text;
-  if (typeof text !== 'string') throw new Error('mcp_query_result_missing');
-  return JSON.parse(text);
+  const output = createInterface({ input: child.stdout });
+  const pending = new Map();
+  let stderr = '';
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', chunk => { stderr = (stderr + chunk).slice(-16_384); });
+  output.on('line', line => {
+    let message;
+    try { message = JSON.parse(line); } catch { return; }
+    const waiter = pending.get(message.id);
+    if (waiter) waiter.resolve(message);
+  });
+  const exitPromise = new Promise(resolveExit => child.once('exit', (code, signal) => resolveExit({ code, signal })));
+  child.once('error', error => { for (const waiter of pending.values()) waiter.reject(error); });
+  child.once('exit', (code, signal) => {
+    const error = new Error(`mcp_client_exited_before_response: status=${code ?? 'null'} signal=${signal ?? 'none'} stderr=${stderr}`);
+    for (const waiter of pending.values()) waiter.reject(error);
+  });
+  let requestId = 0;
+  const send = async (method, params) => {
+    const id = ++requestId;
+    const message = { jsonrpc: '2.0', id, method, params };
+    const responsePromise = new Promise((resolveResponse, rejectResponse) => {
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        rejectResponse(new Error(`mcp_response_timeout:${method}:stderr=${stderr}`));
+      }, 30_000);
+      pending.set(id, {
+        resolve(value) { clearTimeout(timer); pending.delete(id); resolveResponse(value); },
+        reject(error) { clearTimeout(timer); pending.delete(id); rejectResponse(error); }
+      });
+    });
+    child.stdin.write(`${JSON.stringify(message)}\n`);
+    const response = await responsePromise;
+    if (response.error || response.result?.isError) throw new Error(`mcp_request_failed:${method}:${JSON.stringify(response)}`);
+    return response;
+  };
+  const toolValue = response => {
+    const text = response.result?.content?.find(item => item?.type === 'text')?.text;
+    if (typeof text !== 'string') throw new Error(`mcp_tool_result_missing:${JSON.stringify(response)}`);
+    let value;
+    try { value = JSON.parse(text); } catch { throw new Error(`mcp_tool_result_invalid:${text}`); }
+    if (value?.ok === false) throw new Error(`mcp_tool_operation_failed:${JSON.stringify(value)}`);
+    return value;
+  };
+  try {
+    await send('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'standalone-boundary-check', version: '1' } });
+    const connected = toolValue(await send('tools/call', { name: 'webenvoy_connect', arguments: {} }));
+    if (connected.ok !== true) throw new Error(`mcp_connect_not_confirmed:${JSON.stringify(connected)}`);
+    const queried = toolValue(await send('tools/call', { name: 'webenvoy_query', arguments: { run_id: runId } }));
+    if (typeof queried.run_id !== 'string') throw new Error(`mcp_query_run_projection_missing:${JSON.stringify(queried)}`);
+    child.stdin.end();
+    const exit = await exitPromise;
+    if (exit.code !== 0 || exit.signal) throw new Error(`mcp_query_failed: status=${exit.code ?? 'null'} signal=${exit.signal ?? 'none'} stderr=${stderr}`);
+    return queried;
+  } finally {
+    output.close();
+    if (child.exitCode === null) child.kill('SIGTERM');
+  }
 }
 
 async function mkdtempAsAgent(prefix) {

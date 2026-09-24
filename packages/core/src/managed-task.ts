@@ -294,21 +294,26 @@ export function createManagedTaskService(options: {
   skillLibraryService: Pick<ReturnType<typeof createFileSkillLibraryService>, "resolveManagedSiteTask">;
   managedBrowserService: Pick<ReturnType<typeof createManagedBrowserService>, "executeTaskSnapshot">;
   workerIdentity?: { owner_uid: number; agent_uid: number; mode: string; owner_socket_acl: string };
-  managedAccountSystemService?: {
-    resolveTemplate(templateRef: string): Promise<{ local_definition_ref: string; revision_ref: string; template_ref: string; template_sha256: string; historical: boolean }>;
+  accountSystemDefinitionService?: {
+    resolveTemplate(templateRef: string): Promise<unknown>;
   };
 }) {
   const store = options.runRecordStore;
   const directory = join(store.directory, "managed-task-operation-locks");
   const activeTickets = new Map<string, ActiveManagedSiteTicket>();
+  function deactivateWorkerTicket(active: ActiveManagedSiteTicket): void {
+    active.cancelled = true;
+    if (active.timer !== undefined) clearTimeout(active.timer);
+    if (activeTickets.get(active.ticket_id) === active) activeTickets.delete(active.ticket_id);
+  }
 
   async function authorize(credentialHash: string, input: ParsedRequest, profileRef: string, origin: string, packageRef: string, revisionRef: string) {
     return options.accessStore.checkAccess(credentialHash, accessRequest(input, profileRef, origin, packageRef, revisionRef));
   }
   async function resolveTaskAccountSystem(templateRef: string | undefined): Promise<{ local_definition_ref: string; local_revision_ref: string; template_ref: string; template_sha256: string } | undefined> {
     if (templateRef === undefined) return undefined;
-    if (!options.managedAccountSystemService) return fail("account_system_definition_unavailable");
-    const resolved = await options.managedAccountSystemService.resolveTemplate(templateRef);
+    if (!options.accountSystemDefinitionService) return fail("account_system_definition_unavailable");
+    const resolved = await options.accountSystemDefinitionService.resolveTemplate(templateRef);
     if (!isObject(resolved) || resolved.template_ref !== templateRef || resolved.historical === true ||
         typeof resolved.local_definition_ref !== "string" || !/^webenvoy:account-system\/[0-9a-f-]{36}$/.test(resolved.local_definition_ref) ||
         typeof resolved.revision_ref !== "string" || !/^webenvoy:account-system-revision\/[0-9a-f-]{36}@[1-9][0-9]*#sha256:[a-f0-9]{64}$/.test(resolved.revision_ref) ||
@@ -484,8 +489,7 @@ export function createManagedTaskService(options: {
   async function cancelWorkerTicket(runId: string): Promise<void> {
     const active = [...activeTickets.values()].find(item => item.run_id === runId);
     if (!active) return;
-    active.cancelled = true;
-    if (active.timer !== undefined) clearTimeout(active.timer);
+    deactivateWorkerTicket(active);
   }
   async function executeScriptTask(credentialHash: string, request: ParsedRequest, principalId: string, profileRef: string, origin: string,
       runId: string, deadlineAt: number, sitePackage: ActiveManagedSiteTicket["sitePackage"], taskFacts: ReturnType<typeof assertPinnedTask>, initialSummary: JsonObject) {
@@ -521,14 +525,20 @@ export function createManagedTaskService(options: {
       input: { schema_ref: taskFacts.inputSchemaRef, value: {} }, context: { run_id: runId, task_ref: sitePackage.task_ref }, deadline_at: deadlineAt
     };
     const current = await store.getRunRecord(runId);
-    if (!current || current.status !== "running") return response(current!, request.operation);
+    if (!current || current.status !== "running") {
+      deactivateWorkerTicket(active);
+      return current ? response(current, request.operation) : fail("managed_task_operation_unavailable");
+    }
     active.timer = setTimeout(() => { void settleWorkerTimeout(active).catch(() => undefined); }, Math.max(0, deadlineAt - Date.now()));
     active.timer.unref?.();
     return { ...response(current, request.operation), worker_execution: { ticket } };
   }
   async function finalizeWorker(active: ActiveManagedSiteTicket): Promise<JsonObject> {
     const latest = await store.getRunRecord(active.run_id);
-    if (!latest || terminalRunRecordStatuses.has(latest.status)) return latest ? response(latest, "task.submit") : fail("managed_task_operation_unavailable");
+    if (!latest || terminalRunRecordStatuses.has(latest.status)) {
+      deactivateWorkerTicket(active);
+      return latest ? response(latest, "task.submit") : fail("managed_task_operation_unavailable");
+    }
     if (!active.snapshot || !active.output || !active.postCheck) return fail("managed_site_output_missing");
     const snapshot = active.snapshot.snapshot as JsonObject;
     const evidenceRef = String(snapshot.observation_ref);
@@ -537,6 +547,7 @@ export function createManagedTaskService(options: {
         evidenceRef, sourceRef: active.target_ref, postCheck: active.postCheck,
         failure: publicFailure("result_projection", "site_task_post_check_failed", "verification", "query_original_run_only")
       });
+      deactivateWorkerTicket(active);
       return response(failed, "task.submit");
     }
     const completed = await completeRunWithResult(store, active.run_id, {
@@ -546,13 +557,15 @@ export function createManagedTaskService(options: {
       persisted_public_summary: { ...latest.public_result_summary, dispatch_state: active.dispatched ? "dispatched" : "not_dispatched" },
       persist_result_envelope: true
     });
-    if (active.timer !== undefined) clearTimeout(active.timer);
-    activeTickets.delete(active.ticket_id);
+    deactivateWorkerTicket(active);
     return response(completed.run_record, "task.submit");
   }
   async function failWorker(active: ActiveManagedSiteTicket, code: string): Promise<JsonObject> {
     const latest = await store.getRunRecord(active.run_id);
-    if (!latest || terminalRunRecordStatuses.has(latest.status)) return latest ? response(latest, "task.submit") : fail("managed_task_operation_unavailable");
+    if (!latest || terminalRunRecordStatuses.has(latest.status)) {
+      deactivateWorkerTicket(active);
+      return latest ? response(latest, "task.submit") : fail("managed_task_operation_unavailable");
+    }
     const failureCode = active.failure_code ?? code;
     const dispatchState = active.dispatched ? "dispatched" : "not_dispatched";
     const unknown = active.outcome_uncertain || active.dispatched && !active.snapshot;
@@ -564,9 +577,7 @@ export function createManagedTaskService(options: {
       failure: publicFailure(unknown ? "write_outcome" : "runtime_execution", failureCode,
         unknown ? "reconciliation" : "execution", "query_original_run_only")
     });
-    if (active.timer !== undefined) clearTimeout(active.timer);
-    active.cancelled = true;
-    activeTickets.delete(active.ticket_id);
+    deactivateWorkerTicket(active);
     return response(failed, "task.submit");
   }
   async function workerComplete(credentialHash: string, value: unknown): Promise<JsonObject> {
@@ -585,7 +596,7 @@ export function createManagedTaskService(options: {
   async function settleWorkerTimeout(active: ActiveManagedSiteTicket): Promise<void> {
     if (activeTickets.get(active.ticket_id) !== active) return;
     const run = await store.getRunRecord(active.run_id);
-    if (!run || terminalRunRecordStatuses.has(run.status)) { activeTickets.delete(active.ticket_id); return; }
+    if (!run || terminalRunRecordStatuses.has(run.status)) { deactivateWorkerTicket(active); return; }
     // Once output.write was accepted Core has the exact snapshot and validated
     // output. Finalize that known read result without another Harbor call.
     if (!active.cancelled && active.snapshot && active.output && active.postCheck) {

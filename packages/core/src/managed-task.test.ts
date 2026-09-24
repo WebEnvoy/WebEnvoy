@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import { createFileManagedAccessStore, managedPageOperations, managedSkillOperations, managedTaskOperations } from "./managed-access.js";
 import { createManagedTaskService } from "./managed-task.js";
 import { createFileRunRecordStore, type FileRunRecordStore, type RunRecordStatus } from "./run-record-store.js";
+import { completeRunWithFailure } from "./result-envelope.js";
 import { createFileSkillLibraryService } from "./skill-library.js";
 
 type Json = Record<string, any>;
@@ -340,7 +341,7 @@ test("managed site task runs the pinned package through one durable Core Run", {
       assert.equal(await managedTaskRunCount(runRecordStore), before, "a declared local definition must resolve before the first durable Run write");
 
       const disabledService = createManagedTaskService({ accessStore, runRecordStore, skillLibraryService: accountBoundLibrary, managedBrowserService,
-        managedAccountSystemService: { async resolveTemplate() { throw new Error("account_system_definition_disabled"); } } });
+        accountSystemDefinitionService: { async resolveTemplate() { throw new Error("account_system_definition_disabled"); } } });
       await assert.rejects(disabledService.operate(credentialHash, submitRequest(pin, actor, "managed-task-account-system-disabled")), /account_system_definition_disabled/);
       assert.equal(await managedTaskRunCount(runRecordStore), before, "disabled definitions must fail before Run creation and Harbor dispatch");
 
@@ -352,7 +353,7 @@ test("managed site task runs the pinned package through one durable Core Run", {
         historical: false
       };
       const accountAwareService = createManagedTaskService({ accessStore, runRecordStore, skillLibraryService: accountBoundLibrary, managedBrowserService,
-        managedAccountSystemService: { async resolveTemplate(receivedRef) {
+        accountSystemDefinitionService: { async resolveTemplate(receivedRef) {
           assert.equal(receivedRef, templateRef);
           return localDefinition;
         } } });
@@ -892,6 +893,19 @@ test("GitHub Trending package executes through the Core broker after install and
       assert.equal(snapshotCalls.length, before + 1, "the rejected first invoke is never retried");
     });
 
+    await t.test("a terminal Run discovered by worker failure deactivates its ticket", async () => {
+      const prepared = await managedTaskService.operate(credentialHash,
+        request("task.submit", "github-script-terminal-ticket-cleanup-001"), { agentSocketIngressVerified: true }) as Json;
+      const ticketId = prepared.worker_execution.ticket.ticket_id as string;
+      await completeRunWithFailure(runRecordStore, prepared.run.run_id, {
+        status: "failed", failure: { category: "runtime_execution", code: "managed_task_timeout", phase: "execution", recovery_hint: "query_original_run_only" },
+        persist_result_envelope: true
+      });
+      const existing = response(await managedTaskService.workerFailure(credentialHash, { ticket_id: ticketId, code: "managed_task_snapshot_unavailable" }));
+      assert.equal(existing.run.status, "failed", "a terminal race returns the durable Run without rewriting it");
+      await rejectsWithCode(managedTaskService.workerFailure(credentialHash, { ticket_id: ticketId, code: "managed_task_snapshot_unavailable" }), ["managed_task_ticket_inactive"]);
+    });
+
     await t.test("Grant revocation after snapshot blocks output without a second browser call", async () => {
       const freshGrant = await accessStore.createGrant({
         idempotency_key: "github-script-revoke-grant", principal_id: actor.principal_id,
@@ -942,6 +956,7 @@ test("GitHub Trending package executes through the Core broker after install and
       await rejectsWithCode(managedTaskService.broker(credentialHash, { ticket_id: ticket.ticket_id, method: "output.write", input: {} }), ["managed_task_ticket_inactive"]);
       await rejectsWithCode(managedTaskService.broker(credentialHash, { ticket_id: ticket.ticket_id, method: "runtime.invoke", input: { operation_id: "instance.snapshot", action: "read" } }),
         ["managed_task_ticket_inactive", "managed_site_capability_not_admitted"]);
+      await rejectsWithCode(managedTaskService.workerFailure(credentialHash, { ticket_id: ticket.ticket_id, code: "managed_task_snapshot_unavailable" }), ["managed_task_ticket_inactive"]);
       const terminal = await runRecordStore.getRunRecord(preparedRun.run.run_id);
       assert.equal(terminal?.status, "cancelled");
       assert.equal(snapshotCalls.length, before + 1, "stop prevents a second browser operation");

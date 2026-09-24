@@ -20,6 +20,10 @@ await access(join(packageRoot, "runtime/node"), constants.X_OK);
 for (const path of ["agent-entry/cli.mjs", "agent-entry/mcp.mjs", "agent-entry/service.mjs", "agent-entry/managed-site-worker-supervisor.mjs", "agent-entry/managed-site-worker.mjs", "dist-electron/runtime/core/start-runtime.mjs", "dist-electron/runtime/harbor/start-runtime.mjs"]) {
   await stat(join(packageRoot, path));
 }
+const packagedCoreEntry = await readFile(join(packageRoot, "dist-electron/runtime/core/start-runtime.mjs"), "utf8");
+assert.match(packagedCoreEntry,
+  /createManagedTaskService\(\{[\s\S]*?\.\.\.\(accountSystemDefinitionService === undefined \? \{\} : \{ accountSystemDefinitionService \}\)/,
+  "packaged Core must pass the installed AccountSystem resolver to task submission");
 assert.equal(await fixedNodeVersion(packageRoot), `v${manifest.runtime.node_version}`);
 
 const verifyScript = `import { verifyBundle } from './agent-entry/bundle.mjs'; console.log(JSON.stringify(await verifyBundle(process.cwd())));`;

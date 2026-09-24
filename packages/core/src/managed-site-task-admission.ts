@@ -55,6 +55,7 @@ const maxIndexBytes = 1024 * 1024;
 const maxManifestBytes = 1024 * 1024;
 const maxOwnerDiffBytes = 128 * 1024;
 const shaRefPattern = /^sha256:[a-f0-9]{64}$/;
+const manifestDigestPattern = /^[a-f0-9]{64}$/;
 const commitPattern = /^[a-f0-9]{40}$/;
 const packageRefPattern = /^lode:\/\/site-skill\/[A-Za-z0-9._/-]+$/;
 const sourceCandidatePattern = /^webenvoy:site-task-candidate\/[0-9a-f-]{36}#sha256:[a-f0-9]{64}$/;
@@ -312,7 +313,7 @@ function derivePin(packageRef: string, taskRef: string, index: Json, manifestByt
     task_ref: taskRef,
     revision_ref: text(entry.revision_ref, "managed_site_task_source_corrupt"),
     package_digest: text(entry.package_digest, "managed_site_task_source_corrupt"),
-    manifest_sha256: `sha256:${digest(manifestBytes)}`,
+    manifest_sha256: digest(manifestBytes),
     source_repository: text(source.repository, "managed_site_task_source_corrupt"),
     source_path: packagePath,
     source_commit: commit,
@@ -325,7 +326,7 @@ function derivePin(packageRef: string, taskRef: string, index: Json, manifestByt
 
 function parsePin(value: unknown): ExtendedSiteSkillPackagePin {
   const pin = exactObject(value, ["package_ref", "package_path", "task_ref", "revision_ref", "package_digest", "manifest_sha256", "source_repository", "source_path", "source_commit", "source_ref", "lock_ref", "capability_asset_ref", "script"]);
-  if (!packageRefPattern.test(text(pin.package_ref)) || !shaRefPattern.test(text(pin.package_digest)) || !shaRefPattern.test(text(pin.manifest_sha256)) || !commitPattern.test(text(pin.source_commit)) ||
+  if (!packageRefPattern.test(text(pin.package_ref)) || !shaRefPattern.test(text(pin.package_digest)) || !manifestDigestPattern.test(text(pin.manifest_sha256)) || !commitPattern.test(text(pin.source_commit)) ||
       typeof pin.script !== "undefined" && pin.script !== undefined && pin.script !== null && !isObject(pin.script)) return fail("managed_site_task_admission_store_invalid");
   let script: ExtendedSiteSkillPackagePin["script"];
   if (isObject(pin.script)) {
@@ -543,7 +544,7 @@ export function createFileManagedSiteTaskAdmissionStore(options: {
     await assertOutsideManagedRoots(commonDir);
   }
   async function assertNoRepositoryFilters(root: string): Promise<void> {
-    const filters = await git(root, ["config", "--local", "--get-regexp", "^filter\\..*\\.(clean|smudge|process|required)$"]).catch(error => {
+    const filters = await git(root, ["config", "--includes", "--get-regexp", "^filter\\..*\\.(clean|smudge|process|required)$"]).catch(error => {
       if ((error as { code?: unknown }).code === 1) return { stdout: "", stderr: "" };
       throw error;
     });

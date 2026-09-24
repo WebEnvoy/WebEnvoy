@@ -281,6 +281,7 @@ const workerIdentity = Number.isSafeInteger(workerOwnerUid) && workerOwnerUid > 
   : undefined;
 const managedTaskService = managedBrowserService
   ? createManagedTaskService({ accessStore: managedAccessStore, runRecordStore, skillLibraryService: managedSkillService, managedBrowserService,
+      ...(accountSystemDefinitionService === undefined ? {} : { accountSystemDefinitionService }),
       ...(workerIdentity === undefined ? {} : { workerIdentity }) })
   : undefined;
 const server = createApiServer({
