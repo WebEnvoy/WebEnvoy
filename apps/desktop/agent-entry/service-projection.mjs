@@ -10,6 +10,17 @@ const projectLock = value => value && typeof value === 'object' && !Array.isArra
   ? Object.fromEntries(['owner', 'state', 'holder_ref', 'updated_at'].filter(key => key in value).map(key => [key, value[key]]))
   : undefined;
 
+const providerDiagnosticStages = new Set(['page_list_request', 'page_relation_refresh', 'provider_snapshot']);
+const providerDiagnosticOutcomes = new Set(['completed', 'unavailable', 'timeout', 'error']);
+const projectProviderOperationDiagnostics = value => Array.isArray(value) ? value.slice(-12).flatMap(item => {
+  if (!item || typeof item !== 'object' || Array.isArray(item) || !providerDiagnosticStages.has(item.stage) ||
+      !providerDiagnosticOutcomes.has(item.outcome) || !Number.isSafeInteger(item.duration_ms) || item.duration_ms < 0 || item.duration_ms > 120_000 ||
+      typeof item.observed_at !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(item.observed_at) || !Number.isFinite(Date.parse(item.observed_at)) ||
+      Object.hasOwn(item, 'code') && (typeof item.code !== 'string' || !/^[a-z][a-z0-9_]{0,63}$/.test(item.code))) return [];
+  return [{ stage: item.stage, outcome: item.outcome, duration_ms: item.duration_ms, observed_at: item.observed_at,
+    ...(Object.hasOwn(item, 'code') ? { code: item.code } : {}) }];
+}) : [];
+
 const ownerSessionRunStatuses = new Set(['pending', 'admitted', 'running', 'requires_user_action', 'manual_recovery_required', 'unknown_outcome']);
 const safeIdentifier = /^[A-Za-z][A-Za-z0-9._:-]{0,127}$/;
 const safeRunId = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
@@ -67,6 +78,8 @@ export function projectSessionFacts(value, { allowTerminalStop = false } = {}) {
   if (value.current_page) result.current_page = projectPage(value.current_page);
   if (value.control_lock) result.control_lock = projectLock(value.control_lock);
   if (value.current_error) result.current_error = projectRuntimeError(value.current_error);
+  const providerOperationDiagnostics = projectProviderOperationDiagnostics(value.provider_operation_diagnostics);
+  if (providerOperationDiagnostics.length > 0) result.provider_operation_diagnostics = providerOperationDiagnostics;
   if (value.viewer_entry && typeof value.viewer_entry === 'object' && !Array.isArray(value.viewer_entry)) {
     result.viewer_entry = Object.fromEntries(['availability', 'access_mode', 'transport', 'input_capabilities', 'unavailable_reason'].filter(key => key in value.viewer_entry).map(key => [key, value.viewer_entry[key]]));
   }
