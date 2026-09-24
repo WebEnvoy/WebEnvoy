@@ -304,7 +304,8 @@ Agent 自行计算或替换的第二身份。Core/Lode resolver 必须逐项核�
 capability ref 冒充该 task。
 浏览器现场任务的 `target_ref` 必须是当前 Harbor/Core 已登记的不透明 target ref；
 不能以网页 URL、selector 或最后一次页面状态替代。§5.3 的程序侧匿名读取不带
-`target_ref`。`intent.summary` 是最多 256 个 UTF-8 字符的非敏感摘要；
+`target` 字段；若提供任何 Page 或公共目标对象则在派发前拒绝。`intent.summary`
+是最多 256 个 UTF-8 字符的非敏感摘要；
 `intent.policy` 只接受现有 Task Intent 的公开 risk、execution_intent 和 timeout 字段。
 
 Core 在 managed projection 内部生成唯一 `run_id`/`intent_id`，并将请求映射为同一
@@ -542,7 +543,7 @@ observation 和 browser Provider 绑定要求；固定来源、代码准入、�
 Instance/Page/ControlLease/browser Context。普通 Agent 的正式入口仍是
 `webenvoy_task.task.submit/query/stop`，只授予其实际 `task.*` operation 与精确
 package revision；`network.read` 只在该 Run 的 worker ticket 内出现。
-`task.submit` 对此目标不带 Page target；Core 只从已验证的 task declaration 取得
+`task.submit` 对此目标必须完全省略 `target` 字段；Core 只从已验证的 task declaration 取得
 origin/请求策略，不从 Agent 输入或当前浏览器猜测。页面任务继续要求原 target。
 
 `webenvoy.managed-task-inline/v1` 输入须先按 pinned Lode schema 校验并限于 65536

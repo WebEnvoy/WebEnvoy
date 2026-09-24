@@ -98,7 +98,7 @@ mapping；Lode、Harbor、Runtime 和业务错误不得被包装为成功。CLI 
 完整性和版本，不把源码或 raw 响应正文变成普通 Agent 结果。Agent 仍先获得精确
 Grant、安装并显式启用 revision，再用同一 `webenvoy_task.task.submit` 携带已验证
 inline JSON 输入。此类任务由 pinned declaration 决定 URL 规则，请求不接受 Agent
-自填的 URL/header/allowlist，也不携带 Page target；五组 task scope 仍绑定一个真实
+自填的 URL/header/allowlist，且必须省略 `target` 字段；五组 task scope 仍绑定一个真实
 Profile 和任务 origin。页面型任务的 target 要求保持不变。
 
 程序侧匿名读取在 Core broker 内受控执行；它不启动或冒充浏览器 Page、
