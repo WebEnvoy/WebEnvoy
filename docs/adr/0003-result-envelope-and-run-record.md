@@ -43,6 +43,12 @@ accepted -> running -> succeeded / failed / unknown_outcome / manual_recovery_re
 
 数据集投影是可选公共载体。Core 可以记录数据集引用或归一化公共载荷，但 Core 不变成业务数据仓库或平台专用 ETL 层。
 
+### Core Run 的有界公共结果持久化
+
+Core 的 `webenvoy.run-record.v0` 在同一个 Run 文件中原子保存状态与公共结果。`public_result_summary` 最多 64 KiB UTF-8 JSON；如果完整摘要超过该界限且含 `result`，Core 将其余摘要留在该字段，把 `result` 单独存为最多 256 KiB UTF-8 JSON 的可选 `public_result_payload`。摘要本身仍须在 64 KiB 内，结果也不得超过 256 KiB；超过边界必须失败，不截断或改写为成功。两个字段只保存经过公共结果边界校验的 JSON，不承载 raw DOM、凭据或 Provider 私有材料。
+
+查询把分离的 payload 还原为原有公共 `result` 形状；旧 Run 若把结果内联在摘要中，仍按原形读取。只更新元数据或状态时保留已有 payload；明确写入新的 `result` 时以新值替换旧 payload，不能让旧结果覆盖新终态。历史 `unknown_outcome` 不因新版本可保存较大结果而改写或重放。新字段见 [Run Record v0 Schema](../../packages/schemas/schemas/run-record.schema.json)。旧二进制不认识分离的 payload，不能直接回滚并期望读取这类新 Run 的完整结果；回滚前须使用理解该字段的版本完成迁移或保留新版本读取能力。
+
 ## 第一阶段 Run Record 最小事实范围
 
 本表覆盖 Core #15 的第一阶段结论。它定义 Run Record 需要承载的最小事实类型和引用边界，不冻结最终字段名。

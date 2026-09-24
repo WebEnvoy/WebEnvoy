@@ -3,7 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { withFileOwnershipLock } from "./file-ownership.js";
 import { ManagedAccessError, managedFileOperations, managedInteractionOperations, managedPageOperations, type FileManagedAccessStore, type ManagedAccessRequest } from "./managed-access.js";
-import type { FileRunRecordStore, RunRecord } from "./run-record-store.js";
+import { publicRunResult, type FileRunRecordStore, type RunRecord } from "./run-record-store.js";
 import type { FileAuthorizationDecisionStore } from "./authorization-decision-store.js";
 import type { FileExecutionPolicyConfigStore } from "./execution-policy-config-store.js";
 import { matchHarborBusinessOperationOwner } from "./execution-policy-owner-proof.js";
@@ -372,8 +372,9 @@ function managedRuntimeSessionBinding(session: ObjectValue, identityEnvironmentR
   };
 }
 function response(run: RunRecord) {
+  const result = publicRunResult(run);
   return { ok: run.status === "succeeded", run_id: run.run_id, status: run.status,
-    ...(run.public_result_summary?.result === undefined ? {} : { result: run.public_result_summary.result }),
+    ...(result === undefined ? {} : { result }),
     ...(run.public_result_summary?.dispatch_state === undefined ? {} : { dispatch_state: run.public_result_summary.dispatch_state }),
     ...(run.public_result_summary?.reconciliation === undefined ? {} : { reconciliation: run.public_result_summary.reconciliation }),
     ...(run.failure === undefined ? {} : { failure: { code: run.failure.code } }) };

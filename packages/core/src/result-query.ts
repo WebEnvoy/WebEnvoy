@@ -6,7 +6,8 @@ import {
   type FileRunRecordStore,
   type RetentionState,
   type RunRecord,
-  type RunRecordStatus
+  type RunRecordStatus,
+  publicRunResult
 } from "./run-record-store.js";
 
 export const resultQuerySchemaVersion = "webenvoy.result-query.v0";
@@ -195,8 +196,15 @@ function resultStates(record: RunRecord): Pick<ResultQueryEnvelope["result"], "e
   }
   return {
     envelope_state: "available",
-    payload_state: record.public_result_summary === undefined ? "not_persisted_in_core" : "available"
+    payload_state: record.public_result_summary === undefined && record.public_result_payload === undefined ? "not_persisted_in_core" : "available"
   };
+}
+
+function resultData(record: RunRecord): Record<string, unknown> | undefined {
+  if (record.public_result_summary === undefined && record.public_result_payload === undefined) return undefined;
+  const summary = record.public_result_summary === undefined ? {} : { ...publicResultSummary(record.public_result_summary) };
+  if (record.public_result_payload !== undefined) summary.result = publicRunResult(record);
+  return summary;
 }
 
 function resultEnvelope(record: RunRecord): ResultEnvelope | undefined {
@@ -204,6 +212,7 @@ function resultEnvelope(record: RunRecord): ResultEnvelope | undefined {
     return undefined;
   }
   const ok = record.status === "succeeded";
+  const data = resultData(record);
   return {
     schema_version: resultEnvelopeSchemaVersion,
     run_record_ref: record.run_id,
@@ -218,9 +227,9 @@ function resultEnvelope(record: RunRecord): ResultEnvelope | undefined {
     ...(record.result_kind === undefined ? {} : { result_kind: record.result_kind }),
     ...(record.output_schema_id === undefined ? {} : { output_schema_id: record.output_schema_id }),
     ...(record.projection_ref === undefined ? {} : { projection_ref: record.projection_ref }),
-    ...(record.public_result_summary === undefined || (record.retention_state !== undefined && record.retention_state !== "active")
+    ...((record.retention_state !== undefined && record.retention_state !== "active") || data === undefined
       ? {}
-      : { data: publicResultSummary(record.public_result_summary) }),
+      : { data }),
     ...(record.package_ref === undefined ? {} : { package_ref: record.package_ref }),
     ...(record.source_refs === undefined ? {} : { source_refs: [...record.source_refs] }),
     ...(record.evidence_refs === undefined ? {} : { evidence_refs: [...record.evidence_refs] }),

@@ -6,7 +6,7 @@ import { ManagedAccessError, type FileManagedAccessStore, type ManagedOperation,
 import type { createManagedBrowserService } from "./managed-browser.js";
 import type { createFileSkillLibraryService } from "./skill-library.js";
 import { approvedManagedSiteTaskPackage } from "./site-skill-package.js";
-import { terminalRunRecordStatuses, type FailureRecord, type FileRunRecordStore, type PostCheckResult, type RunRecord } from "./run-record-store.js";
+import { publicRunResult, terminalRunRecordStatuses, type FailureRecord, type FileRunRecordStore, type PostCheckResult, type RunRecord } from "./run-record-store.js";
 import { completeRunWithFailure, completeRunWithResult, type ResultEnvelope } from "./result-envelope.js";
 import { validateTaskIntent } from "./task-submission.js";
 import { isValidRunId } from "./run-id.js";
@@ -212,6 +212,7 @@ function summaryFacts(run: RunRecord): { package_ref: string; revision_ref: stri
 function response(run: RunRecord, operation: ManagedTaskOperation, operationRef = run.run_id, failureOverride?: JsonObject | null) {
   const summary = run.public_result_summary;
   const input = isObject(summary?.input) ? summary.input : {};
+  const result = publicRunResult(run);
   return {
     ok: true as const,
     schema_version: responseSchemaVersion,
@@ -220,7 +221,7 @@ function response(run: RunRecord, operation: ManagedTaskOperation, operationRef 
     run: { run_id: run.run_id, task_intent_ref: run.task_intent_ref, package_ref: run.package_ref ?? "", status: run.status,
       dispatch_state: summary?.dispatch_state === "dispatched" ? "dispatched" as const : "not_dispatched" as const },
     input: { schema_ref: typeof input.schema_ref === "string" ? input.schema_ref : "unavailable", carrier: "none" as const, value_present: false as const },
-    result: isObject(summary?.result) ? summary.result as unknown as ResultEnvelope : null,
+    result: isObject(result) ? result as unknown as ResultEnvelope : null,
     failure: failureOverride !== undefined ? failureOverride : run.failure ?? null
   };
 }

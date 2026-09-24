@@ -3,7 +3,7 @@ import { link, lstat, mkdir, readFile, readdir, rename, unlink, writeFile } from
 import { join, relative, resolve } from "node:path";
 import { withFileOwnershipLock } from "./file-ownership.js";
 import { ManagedAccessError, managedSkillOperations, type FileManagedAccessStore, type ManagedAccessRequest } from "./managed-access.js";
-import type { FileRunRecordStore, RunRecord } from "./run-record-store.js";
+import { publicRunResult, type FileRunRecordStore, type RunRecord } from "./run-record-store.js";
 import { completeRunWithFailure, completeRunWithResult } from "./result-envelope.js";
 import { approvedManagedSiteTaskPackage, resolveApprovedSiteTaskPackage, type VerifiedSiteTask } from "./site-skill-package.js";
 
@@ -521,7 +521,8 @@ export function createFileSkillLibraryService(options: {
     await options.accessStore.checkAccess(hash, request);
   }
   function response(run: RunRecord): JsonObject {
-    return { ok: run.status === "succeeded", run_id: run.run_id, status: run.status, ...(run.public_result_summary?.result === undefined ? {} : { result: run.public_result_summary.result }), ...(run.failure === undefined ? {} : { failure: { code: run.failure.code } }) };
+    const result = publicRunResult(run);
+    return { ok: run.status === "succeeded", run_id: run.run_id, status: run.status, ...(result === undefined ? {} : { result }), ...(run.failure === undefined ? {} : { failure: { code: run.failure.code } }) };
   }
   function committedResponse(operation: SkillOperationRecord): JsonObject {
     return { ok: true, run_id: operation.run_id, status: "succeeded", result: operation.metadata };
@@ -529,7 +530,7 @@ export function createFileSkillLibraryService(options: {
   async function projectCommittedOperation(operation: SkillOperationRecord): Promise<JsonObject> {
     const current = await options.runRecordStore.getRunRecord(operation.run_id);
     if (!current) return committedResponse(operation);
-    if (current.status !== "succeeded" || current.public_result_summary?.result === undefined) {
+    if (current.status !== "succeeded" || publicRunResult(current) === undefined) {
       await completeRunWithResult(options.runRecordStore, operation.run_id, {
         result_ref: `managed-skill-result:${operation.run_id}`,
         result_kind: "managed_skill_operation",

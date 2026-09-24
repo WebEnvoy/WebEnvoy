@@ -28,6 +28,7 @@
       "result_ref": "Core",
       "result_outcome": "Core",
       "public_result_summary": "Core persists a bounded public projection after runtime private-field rejection",
+      "public_result_payload": "Core persists a bounded public result separately when it does not fit in the summary",
       "projection_ref": "Core",
       "source_refs": "Harbor or Lode owns referenced source body; Core records refs only",
       "preview_result": "Core projected validate-only preview result; submitted result truth is out of boundary",
@@ -258,6 +259,9 @@
     },
     "public_result_summary": {
       "type": "object"
+    },
+    "public_result_payload": {
+      "description": "Optional JSON-safe result separated from public_result_summary; Core enforces a 256 KiB UTF-8 JSON limit."
     },
     "source_refs": {
       "type": "array",
