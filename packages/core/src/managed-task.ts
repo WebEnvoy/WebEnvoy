@@ -811,7 +811,7 @@ export function createManagedTaskService(options: {
         const targetRef = taskFacts.kind === "page_snapshot" ? request.target?.target_ref : taskFacts.targetRef;
         const taskInputValue = request.input!.carrier === "webenvoy.managed-task-inline/v1" ? request.input!.value : {};
         if (origin !== taskFacts.origin || request.input!.schema_ref !== taskFacts.inputSchemaRef || request.input!.carrier !== taskFacts.inputCarrier ||
-            Buffer.byteLength(canonical(taskInputValue), "utf8") > taskFacts.maxInputBytes || !schemaValid(taskInputValue, sitePackage.input_schema) ||
+          request.input!.carrier === "webenvoy.managed-task-inline/v1" && Buffer.byteLength(canonical(taskInputValue), "utf8") > taskFacts.maxInputBytes || !schemaValid(taskInputValue, sitePackage.input_schema) ||
             taskFacts.kind === "page_snapshot" && (!request.target || request.target.target_type !== taskFacts.targetType) ||
             taskFacts.kind === "program_public_read" && request.target !== undefined || !targetRef) return fail("managed_access_denied");
         // A task's AccountSystem dependency is part of its admission inputs. Resolve
