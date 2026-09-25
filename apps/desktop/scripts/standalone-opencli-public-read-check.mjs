@@ -110,7 +110,31 @@ function taskRequest(operation, sample, fields = {}) {
 }
 async function verifyBusiness(sample, result) {
   const rows = result?.data?.normalized?.records;
-  assert.ok(Array.isArray(rows) && rows.length > 0, `${sample.name}:records_missing`);
+  assert.ok(Array.isArray(rows) && rows.length === sample.input.limit, `${sample.name}:records_missing`);
+  const listingUrl = {
+    github: `https://github.com/trending?since=${sample.input.since}`,
+    devto: `https://dev.to/api/articles/latest?per_page=100&page=${sample.input.page}`,
+    arxiv: `https://export.arxiv.org/api/query?search_query=cat%3A${sample.input.category}&max_results=50&sortBy=submittedDate&sortOrder=descending`,
+  }[sample.name];
+  const listingResponse = await fetch(listingUrl, { headers: sample.task.network_read.headers,
+    signal: AbortSignal.timeout(15_000), redirect: 'manual' });
+  assert.equal(listingResponse.status, 200, `${sample.name}:independent_listing_status`);
+  const listingBody = await listingResponse.text();
+  assert.ok(listingBody.length > 0 && listingBody.length < 2_000_000, `${sample.name}:independent_listing_body`);
+  const listed = sample.name === 'github'
+    ? [...listingBody.matchAll(/<article\b[^>]*\bBox-row\b[^>]*>[\s\S]*?<\/article>/g)]
+      .map(match => match[0].match(/<h2\b[\s\S]*?href="\/([^"/?#]+\/[^"/?#]+)"/)?.[1]).filter(Boolean)
+    : sample.name === 'devto'
+      ? JSON.parse(listingBody).map(item => String(item.id))
+      : [...listingBody.matchAll(/<entry>([\s\S]*?)<\/entry>/g)]
+        .map(match => match[1].match(/<id>\s*https?:\/\/arxiv\.org\/abs\/([^<]+)<\/id>/)?.[1]?.replace(/v\d+$/, '')).filter(Boolean);
+  let previousIndex = -1;
+  for (const row of rows) {
+    const identity = sample.name === 'github' ? row.repo : row.id;
+    const index = listed.indexOf(identity);
+    assert.ok(index > previousIndex, `${sample.name}:independent_listing_mismatch`);
+    previousIndex = index;
+  }
   const first = rows[0];
   let url;
   if (sample.name === 'github') url = `https://github.com/${first.repo}`;
@@ -127,8 +151,9 @@ async function verifyBusiness(sample, result) {
     const plain = body.replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\s+/g, ' ');
     assert.ok(plain.includes(first.title.replace(/\s+/g, ' ')) && body.includes(first.id), 'arxiv:paper_detail_mismatch');
   }
-  return { method: 'separate public detail request', status: response.status, record_count: rows.length,
-    first_identity_sha256: sha(sample.name === 'github' ? first.repo : first.id) };
+  return { method: 'separate public listing and first detail requests', status: response.status,
+    listing_status: listingResponse.status, record_count: rows.length,
+    listed_in_order: true, first_identity_sha256: sha(sample.name === 'github' ? first.repo : first.id) };
 }
 
 try {
