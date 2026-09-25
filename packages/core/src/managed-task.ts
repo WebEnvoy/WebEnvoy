@@ -689,7 +689,7 @@ export function createManagedTaskService(options: {
     const failureCode = active.failure_code ?? code;
     const dispatchState = active.dispatched ? "dispatched" : "not_dispatched";
     const unknown = active.outcome_uncertain || active.dispatched &&
-      (active.taskFacts.kind === "page_snapshot" ? !active.snapshot : !active.public_response);
+      (active.taskFacts.kind === "page_snapshot" ? !active.snapshot : active.network_controller !== undefined && !active.public_response);
     const status = unknown ? "unknown_outcome" : "failed";
     const failed = await finishFailure(active.run_id, failureCode, status, dispatchState, {
       ...(active.snapshot && isObject(active.snapshot.snapshot) && typeof active.snapshot.snapshot.observation_ref === "string"

@@ -90,12 +90,14 @@ test("program-side public read prepares without a browser service or Page target
       accessStore, runRecordStore,
       skillLibraryService: { async resolveManagedSiteTask() { return sitePackage; } } as unknown as Parameters<typeof createManagedTaskService>[0]["skillLibraryService"],
       workerIdentity: { owner_uid: 501, agent_uid: 502, mode: "distinct_uid_hardened", owner_socket_acl: "verified" },
-      async publicHttpReader(_policy, _call, dependencies, signal) {
+      async publicHttpReader(_policy, call, dependencies, signal) {
         publicReadCalls += 1;
         await dependencies?.beforeDispatch?.(new URL("https://github.com/trending"), {
           url_sha256: "a".repeat(64), pathname: "/trending", hop_index: 0
         });
         dispatched.resolve();
+        if ((call as Json).url.includes("since=weekly"))
+          throw new ProgramPublicHttpError("managed_task_network_content_type_denied", "dispatched", false);
         await new Promise<void>(resolve => signal?.addEventListener("abort", () => resolve(), { once: true }));
         throw new ProgramPublicHttpError("managed_task_network_cancelled", "dispatched", true);
       }
@@ -140,6 +142,19 @@ test("program-side public read prepares without a browser service or Page target
     assert.equal(retried.run.run_id, inFlight.run.run_id);
     assert.equal(retried.run.status, "unknown_outcome");
     assert.equal(publicReadCalls, 1, "same key never replays a dispatched HTTP request");
+    const knownReject = await taskService.operate(credentialHash, {
+      ...submitRequest, idempotency_key: "public-read-known-rejection"
+    }, { agentSocketIngressVerified: true }) as Json;
+    const rejectedTicketId = knownReject.worker_execution.ticket.ticket_id;
+    await taskService.workerStarted(credentialHash, { ticket_id: rejectedTicketId });
+    await rejectsWithCode(taskService.broker(credentialHash, { ticket_id: rejectedTicketId, method: "network.read",
+      input: { url: "https://github.com/trending?since=weekly", method: "GET", headers: policy.headers } }),
+    ["managed_task_network_content_type_denied"]);
+    const rejected = await taskService.workerFailure(credentialHash, {
+      ticket_id: rejectedTicketId, code: "managed_task_network_content_type_denied"
+    }) as Json;
+    assert.equal(rejected.run.status, "failed", "a known HTTP rejection remains failed");
+    assert.equal(rejected.run.dispatch_state, "dispatched");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
