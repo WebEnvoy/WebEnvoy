@@ -113,8 +113,8 @@ async function verifyBusiness(sample, result) {
   assert.ok(Array.isArray(rows) && rows.length === sample.input.limit, `${sample.name}:records_missing`);
   const listingUrl = {
     github: `https://github.com/trending?since=${sample.input.since}`,
-    devto: `https://dev.to/api/articles/latest?per_page=100&page=${sample.input.page}`,
-    arxiv: `https://export.arxiv.org/api/query?search_query=cat%3A${sample.input.category}&max_results=50&sortBy=submittedDate&sortOrder=descending`,
+    devto: `https://dev.to/api/articles/latest?per_page=${sample.input.limit}&page=${sample.input.page}`,
+    arxiv: `https://export.arxiv.org/api/query?search_query=cat%3A${sample.input.category}&max_results=${sample.input.limit}&sortBy=submittedDate&sortOrder=descending`,
   }[sample.name];
   const listingResponse = await fetch(listingUrl, { headers: sample.task.network_read.headers,
     signal: AbortSignal.timeout(15_000), redirect: 'manual' });
@@ -128,13 +128,8 @@ async function verifyBusiness(sample, result) {
       ? JSON.parse(listingBody).map(item => String(item.id))
       : [...listingBody.matchAll(/<entry>([\s\S]*?)<\/entry>/g)]
         .map(match => match[1].match(/<id>\s*https?:\/\/arxiv\.org\/abs\/([^<]+)<\/id>/)?.[1]?.replace(/v\d+$/, '')).filter(Boolean);
-  let previousIndex = -1;
-  for (const row of rows) {
-    const identity = sample.name === 'github' ? row.repo : row.id;
-    const index = listed.indexOf(identity);
-    assert.ok(index > previousIndex, `${sample.name}:independent_listing_mismatch`);
-    previousIndex = index;
-  }
+  assert.deepEqual(rows.map(row => sample.name === 'github' ? row.repo : row.id),
+    listed.slice(0, rows.length), `${sample.name}:independent_listing_mismatch`);
   const first = rows[0];
   let url;
   if (sample.name === 'github') url = `https://github.com/${first.repo}`;
