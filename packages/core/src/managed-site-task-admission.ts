@@ -717,6 +717,8 @@ export function createFileManagedSiteTaskAdmissionStore(options: {
         const prior = state.receipts.find(item => item.repository_ref === found.repository_ref && item.authoring_commit === found.authoring_commit &&
           item.pin.package_ref === found.pin.package_ref && item.pin.revision_ref === found.pin.revision_ref && item.pin.package_digest === found.pin.package_digest && item.revoked_at === null);
         if (prior) return publicReceipt(prior);
+        if (found.base_revision_ref === null && state.receipts.some(item => item.base_revision_ref === null && item.pin.package_ref === found.pin.package_ref))
+          return fail("managed_site_task_source_admission_conflict");
         const receiptValue = {
           local_revision_ref: localRevisionRef(found), admission_ref: "",
           repository_ref: found.repository_ref, base_revision_ref: found.base_revision_ref, pin: structuredClone(found.pin),

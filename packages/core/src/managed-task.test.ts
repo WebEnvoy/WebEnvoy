@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createFileManagedAccessStore, managedPageOperations, managedSkillOperations, managedTaskOperations } from "./managed-access.js";
 import { createManagedTaskService } from "./managed-task.js";
+import { ProgramPublicHttpError } from "./program-public-http.js";
 import { createFileRunRecordStore, type FileRunRecordStore, type RunRecordStatus } from "./run-record-store.js";
 import { completeRunWithFailure } from "./result-envelope.js";
 import { createFileSkillLibraryService } from "./skill-library.js";
@@ -48,6 +49,8 @@ test("program-side public read prepares without a browser service or Page target
     query_keys: ["since"], headers: { accept: "text/html" }, content_types: ["text/html"],
     max_response_bytes: 1_048_576, max_redirects: 2, timeout_ms: 10_000
   };
+  const dispatched = Promise.withResolvers<void>();
+  let publicReadCalls = 0;
   const sitePackage = {
     ...pin, version: "0.1.0", source_repository: "WebEnvoy/Lode", package_path: "sites/github/opencli-trending-repos",
     source_ref: sourceRef, lock_ref: "lode://lock/site-skill/github/opencli-trending-repos@0.1.0", source_commit: "a".repeat(40),
@@ -86,7 +89,16 @@ test("program-side public read prepares without a browser service or Page target
     const taskService = createManagedTaskService({
       accessStore, runRecordStore,
       skillLibraryService: { async resolveManagedSiteTask() { return sitePackage; } } as unknown as Parameters<typeof createManagedTaskService>[0]["skillLibraryService"],
-      workerIdentity: { owner_uid: 501, agent_uid: 502, mode: "distinct_uid_hardened", owner_socket_acl: "verified" }
+      workerIdentity: { owner_uid: 501, agent_uid: 502, mode: "distinct_uid_hardened", owner_socket_acl: "verified" },
+      async publicHttpReader(_policy, _call, dependencies, signal) {
+        publicReadCalls += 1;
+        await dependencies?.beforeDispatch?.(new URL("https://github.com/trending"), {
+          url_sha256: "a".repeat(64), pathname: "/trending", hop_index: 0
+        });
+        dispatched.resolve();
+        await new Promise<void>(resolve => signal?.addEventListener("abort", () => resolve(), { once: true }));
+        throw new ProgramPublicHttpError("managed_task_network_cancelled", "dispatched", true);
+      }
       // No managedBrowserService: program-side reads must not need an Instance or Provider.
     });
     const submitRequest = {
@@ -110,6 +122,24 @@ test("program-side public read prepares without a browser service or Page target
     assert.equal(stringLimit.ok, true, JSON.stringify(stringLimit));
     await rejectsWithCode(taskService.operate(credentialHash, { ...submitRequest, idempotency_key: "public-read-out-of-range",
       input: { ...submitRequest.input, value: { limit: 26 } } }, { agentSocketIngressVerified: true }), ["managed_access_denied"]);
+    const timeoutRequest = { ...submitRequest, idempotency_key: "public-read-inflight-timeout",
+      intent: { ...submitRequest.intent, policy: { ...submitRequest.intent.policy, timeout_ms: 150 } } };
+    const inFlight = await taskService.operate(credentialHash, timeoutRequest, { agentSocketIngressVerified: true }) as Json;
+    const ticketId = inFlight.worker_execution.ticket.ticket_id;
+    await taskService.workerStarted(credentialHash, { ticket_id: ticketId });
+    const pendingRead = taskService.broker(credentialHash, { ticket_id: ticketId, method: "network.read",
+      input: { url: "https://github.com/trending", method: "GET", headers: policy.headers } }).catch(() => undefined);
+    await dispatched.promise;
+    await delay(250);
+    await pendingRead;
+    const timedOut = await runRecordStore.getRunRecord(inFlight.run.run_id);
+    assert.equal(timedOut?.status, "unknown_outcome", "dispatched HTTP with no response remains uncertain");
+    assert.equal(timedOut.public_result_summary?.dispatch_state, "dispatched");
+    assert.equal(timedOut.failure?.code, "managed_task_timeout");
+    const retried = await taskService.operate(credentialHash, timeoutRequest, { agentSocketIngressVerified: true }) as Json;
+    assert.equal(retried.run.run_id, inFlight.run.run_id);
+    assert.equal(retried.run.status, "unknown_outcome");
+    assert.equal(publicReadCalls, 1, "same key never replays a dispatched HTTP request");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

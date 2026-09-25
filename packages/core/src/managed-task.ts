@@ -339,6 +339,7 @@ export function createManagedTaskService(options: {
   skillLibraryService: Pick<ReturnType<typeof createFileSkillLibraryService>, "resolveManagedSiteTask">;
   managedBrowserService?: Pick<ReturnType<typeof createManagedBrowserService>, "executeTaskSnapshot">;
   workerIdentity?: { owner_uid: number; agent_uid: number; mode: string; owner_socket_acl: string };
+  publicHttpReader?: typeof readProgramPublicHttp;
   accountSystemDefinitionService?: {
     resolveTemplate(templateRef: string): Promise<unknown>;
   };
@@ -517,7 +518,7 @@ export function createManagedTaskService(options: {
         let run = await store.getRunRecord(active.run_id);
         if (!run || run.status !== "running") return fail("managed_task_ticket_inactive");
         try {
-          const result = await readProgramPublicHttp(policy, request.input, {
+          const result = await (options.publicHttpReader ?? readProgramPublicHttp)(policy, request.input, {
             async beforeDispatch(_url, hop) {
               await revalidateWorkerTicket(active);
               const current = await store.getRunRecord(active.run_id);
@@ -687,7 +688,8 @@ export function createManagedTaskService(options: {
     }
     const failureCode = active.failure_code ?? code;
     const dispatchState = active.dispatched ? "dispatched" : "not_dispatched";
-    const unknown = active.outcome_uncertain || active.taskFacts.kind === "page_snapshot" && active.dispatched && !active.snapshot;
+    const unknown = active.outcome_uncertain || active.dispatched &&
+      (active.taskFacts.kind === "page_snapshot" ? !active.snapshot : !active.public_response);
     const status = unknown ? "unknown_outcome" : "failed";
     const failed = await finishFailure(active.run_id, failureCode, status, dispatchState, {
       ...(active.snapshot && isObject(active.snapshot.snapshot) && typeof active.snapshot.snapshot.observation_ref === "string"

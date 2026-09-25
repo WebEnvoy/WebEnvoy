@@ -331,10 +331,20 @@ test("owner can explicitly admit a first fixed package without a static base, wi
     assert.equal((await store.resolveAdmitted(request))?.code_admission_ref, undefined);
     assert.equal((await store.admitSource({ candidate_ref: candidate.candidate_ref }) as Json).admission_ref, sourceReceipt.admission_ref,
       "the same explicit admission reuses its receipt");
+    const selectedAgain = await store.selectAuthoringRepository({ path: root }) as Json;
+    const candidateAgain = await store.inspectCandidate({ repository_ref: selectedAgain.repository_ref, package_ref: firstPackageRef,
+      base_revision_ref: null, task_ref: firstTaskRef }) as Json;
+    await assert.rejects(store.admitSource({ candidate_ref: candidateAgain.candidate_ref }),
+      /managed_site_task_source_admission_conflict/, "a second repository selection cannot create an unreadable duplicate receipt");
+    assert.equal((await store.listAdmissions(firstPackageRef)).length, 1);
     const codeReceipt = await store.admitCode({ admission_ref: sourceReceipt.admission_ref }) as Json;
     assert.equal(codeReceipt.code_active, true);
     const restarted = createFileManagedSiteTaskAdmissionStore({ directory: join(directory, "owner-state"), managedDataRoot: join(directory, "managed"), runtime });
     assert.equal((await restarted.resolveAdmitted(request))?.code_admission_ref, codeReceipt.code_admission_ref, "admission receipts survive restart");
+    await restarted.revokeSource({ admission_ref: sourceReceipt.admission_ref });
+    await assert.rejects(restarted.admitSource({ candidate_ref: candidateAgain.candidate_ref }),
+      /managed_site_task_source_admission_conflict/, "revocation preserves the first admission history");
+    assert.equal((await restarted.listAdmissions(firstPackageRef)).length, 1);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
