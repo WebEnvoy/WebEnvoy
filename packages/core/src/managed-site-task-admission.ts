@@ -17,7 +17,7 @@ export type ExtendedSiteSkillPackagePin = SiteSkillPackagePin & {
   source_ref: string;
   lock_ref: string;
   capability_asset_ref: string;
-  script: {
+  script: ({
     script_ref: string;
     path: string;
     version: string;
@@ -26,7 +26,16 @@ export type ExtendedSiteSkillPackagePin = SiteSkillPackagePin & {
     entrypoint: "run";
     broker: "webenvoy.site-skill-broker/v1";
     broker_capabilities: readonly ["runtime.invoke", "output.write"];
-  } | undefined;
+  } | {
+    script_ref: string;
+    path: string;
+    version: string;
+    sha256: string;
+    runtime_kind: "webenvoy.site-skill-script-abi/v1";
+    entrypoint: "run";
+    broker: "webenvoy.site-skill-broker/v1.1";
+    broker_capabilities: readonly ["network.read", "output.write"];
+  }) | undefined;
 };
 
 export type ManagedSiteTaskPackageRequest = {
@@ -46,7 +55,8 @@ export type OwnerAdmittedSiteTaskPin = {
   code_admission_ref?: string;
 };
 
-export const managedSiteTaskAdmissionStoreSchemaVersion = "webenvoy.site-task-source-admissions.v1" as const;
+export const managedSiteTaskAdmissionStoreSchemaVersion = "webenvoy.site-task-source-admissions.v2" as const;
+const legacyManagedSiteTaskAdmissionStoreSchemaVersion = "webenvoy.site-task-source-admissions.v1" as const;
 
 const fail = (code: string): never => { throw new ManagedAccessError(code); };
 const digest = (value: Uint8Array | string): string => createHash("sha256").update(value).digest("hex");
@@ -68,7 +78,7 @@ type StoredRepository = { repository_ref: string; path: string; selected_at: str
 type StoredCandidate = {
   candidate_ref: string;
   repository_ref: string;
-  base_revision_ref: string;
+  base_revision_ref: string | null;
   pin: ExtendedSiteSkillPackagePin;
   authoring_commit: string;
   source_commit: string;
@@ -80,7 +90,7 @@ type StoredReceipt = {
   local_revision_ref: string;
   admission_ref: string;
   repository_ref: string;
-  base_revision_ref: string;
+  base_revision_ref: string | null;
   pin: ExtendedSiteSkillPackagePin;
   authoring_commit: string;
   source_commit: string;
@@ -175,6 +185,9 @@ function candidateDigest(candidate: Pick<StoredCandidate, "repository_ref" | "ba
     diff_sha256: candidate.diff_sha256
   }));
 }
+function nullableText(value: unknown, code = "managed_site_task_admission_invalid_input"): string | null {
+  return value === null ? null : text(value, code);
+}
 function candidateRefMatches(candidate: StoredCandidate): boolean {
   const prefix = candidate.candidate_ref.split("#", 1)[0];
   return candidate.candidate_ref === `${prefix}#sha256:${candidateDigest(candidate)}`;
@@ -215,6 +228,18 @@ async function git(root: string, args: string[], maxBuffer = 2 * 1024 * 1024, us
     if (code === 1) throw error;
     return fail("managed_site_task_authoring_repository_invalid");
   }
+}
+async function candidateDiffRange(root: string, baseRevisionRef: string | null, pin: ExtendedSiteSkillPackagePin, authoringCommit: string,
+  runtime: SiteTaskAdmissionRuntime): Promise<{ range: string; packagePath: string }> {
+  if (baseRevisionRef !== null) {
+    const base = runtime.approvedBasePackageFor(pin.package_ref);
+    if (!base || base.revision_ref !== baseRevisionRef) return fail("managed_site_task_base_revision_unapproved");
+    return { range: `${base.source_commit}..${authoringCommit}`, packagePath: base.package_path };
+  }
+  if (runtime.approvedBasePackageFor(pin.package_ref)) return fail("managed_site_task_base_revision_unapproved");
+  const parent = await git(root, ["rev-parse", `${pin.source_commit}^`]).then(result => result.stdout.trim()).catch(() => "");
+  if (!commitPattern.test(parent)) return fail("managed_site_task_source_commit_unreviewable");
+  return { range: `${parent}..${authoringCommit}`, packagePath: pin.package_path };
 }
 async function assertNoSymlinkPath(path: string): Promise<void> {
   const absolute = resolve(path);
@@ -297,15 +322,17 @@ function derivePin(packageRef: string, taskRef: string, index: Json, manifestByt
   if (scripts.length === 1) {
     const declaration = exactObject(scripts[0], ["script_ref", "path", "source_commit", "version", "sha256", "runtime_kind", "entrypoint", "input_schema_ref", "output_schema_ref", "capability_refs", "action", "broker", "broker_capabilities", "target_binding", "timeout_ms", "cancel", "data_handling"]);
     const capabilities = declaration.broker_capabilities;
-    if (!Array.isArray(capabilities) || canonical(capabilities) !== canonical(["runtime.invoke", "output.write"]) || declaration.runtime_kind !== "webenvoy.site-skill-script-abi/v1" ||
-        declaration.entrypoint !== "run" || declaration.broker !== "webenvoy.site-skill-broker/v1" || declaration.source_commit !== commit ||
+    const pageBroker = declaration.broker === "webenvoy.site-skill-broker/v1" && canonical(capabilities) === canonical(["runtime.invoke", "output.write"]);
+    const publicReadBroker = declaration.broker === "webenvoy.site-skill-broker/v1.1" && canonical(capabilities) === canonical(["network.read", "output.write"]);
+    if (!Array.isArray(capabilities) || !(pageBroker || publicReadBroker) || declaration.runtime_kind !== "webenvoy.site-skill-script-abi/v1" ||
+        declaration.entrypoint !== "run" || declaration.source_commit !== commit ||
         !shaRefPattern.test(String(declaration.sha256))) return fail("managed_site_task_source_corrupt");
-    script = {
-      script_ref: text(declaration.script_ref, "managed_site_task_source_corrupt"), path: safeRelative(declaration.path),
+    const base = { script_ref: text(declaration.script_ref, "managed_site_task_source_corrupt"), path: safeRelative(declaration.path),
       version: text(declaration.version, "managed_site_task_source_corrupt"), sha256: text(declaration.sha256, "managed_site_task_source_corrupt"),
-      runtime_kind: "webenvoy.site-skill-script-abi/v1", entrypoint: "run", broker: "webenvoy.site-skill-broker/v1",
-      broker_capabilities: ["runtime.invoke", "output.write"]
-    };
+      runtime_kind: "webenvoy.site-skill-script-abi/v1" as const, entrypoint: "run" as const };
+    script = publicReadBroker
+      ? { ...base, broker: "webenvoy.site-skill-broker/v1.1", broker_capabilities: ["network.read", "output.write"] as const }
+      : { ...base, broker: "webenvoy.site-skill-broker/v1", broker_capabilities: ["runtime.invoke", "output.write"] as const };
   }
   return {
     package_ref: packageRef,
@@ -331,13 +358,15 @@ function parsePin(value: unknown): ExtendedSiteSkillPackagePin {
   let script: ExtendedSiteSkillPackagePin["script"];
   if (isObject(pin.script)) {
     const candidate = exactObject(pin.script, ["script_ref", "path", "version", "sha256", "runtime_kind", "entrypoint", "broker", "broker_capabilities"]);
-    if (candidate.runtime_kind !== "webenvoy.site-skill-script-abi/v1" || candidate.entrypoint !== "run" || candidate.broker !== "webenvoy.site-skill-broker/v1" ||
-        !Array.isArray(candidate.broker_capabilities) || canonical(candidate.broker_capabilities) !== canonical(["runtime.invoke", "output.write"])) return fail("managed_site_task_admission_store_invalid");
-    script = {
-      script_ref: text(candidate.script_ref), path: safeRelative(candidate.path), version: text(candidate.version), sha256: text(candidate.sha256),
-      runtime_kind: "webenvoy.site-skill-script-abi/v1", entrypoint: "run", broker: "webenvoy.site-skill-broker/v1",
-      broker_capabilities: ["runtime.invoke", "output.write"]
-    };
+    const pageBroker = candidate.broker === "webenvoy.site-skill-broker/v1" && canonical(candidate.broker_capabilities) === canonical(["runtime.invoke", "output.write"]);
+    const publicReadBroker = candidate.broker === "webenvoy.site-skill-broker/v1.1" && canonical(candidate.broker_capabilities) === canonical(["network.read", "output.write"]);
+    if (candidate.runtime_kind !== "webenvoy.site-skill-script-abi/v1" || candidate.entrypoint !== "run" || !(pageBroker || publicReadBroker) ||
+        !Array.isArray(candidate.broker_capabilities)) return fail("managed_site_task_admission_store_invalid");
+    const base = { script_ref: text(candidate.script_ref), path: safeRelative(candidate.path), version: text(candidate.version), sha256: text(candidate.sha256),
+      runtime_kind: "webenvoy.site-skill-script-abi/v1" as const, entrypoint: "run" as const };
+    script = publicReadBroker
+      ? { ...base, broker: "webenvoy.site-skill-broker/v1.1", broker_capabilities: ["network.read", "output.write"] as const }
+      : { ...base, broker: "webenvoy.site-skill-broker/v1", broker_capabilities: ["runtime.invoke", "output.write"] as const };
   }
   const result: ExtendedSiteSkillPackagePin = {
     package_ref: text(pin.package_ref), package_path: safeRelative(pin.package_path), task_ref: text(pin.task_ref), revision_ref: text(pin.revision_ref),
@@ -351,7 +380,8 @@ function parsePin(value: unknown): ExtendedSiteSkillPackagePin {
 
 function parseState(value: unknown, runtime: SiteTaskAdmissionRuntime): State {
   const state = exactObject(value, ["schema_version", "repositories", "candidates", "receipts"]);
-  if (state.schema_version !== managedSiteTaskAdmissionStoreSchemaVersion || !Array.isArray(state.repositories) || !Array.isArray(state.candidates) || !Array.isArray(state.receipts) ||
+  if (state.schema_version !== managedSiteTaskAdmissionStoreSchemaVersion && state.schema_version !== legacyManagedSiteTaskAdmissionStoreSchemaVersion ||
+      !Array.isArray(state.repositories) || !Array.isArray(state.candidates) || !Array.isArray(state.receipts) ||
       state.repositories.length > 128 || state.candidates.length > 4096 || state.receipts.length > 4096) return fail("managed_site_task_admission_store_invalid");
   const repositories: StoredRepository[] = state.repositories.map(value => {
     const item = exactObject(value, ["repository_ref", "path", "selected_at"]);
@@ -363,13 +393,15 @@ function parseState(value: unknown, runtime: SiteTaskAdmissionRuntime): State {
   const candidates: StoredCandidate[] = state.candidates.map(value => {
     const item = exactObject(value, ["candidate_ref", "repository_ref", "base_revision_ref", "pin", "authoring_commit", "source_commit", "changed_paths", "diff_sha256", "inspected_at"]);
     const pin = parsePin(item.pin);
+    const baseRevisionRef = nullableText(item.base_revision_ref, "managed_site_task_admission_store_invalid");
+    if (state.schema_version === legacyManagedSiteTaskAdmissionStoreSchemaVersion && baseRevisionRef === null) return fail("managed_site_task_admission_store_invalid");
     if (!sourceCandidatePattern.test(text(item.candidate_ref, "managed_site_task_admission_store_invalid")) ||
         !repositories.some(repo => repo.repository_ref === item.repository_ref) || !commitPattern.test(text(item.authoring_commit, "managed_site_task_admission_store_invalid")) ||
         !commitPattern.test(text(item.source_commit, "managed_site_task_admission_store_invalid")) || !Array.isArray(item.changed_paths) ||
         !shaRefPattern.test(text(item.diff_sha256, "managed_site_task_admission_store_invalid"))) return fail("managed_site_task_admission_store_invalid");
     const base = runtime.approvedBasePackageFor(pin.package_ref);
-    if (!base || base.revision_ref !== item.base_revision_ref || pin.source_commit !== item.source_commit || pin.task_ref !== base.task_ref) return fail("managed_site_task_admission_store_invalid");
-    const candidate = { candidate_ref: String(item.candidate_ref), repository_ref: String(item.repository_ref), base_revision_ref: String(item.base_revision_ref), pin,
+    if ((baseRevisionRef === null ? false : !base || base.revision_ref !== baseRevisionRef || pin.task_ref !== base.task_ref) || pin.source_commit !== item.source_commit) return fail("managed_site_task_admission_store_invalid");
+    const candidate = { candidate_ref: String(item.candidate_ref), repository_ref: String(item.repository_ref), base_revision_ref: baseRevisionRef, pin,
       authoring_commit: String(item.authoring_commit), source_commit: String(item.source_commit), changed_paths: item.changed_paths.map(value => text(value, "managed_site_task_admission_store_invalid")),
       diff_sha256: String(item.diff_sha256), inspected_at: timestamp(item.inspected_at) };
     if (candidate.changed_paths.some(path => safeRelative(path) !== path) || !candidateRefMatches(candidate)) return fail("managed_site_task_admission_store_invalid");
@@ -378,11 +410,13 @@ function parseState(value: unknown, runtime: SiteTaskAdmissionRuntime): State {
   const receipts: StoredReceipt[] = state.receipts.map(value => {
     const item = exactObject(value, ["local_revision_ref", "admission_ref", "repository_ref", "base_revision_ref", "pin", "authoring_commit", "source_commit", "created_at", "revoked_at", "code_admission_ref", "code_admitted_at", "code_revoked_at"]);
     const pin = parsePin(item.pin);
+    const baseRevisionRef = nullableText(item.base_revision_ref, "managed_site_task_admission_store_invalid");
+    if (state.schema_version === legacyManagedSiteTaskAdmissionStoreSchemaVersion && baseRevisionRef === null) return fail("managed_site_task_admission_store_invalid");
     const receipt = {
       local_revision_ref: text(item.local_revision_ref, "managed_site_task_admission_store_invalid"),
       admission_ref: text(item.admission_ref, "managed_site_task_admission_store_invalid"),
       repository_ref: text(item.repository_ref, "managed_site_task_admission_store_invalid"),
-      base_revision_ref: text(item.base_revision_ref, "managed_site_task_admission_store_invalid"), pin,
+      base_revision_ref: baseRevisionRef, pin,
       authoring_commit: text(item.authoring_commit, "managed_site_task_admission_store_invalid"), source_commit: text(item.source_commit, "managed_site_task_admission_store_invalid"),
       created_at: timestamp(item.created_at), revoked_at: parseTimestampOrNull(item.revoked_at),
       code_admission_ref: item.code_admission_ref === null ? null : text(item.code_admission_ref, "managed_site_task_admission_store_invalid"),
@@ -390,13 +424,15 @@ function parseState(value: unknown, runtime: SiteTaskAdmissionRuntime): State {
     };
     const base = runtime.approvedBasePackageFor(pin.package_ref);
     if (!localRevisionPattern.test(receipt.local_revision_ref) || !sourceAdmissionPattern.test(receipt.admission_ref) ||
-        !repositories.some(repo => repo.repository_ref === receipt.repository_ref) || !base || base.revision_ref !== receipt.base_revision_ref ||
+        !repositories.some(repo => repo.repository_ref === receipt.repository_ref) ||
+        (receipt.base_revision_ref !== null && (!base || base.revision_ref !== receipt.base_revision_ref || pin.task_ref !== base.task_ref)) ||
         receipt.pin.source_commit !== receipt.source_commit || sourceAdmissionRef(receipt) !== receipt.admission_ref ||
         receipt.code_admission_ref !== null && (!receipt.pin.script || runtime.scriptCodeAdmissionRef(receipt.pin) !== receipt.code_admission_ref)) return fail("managed_site_task_admission_store_invalid");
     return receipt;
   });
   if (new Set(repositories.map(item => item.repository_ref)).size !== repositories.length || new Set(candidates.map(item => item.candidate_ref)).size !== candidates.length ||
-      new Set(receipts.map(item => item.admission_ref)).size !== receipts.length) return fail("managed_site_task_admission_store_invalid");
+      new Set(receipts.map(item => item.admission_ref)).size !== receipts.length ||
+      new Set(receipts.filter(item => item.base_revision_ref === null).map(item => item.pin.package_ref)).size !== receipts.filter(item => item.base_revision_ref === null).length) return fail("managed_site_task_admission_store_invalid");
   return { schema_version: managedSiteTaskAdmissionStoreSchemaVersion, repositories, candidates, receipts };
 }
 
@@ -470,6 +506,7 @@ export function createFileManagedSiteTaskAdmissionStore(options: {
   function publicReceipt(value: StoredReceipt): Json {
     return {
       local_revision_ref: value.local_revision_ref, admission_ref: value.admission_ref,
+      base_revision_ref: value.base_revision_ref,
       package_ref: value.pin.package_ref, revision_ref: value.pin.revision_ref, package_digest: value.pin.package_digest,
       source_ref: value.pin.source_ref, source_commit: value.source_commit, authoring_commit: value.authoring_commit,
       task_ref: value.pin.task_ref, active: value.revoked_at === null, created_at: value.created_at, revoked_at: value.revoked_at,
@@ -576,17 +613,26 @@ export function createFileManagedSiteTaskAdmissionStore(options: {
     const taskRef = text(taskRefValue);
     if (!packageRefPattern.test(packageRef)) return fail("managed_site_task_admission_invalid_input");
     const base = options.runtime.approvedBasePackageFor(packageRef);
-    if (!base || base.revision_ref !== text(baseRevisionRefValue)) return fail("managed_site_task_base_revision_unapproved");
+    const baseRevisionRef = nullableText(baseRevisionRefValue);
+    if (base) {
+      if (baseRevisionRef === null || base.revision_ref !== baseRevisionRef) return fail("managed_site_task_base_revision_unapproved");
+    } else if (baseRevisionRef !== null) {
+      return fail("managed_site_task_base_revision_unapproved");
+    }
     const index = readObject(await readRegular(root, "registry/local-packages.json", maxIndexBytes));
     if (index.schema_version !== "lode.local-package-index.v0" || !Array.isArray(index.entries)) return fail("managed_site_task_source_corrupt");
     const matching = index.entries.filter(value => isObject(value) && value.package_ref === packageRef);
     if (matching.length !== 1 || !isObject(matching[0])) return fail("managed_site_task_source_corrupt");
     const packagePath = safeRelative(matching[0].package_path);
-    if (packagePath !== base.package_path) return fail("managed_site_task_source_corrupt");
+    if (base ? packagePath !== base.package_path : !packagePath.startsWith("sites/")) return fail("managed_site_task_source_corrupt");
     const manifestBytes = await readRegular(root, `${packagePath}/manifest.json`, maxManifestBytes);
     const pin = derivePin(packageRef, taskRef, index, manifestBytes);
-    if (pin.revision_ref === base.revision_ref || !versionGreater(pin.revision_ref.split("@").at(-1)?.split("#")[0], base.revision_ref.split("@").at(-1)?.split("#")[0]) ||
-        pin.source_repository !== base.source_repository || pin.source_path !== base.source_path || pin.task_ref !== base.task_ref || pin.capability_asset_ref !== base.capability_asset_ref) return fail("managed_site_task_source_not_derived_from_base");
+    if (!base && state.receipts.some(item => item.pin.package_ref === packageRef &&
+        (item.pin.revision_ref !== pin.revision_ref || item.pin.package_digest !== pin.package_digest || item.pin.task_ref !== pin.task_ref))) {
+      return fail("managed_site_task_initial_admission_exists");
+    }
+    if (base && (pin.revision_ref === base.revision_ref || !versionGreater(pin.revision_ref.split("@").at(-1)?.split("#")[0], base.revision_ref.split("@").at(-1)?.split("#")[0]) ||
+        pin.source_repository !== base.source_repository || pin.source_path !== base.source_path || pin.task_ref !== base.task_ref || pin.capability_asset_ref !== base.capability_asset_ref)) return fail("managed_site_task_source_not_derived_from_base");
     const verified = await options.runtime.verifyPackageRoot(root, pin);
     if (verified.package_ref !== packageRef || verified.revision_ref !== pin.revision_ref || verified.package_digest !== pin.package_digest || verified.source_ref !== pin.source_ref ||
         verified.source_commit !== pin.source_commit || verified.task_ref !== taskRef) return fail("managed_site_task_source_corrupt");
@@ -597,13 +643,14 @@ export function createFileManagedSiteTaskAdmissionStore(options: {
       void check;
     }
     const authoringCommit = await head(root);
-    const changedOutput = await git(root, ["diff", "--name-only", "-z", `${base.source_commit}..${authoringCommit}`, "--", base.package_path, "registry/local-packages.json"]);
-    const changedPaths = changedOutput.stdout.split("\0").filter(Boolean).map(path => path.startsWith(`${base.package_path}/`) ? path.slice(base.package_path.length + 1) : path).sort();
+    const diffRange = await candidateDiffRange(root, baseRevisionRef, pin, authoringCommit, options.runtime);
+    const changedOutput = await git(root, ["diff", "--name-only", "-z", diffRange.range, "--", diffRange.packagePath, "registry/local-packages.json"]);
+    const changedPaths = changedOutput.stdout.split("\0").filter(Boolean).map(path => path.startsWith(`${diffRange.packagePath}/`) ? path.slice(diffRange.packagePath.length + 1) : path).sort();
     if (changedPaths.length === 0) return fail("managed_site_task_source_candidate_unchanged");
-    const diff = await git(root, ["diff", "--no-ext-diff", "--no-textconv", "--no-renames", `${base.source_commit}..${authoringCommit}`, "--", base.package_path, "registry/local-packages.json"], maxOwnerDiffBytes + 1);
+    const diff = await git(root, ["diff", "--no-ext-diff", "--no-textconv", "--no-renames", diffRange.range, "--", diffRange.packagePath, "registry/local-packages.json"], maxOwnerDiffBytes + 1);
     if (Buffer.byteLength(diff.stdout) > maxOwnerDiffBytes) return fail("managed_site_task_source_diff_too_large");
     const storedWithoutRef: Omit<StoredCandidate, "candidate_ref" | "inspected_at"> = {
-      repository_ref: repo.repository_ref, base_revision_ref: base.revision_ref, pin, authoring_commit: authoringCommit,
+      repository_ref: repo.repository_ref, base_revision_ref: baseRevisionRef, pin, authoring_commit: authoringCommit,
       source_commit: pin.source_commit, changed_paths: changedPaths, diff_sha256: `sha256:${digest(diff.stdout)}`
     };
     const candidate: StoredCandidate = { ...storedWithoutRef, candidate_ref: candidateRef(storedWithoutRef), inspected_at: now() };
@@ -655,9 +702,8 @@ export function createFileManagedSiteTaskAdmissionStore(options: {
       const root = await selectedRepositoryPath(repo);
       await assertOutsideManagedRoots(root);
       if (await head(root) !== found.authoring_commit) return fail("managed_site_task_authoring_revision_changed");
-      const base = options.runtime.approvedBasePackageFor(found.pin.package_ref);
-      if (!base || base.revision_ref !== found.base_revision_ref) return fail("managed_site_task_base_revision_unapproved");
-      const diff = (await git(root, ["diff", "--no-ext-diff", "--no-textconv", "--no-renames", `${base.source_commit}..${found.authoring_commit}`, "--", base.package_path, "registry/local-packages.json"], maxOwnerDiffBytes + 1)).stdout;
+      const diffRange = await candidateDiffRange(root, found.base_revision_ref, found.pin, found.authoring_commit, options.runtime);
+      const diff = (await git(root, ["diff", "--no-ext-diff", "--no-textconv", "--no-renames", diffRange.range, "--", diffRange.packagePath, "registry/local-packages.json"], maxOwnerDiffBytes + 1)).stdout;
       if (Buffer.byteLength(diff) > maxOwnerDiffBytes || `sha256:${digest(diff)}` !== found.diff_sha256) return fail("managed_site_task_source_candidate_changed");
       return { candidate_ref: found.candidate_ref, authoring_commit: found.authoring_commit, base_revision_ref: found.base_revision_ref, diff };
     },
@@ -671,6 +717,8 @@ export function createFileManagedSiteTaskAdmissionStore(options: {
         const prior = state.receipts.find(item => item.repository_ref === found.repository_ref && item.authoring_commit === found.authoring_commit &&
           item.pin.package_ref === found.pin.package_ref && item.pin.revision_ref === found.pin.revision_ref && item.pin.package_digest === found.pin.package_digest && item.revoked_at === null);
         if (prior) return publicReceipt(prior);
+        if (found.base_revision_ref === null && state.receipts.some(item => item.base_revision_ref === null && item.pin.package_ref === found.pin.package_ref))
+          return fail("managed_site_task_source_admission_conflict");
         const receiptValue = {
           local_revision_ref: localRevisionRef(found), admission_ref: "",
           repository_ref: found.repository_ref, base_revision_ref: found.base_revision_ref, pin: structuredClone(found.pin),

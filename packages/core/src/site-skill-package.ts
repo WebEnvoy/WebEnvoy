@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { lstat, readFile, readdir } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import { ManagedAccessError } from "./managed-access.js";
+import { parseProgramPublicHttpPolicy } from "./program-public-http.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -64,7 +65,7 @@ export type SiteSkillPackagePin = {
   source_ref: string;
   lock_ref: string;
   capability_asset_ref: string;
-  script: {
+  script: ({
     script_ref: string;
     path: string;
     version: string;
@@ -73,7 +74,16 @@ export type SiteSkillPackagePin = {
     entrypoint: "run";
     broker: "webenvoy.site-skill-broker/v1";
     broker_capabilities: readonly ["runtime.invoke", "output.write"];
-  } | undefined;
+  } | {
+    script_ref: string;
+    path: string;
+    version: string;
+    sha256: string;
+    runtime_kind: "webenvoy.site-skill-script-abi/v1";
+    entrypoint: "run";
+    broker: "webenvoy.site-skill-broker/v1.1";
+    broker_capabilities: readonly ["network.read", "output.write"];
+  }) | undefined;
 };
 
 export function managedSiteScriptCodeAdmissionRef(pin: SiteSkillPackagePin): string {
@@ -299,10 +309,28 @@ export async function verifySiteSkillPackageRoot(lodeAssetsPath: string, pin: Si
   const taskFile = files.find(item => item.path === safeRelative(taskLocator.path));
   if (!capabilityFile || !taskFile) return fail("managed_skill_source_corrupt");
   const capability = parseJson(capabilityFile.bytes);
-  if (capabilityRef !== pin.capability_asset_ref || capability.capability_ref !== capabilityRef || capability.capability_id !== "managed-page-snapshot" || capability.version !== "1.0.0" ||
-      capability.source_ref !== source.source_ref || capability.lock_ref !== lockLocator.lock_ref || capability.operation_id !== "instance.snapshot" || capability.action !== "read" ||
+  const taskPreview = parseJson(taskFile.bytes);
+  const applicabilityPreview = taskPreview.applicability && typeof taskPreview.applicability === "object" && !Array.isArray(taskPreview.applicability)
+    ? object(taskPreview.applicability) : {};
+  const dataHandlingPreview = taskPreview.data_handling && typeof taskPreview.data_handling === "object" && !Array.isArray(taskPreview.data_handling)
+    ? object(taskPreview.data_handling) : {};
+  const taskOriginPreview = Array.isArray(applicabilityPreview.origins) && applicabilityPreview.origins.length === 1 ? applicabilityPreview.origins[0] : undefined;
+  const pageCapability = capability.capability_id === "managed-page-snapshot" && capability.version === "1.0.0" &&
+    capability.operation_id === "instance.snapshot" && taskPreview.operation_id === "instance.snapshot" &&
+    (taskPreview.applicability === undefined || applicabilityPreview.target_type === "web_page");
+  const publicReadCapability = capability.operation_id === "network.public_read" && capability.action === "read" &&
+    taskPreview.operation_id === "network.public_read" && applicabilityPreview.target_type === "public_http_origin" &&
+    typeof taskOriginPreview === "string" && dataHandlingPreview.external_egress === "declared";
+  const capabilityVersion = string(capability.version);
+  if (capabilityRef !== pin.capability_asset_ref || capability.capability_ref !== capabilityRef || !(pageCapability || publicReadCapability) ||
+      capability.source_ref !== source.source_ref || capability.lock_ref !== lockLocator.lock_ref || capability.action !== "read" ||
       lock.capability_ref !== capabilityRef || !Array.isArray(object(manifest.compatibility).required_capabilities) ||
-      canonicalJson(object(manifest.compatibility).required_capabilities) !== canonicalJson([{ ref: capabilityRef, version: "1.0.0" }])) return fail("managed_skill_source_corrupt");
+      canonicalJson(object(manifest.compatibility).required_capabilities) !== canonicalJson([{ ref: capabilityRef, version: capabilityVersion }])) return fail("managed_skill_source_corrupt");
+  if (publicReadCapability) {
+    if (!pin.script || pin.script.broker !== "webenvoy.site-skill-broker/v1.1") return fail("managed_skill_source_corrupt");
+    try { parseProgramPublicHttpPolicy(taskPreview.network_read, taskOriginPreview as string); }
+    catch { return fail("managed_skill_source_corrupt"); }
+  }
   const task = parseJson(taskFile.bytes);
   const taskEntrypoint = object(task.entrypoint);
   let verifiedScript: VerifiedSiteTask["script"];
@@ -316,8 +344,11 @@ export async function verifySiteSkillPackageRoot(lodeAssetsPath: string, pin: Si
         taskEntrypoint.script_sha256 !== pin.script.sha256 || taskEntrypoint.runtime_kind !== pin.script.runtime_kind ||
         taskEntrypoint.broker !== pin.script.broker || canonicalJson(taskEntrypoint.capability_refs) !== canonicalJson([capabilityRef])) return fail("managed_skill_source_corrupt");
     const declaration = scriptDecls[0]!;
+    const expectedCapabilities = pageCapability ? ["runtime.invoke", "output.write"] : ["network.read", "output.write"];
+    const expectedBroker = pageCapability ? "webenvoy.site-skill-broker/v1" : "webenvoy.site-skill-broker/v1.1";
     if (declaration.path !== pin.script.path || declaration.version !== pin.script.version || declaration.sha256 !== pin.script.sha256 ||
         declaration.runtime_kind !== pin.script.runtime_kind || declaration.entrypoint !== pin.script.entrypoint || declaration.broker !== pin.script.broker ||
+        declaration.broker !== expectedBroker || canonicalJson(declaration.broker_capabilities) !== canonicalJson(expectedCapabilities) ||
         canonicalJson(declaration.broker_capabilities) !== canonicalJson(pin.script.broker_capabilities) || declaration.source_commit !== pin.source_commit ||
         declaration.output_schema_ref !== object(task.outputs).schema_ref || declaration.input_schema_ref !== object(task.inputs).schema_ref ||
         canonicalJson(declaration.capability_refs) !== canonicalJson([capabilityRef]) ||

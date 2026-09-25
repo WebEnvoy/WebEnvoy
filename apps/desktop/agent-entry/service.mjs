@@ -43,6 +43,7 @@ const send = (res, status, body) => { res.writeHead(status, { 'content-type': 'a
 const ownerRoutes = (req) => (req.method === 'POST' && ['/owner/recovery/inspect', '/owner/recovery/backup', '/owner/recovery/plan', '/owner/recovery/apply'].includes(req.url)) ||
   (req.method === 'GET' && /^\/owner\/recovery\/status\/[^/?]+$/.test(req.url)) ||
   (req.method === 'GET' && /^\/owner\/runtime-sessions\/[^/?]+\/runs$/.test(req.url)) ||
+  (req.method === 'POST' && req.url === '/owner/site-task-admissions/operations') ||
   (req.method === 'GET' && (req.url === '/owner/files' || req.url.startsWith('/owner/files?'))) ||
   (req.method === 'POST' && ['/owner/files/import', '/owner/files/export', '/owner/files/revoke', '/owner/files/delete'].includes(req.url)) ||
   (req.method === 'GET' && (req.url === '/agent-access' || /^\/agent-access\/operations\/[^/?]+$/.test(req.url))) ||

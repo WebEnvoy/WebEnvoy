@@ -11,7 +11,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && cp src/managed-capability-definitions.json dist/managed-capability-definitions.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "pnpm build && node dist/self-check.js && node --test dist/profile-recovery.test.js dist/result-query.test.js dist/skill-library.test.js dist/site-skill-library.test.js dist/managed-task.test.js dist/account-system-definition.test.js dist/managed-account-system.test.js dist/managed-site-task-admission.test.js",
+    "test": "pnpm build && node dist/self-check.js && node --test dist/profile-recovery.test.js dist/result-query.test.js dist/skill-library.test.js dist/site-skill-library.test.js dist/managed-task.test.js dist/account-system-definition.test.js dist/managed-account-system.test.js dist/managed-site-task-admission.test.js dist/program-public-http.test.js",
     "lint": "tsc -p tsconfig.json --noEmit"
   }
 }

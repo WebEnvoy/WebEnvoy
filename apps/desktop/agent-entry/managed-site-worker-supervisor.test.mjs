@@ -39,6 +39,17 @@ const ticket = (source = script, id = 'worker-ticket-0001') => ({
   context: { run_id: 'managed-task-run-1', task_ref: 'read-daily-trending-top5' },
   deadline_at: Date.now() + 5_000
 });
+const publicReadTicket = (source = 'export async function run(input, broker, context) { const response = await broker.network.read({url:"https://public.example/api",method:"GET",headers:{}}); await broker.output.write({run_id:context.run_id, body:response.body, process_type:typeof process}); }', id = 'worker-ticket-public-read-01') => {
+  const value = ticket(source, id);
+  value.package.capability_ref = 'lode://site-capability/example/public-read@0.1.0';
+  value.package.capability_version = '0.1.0';
+  value.script.script_ref = 'lode://script/site-skill/example/read@0.1.0';
+  value.script.broker = 'webenvoy.site-skill-broker/v1.1';
+  value.script.broker_capabilities = ['network.read', 'output.write'];
+  value.authorization.origin = 'https://public.example';
+  delete value.target;
+  return value;
+};
 const callbacks = ({ onBroker = async () => ({}) } = {}) => ({
   onStarted: async () => ({ accepted: true }),
   onBroker
@@ -88,6 +99,26 @@ test('worker host inherits the configured Agent process UID and brokers one snap
   assert.deepEqual(calls.slice(1).map(([method]) => method), ['runtime.invoke', 'output.write']);
   assert.deepEqual(calls[1][1], { operation_id: 'instance.snapshot', action: 'read' });
   assert.deepEqual(calls[2][1], { run_id: 'managed-task-run-1', text: 'bounded snapshot from the same Page', process_type: 'undefined' });
+});
+
+test('worker host brokers a pinned public-read pair without constructing a Page target', async () => {
+  const calls = [];
+  const supervisor = createManagedSiteWorkerSupervisor({
+    installRoot, ownerUid: agentUid - 1, agentUid, mode: 'distinct_uid_hardened', probeOwnerSocket: async () => 'denied'
+  });
+  try {
+    await supervisor.run(publicReadTicket(), {
+      onStarted: async () => {},
+      onBroker: async value => {
+        calls.push([value.method, value.input]);
+        if (value.method === 'network.read') return { ok: true, status: 200, url: 'https://public.example/api', body: '{"ok":true}', response_ref: 'webenvoy:public-http-response/00000000-0000-4000-8000-000000000001', content_type: 'application/json' };
+        return { accepted: true };
+      }
+    });
+  } finally { await supervisor.stopAll(); }
+  assert.deepEqual(calls.map(([method]) => method), ['network.read', 'output.write']);
+  assert.equal(calls[0][1].url, 'https://public.example/api');
+  assert.equal(calls[1][1].process_type, 'undefined');
 });
 
 test('a rejected first invoke remains not_dispatched and is not replayed by the supervisor', async () => {

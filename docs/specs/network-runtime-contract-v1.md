@@ -222,3 +222,49 @@ This additive v1 payload requires a matching Runtime/Plugin build; unknown,
 malformed, or incompatible versions must be rejected as unavailable and must
 not be reinterpreted as a raw Provider result or silently downgraded. No data
 migration is needed because the event ring is ephemeral.
+
+## #594 限定的程序侧匿名公共读取（v1.3 候选）
+
+本节仅在对应合同、实现和检查完成并合入 `main` 后生效；此前 v1.2 的
+`instance.diagnostics` 仍只返回 metadata，不提供响应正文。该能力只供已准入、
+固定版本的公共只读站点任务在受管 worker 内经 Core broker 调用，不新增普通 Agent 的
+任意 HTTP 工具。它是**程序侧匿名 HTTPS**，不使用受管浏览器的 Page、Context、
+Cookie、代理、指纹或登录态，也不能报告为浏览器原生请求。需要登录态、页面请求或
+主动写入的任务不适用。
+
+调用者只提交一个本次请求的 URL，以及 `GET` 和包内已固定的 `Accept`、
+`User-Agent`（若声明）。Core 从当前已安装且启用的 package revision、code admission
+和 task declaration 取得唯一请求策略：精确 HTTPS origin、允许的 pathname（可声明
+至多一个有界后缀段）、允许的 query key、允许的固定 header 值、响应 MIME、
+请求/跳转次数、时间和解压后正文字节上限。策略不能由 Agent 输入、脚本的临时
+参数或另一个 Grant 扩大；同一 task 的 URL 仍须由获准的原参数处理代码构造。
+首版每个 Run 至多一次逻辑 GET，最多两次同策略内跳转；URL 总长至多 2048 bytes，
+可变的单个 pathname 后缀段至多 512 bytes，每个 query key/value 至多 512 bytes；
+URL 规范化后必须仍位于声明的精确路径或其唯一后缀段内。重复 key、片段、userinfo、非标准端口、
+非 HTTPS、IP literal 和未知 header 均在派发前拒绝。包可把具体参数值限制得更窄，
+不能用通用长度上限代替原 adapter 的参数校验。
+
+每次请求和跳转都重新校验完整 URL、origin/path/query/header 和当前
+Principal/Grant/task scope/Profile ceiling、package revision/digest、script hash、
+Code admission、取消/停止状态。程序侧在连接前解析 DNS，只连接本次已检查的地址；
+私有、回环、链路本地、组播、未指定、文档保留及云元数据地址均拒绝，不能在校验后
+让 HTTP 栈重新解析到另一地址。重定向到未获准 origin/path/query 或非公网地址，
+在发送下一跳前以 `not_dispatched` 拒绝该跳，并保留此前已经派发的请求事实；
+不能静默改用浏览器、Provider、代理或账号。没有环境代理、浏览器 Cookie jar、
+Authorization/Cookie/Proxy-Authorization header 或从 Profile/owner/进程环境继承
+的凭据；收到的 Set-Cookie 不保存、不转发，也不提供给 worker 或 Agent。
+
+响应仅在有界媒体类型和 UTF-8 解码成功时，把**实际 HTTP 正文**临时交给该 Run
+的受管 worker；允许的 gzip/deflate/br 必须对压缩后及解压后字节分别限额，超限
+立即取消读取。Core 持久化的只是 opaque response/evidence ref、实际程序侧路径、
+最终允许的 URL 的脱敏摘要、状态码、媒体类型、body SHA-256/字节数、跳转数、
+dispatch state 和失败类，不持久化正文、headers、Cookie 或完整请求。worker
+可在内存中按 `.text()` 或 `.json()` 消费同一正文；HTTP 2xx、解析成功或脚本退出
+都不等于业务成功，仍须通过 pinned output schema、完整性和 post-check。
+
+授权拒绝、DNS/目标不可证明、重定向越界、响应类型/体积超限和取消不得伪装成
+空集合或成功。首次派发前失败为 `not_dispatched`；已经送出请求而响应丢失时保留
+`dispatched`/`unknown_outcome`，只查询原 Run，不由 worker、Plugin 或新 key 自动
+重发。停止只阻止后续请求/读取，不宣称撤销已送出的外部效果。本节只扩展
+`#594` 所需公共匿名读取；#565 的浏览器上下文主动请求、身份请求、写入、拦截与
+修改仍待其自身合同和验收。

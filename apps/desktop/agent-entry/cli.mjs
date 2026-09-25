@@ -65,12 +65,12 @@ dependencies, pin a new immutable revision, then explicitly enable or roll
 back. Template data never infers login identity or credentials.`,
   'site-task-admission': `Usage: webenvoy site-task-admission <select-repository|list-repositories|inspect-candidate|candidate-diff|admit-source|admit-code|revoke-code|revoke-source|list-admissions> --data-dir DIR
 
-Owner-only admission for local repairs created in a private Git worktree.
-The installed Agent may draft files only in the owner-selected worktree;
-Core checks the exact Git source commit, package bytes, dependencies and
-script syntax before source admission. Code admission is a separate owner
-decision. Installation remains disabled until the owner explicitly enables
-the fixed revision; rollback and historical Run pins remain available.`,
+Owner-only source and code admission from a clean, owner-selected Lode Git
+worktree. For a new package, inspect with --first-admission; for an update to
+an existing statically approved package, provide --base-revision-ref. Review
+the pinned commit, registry/manifest, package bytes and candidate diff before
+admit-source. Script code admission is a separate owner decision. Admission
+does not install or enable the package; those remain explicit owner actions.`,
   recovery: `Usage: webenvoy recovery <inspect|backup|plan|apply|status> --data-dir DIR
 
 Owner control identity is required. backup, plan and apply require a caller
@@ -126,7 +126,9 @@ a lost response; never resubmit it to recover a Run.`,
   'agent task submit': `Usage: webenvoy agent task submit --request-file FILE --client-file FILE
 
 Submit one fixed package revision and task_ref through POST
-/managed-tasks/operations. Core checks the current Grant and Page target and
+/managed-tasks/operations. Page tasks supply the current opaque Page target;
+program-side public-read tasks omit target and use only the origin and bounded
+request policy pinned in the admitted task. Core checks the current Grant and
 owns the Run, result and recovery facts. A declared, pinned script runs only in
 the installed Agent host's separate worker under a verified distinct non-admin
 Agent UID; trusted_local refuses script dispatch. The CLI consumes worker
@@ -188,7 +190,7 @@ const COMMAND_FLAGS = new Map([
   ['account-system:resolve', new Set(['--data-dir', '--local-definition-ref', '--revision-ref', '--historical'])],
   ['site-task-admission:select-repository', new Set(['--data-dir', '--path'])],
   ['site-task-admission:list-repositories', new Set(['--data-dir'])],
-  ['site-task-admission:inspect-candidate', new Set(['--data-dir', '--repository-ref', '--package-ref', '--base-revision-ref', '--task-ref'])],
+  ['site-task-admission:inspect-candidate', new Set(['--data-dir', '--repository-ref', '--package-ref', '--base-revision-ref', '--first-admission', '--task-ref'])],
   ['site-task-admission:candidate-diff', new Set(['--data-dir', '--candidate-ref'])],
   ['site-task-admission:admit-source', new Set(['--data-dir', '--candidate-ref'])],
   ['site-task-admission:admit-code', new Set(['--data-dir', '--admission-ref'])],
@@ -550,9 +552,11 @@ if (command === 'setup') {
   } else if (action === 'list-repositories') {
     result = await requestOwner('list_authoring_repositories');
   } else if (action === 'inspect-candidate') {
+    const firstAdmission = args.includes('--first-admission');
+    if (firstAdmission === (arg('--base-revision-ref') !== undefined)) throw cliError('site_task_admission_base_selection_required');
     result = await requestOwner('inspect_candidate', {
       repository_ref: required('--repository-ref'), package_ref: required('--package-ref'),
-      base_revision_ref: required('--base-revision-ref'), task_ref: required('--task-ref')
+      base_revision_ref: firstAdmission ? null : required('--base-revision-ref'), task_ref: required('--task-ref')
     });
   } else if (action === 'candidate-diff') {
     result = await requestOwner('candidate_diff', { candidate_ref: required('--candidate-ref') });

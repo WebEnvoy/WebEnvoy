@@ -1,7 +1,7 @@
 import { cp, mkdir, readFile, writeFile, stat, chmod } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import electron from 'electron';
-import { files, sha } from '../agent-entry/bundle.mjs';
+import { files, sha, INSTALLED_SKILL_VERSION } from '../agent-entry/bundle.mjs';
 const output = resolve(process.argv[2] ?? 'artifacts/WebEnvoy Test.app');
 try { await stat(output); throw new Error('Output already exists; choose a new test installation location'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
 if (process.platform !== 'darwin') throw new Error('This test slice supports only the verified macOS platform');
@@ -20,5 +20,5 @@ const lode = JSON.parse(await readFile(join(appRoot, 'dist-electron/lode/provena
 const allFiles = await files(appRoot);
 const optionalFiles = Object.fromEntries(Object.entries(allFiles).filter(([name]) => (name.startsWith('dist-electron/lode/') && name !== 'dist-electron/lode/provenance.json') || name.startsWith('agent-entry/skill-assets/')));
 const requiredFiles = Object.fromEntries(Object.entries(allFiles).filter(([name]) => !(name in optionalFiles)));
-await writeFile(join(appRoot, 'agent-manifest.json'), JSON.stringify({ schema: 'webenvoy-installed-agent/v1', version: '0.2.0', skill_version: '0.2.0', host, workspace, lode, files: requiredFiles, optional_files: optionalFiles }, null, 2));
+await writeFile(join(appRoot, 'agent-manifest.json'), JSON.stringify({ schema: 'webenvoy-installed-agent/v1', version: '0.2.0', skill_version: INSTALLED_SKILL_VERSION, host, workspace, lode, files: requiredFiles, optional_files: optionalFiles }, null, 2));
 console.log(JSON.stringify({ test_installation: output, app_root: appRoot, release: false, workspace }));

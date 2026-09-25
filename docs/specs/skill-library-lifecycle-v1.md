@@ -159,6 +159,18 @@ Plugin 和 execution 只消费它们：
 | `tasks[].verification` | 必需 | Lode `verification.post_check_ref` 与 `required_evidence_refs` | 任一 ref 缺失、越界或未获准则过滤；不把 HTTP/exit code 当业务验证 |
 | `tasks[].data_handling` | 必需 | Lode `data_handling` 与 `inputs.sensitivity` 的固定枚举值 | 未声明、未知值或与包声明不一致则拒绝；该字段不能扩 Grant |
 
+[#594](https://github.com/WebEnvoy/WebEnvoy/issues/594) 的候选增量仅对固定公共匿名只读任务增加
+`tasks[].target_type="public_http_origin"` 与有界 `tasks[].network_read` 静态投影。
+后者来自同一已校验 Lode task declaration，包含固定 origin、pathname/至多一段后缀、
+允许的 query key、固定 `Accept`/`User-Agent`、响应类型、字节/跳转/超时上限；
+不包含本次完整 URL、响应正文、原始 headers、凭据或现场结果。此类任务的
+`operation_id` 必须为 `network.public_read`，`action=read`，broker 必须精确为
+`webenvoy.site-skill-broker/v1.1`；三项与 `network_read` 任一缺失、越界或不一致时
+整个任务从投影中过滤。旧页面任务不出现这两个字段，仍按原 Page/target 合同。
+这些字段使 Plugin/SKILL 消费者能理解目标和限制，不授予请求权；实际 URL 和当前
+授权仅由 Core 在每次派发时校验。该增量在相应 Lode、Network、S2 合同合并前
+不生效，也不把现有 daily-top5 包重解释成兼容包。
+
 过滤顺序固定为：先用现有 `skill_scope.skill_refs/source_refs` 与 task scope 确认
 asset、source 和 revision 可见，再校验包完整性和 task declaration，最后按上表完成
 字段映射并只返回通过校验的 task 摘要。entrypoint 既没有 script ref 也没有 capability

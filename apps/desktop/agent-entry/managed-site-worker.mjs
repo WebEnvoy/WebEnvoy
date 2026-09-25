@@ -1,7 +1,7 @@
 import { createInterface } from 'node:readline';
 import { Worker } from 'node:worker_threads';
 
-const maxFrameBytes = 4 * 1024 * 1024;
+const maxFrameBytes = 32 * 1024 * 1024;
 const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
 const iterator = lines[Symbol.asyncIterator]();
 let scriptWorker;
@@ -40,11 +40,12 @@ function finish(frame, exitCode = 0) {
   process.stdin.destroy();
 }
 function validRequest(request) {
+  const pageRead = request.broker_capabilities?.[0] === 'runtime.invoke' && request.broker_capabilities?.[1] === 'output.write';
+  const publicRead = request.broker_capabilities?.[0] === 'network.read' && request.broker_capabilities?.[1] === 'output.write';
   return exactKeys(request, ['source', 'input', 'context', 'broker_capabilities', 'execution_timeout_ms']) &&
     typeof request.source === 'string' && Buffer.byteLength(request.source) <= 1024 * 1024 &&
     object(request.context) && Array.isArray(request.broker_capabilities) &&
-    request.broker_capabilities.length === 2 && request.broker_capabilities[0] === 'runtime.invoke' &&
-    request.broker_capabilities[1] === 'output.write' && Number.isSafeInteger(request.execution_timeout_ms) &&
+    request.broker_capabilities.length === 2 && (pageRead || publicRead) && Number.isSafeInteger(request.execution_timeout_ms) &&
     request.execution_timeout_ms > 0 && request.execution_timeout_ms <= 60_000;
 }
 
@@ -72,7 +73,7 @@ async function main() {
     if (!object(frame) || typeof frame.type !== 'string') return finish({ type: 'failure', code: 'managed_site_worker_protocol_invalid' }, 1);
     if (frame.type === 'broker.request') {
       if (!exactKeys(frame, ['type', 'id', 'method', 'input']) || !Number.isSafeInteger(frame.id) || frame.id < 1 ||
-          !['runtime.invoke', 'output.write'].includes(frame.method) || Buffer.byteLength(JSON.stringify(frame)) > maxFrameBytes) {
+          !['runtime.invoke', 'network.read', 'output.write'].includes(frame.method) || Buffer.byteLength(JSON.stringify(frame)) > maxFrameBytes) {
         return finish({ type: 'failure', code: 'managed_site_worker_protocol_invalid' }, 1);
       }
       try { emit(frame); } catch { finish({ type: 'failure', code: 'managed_site_worker_protocol_invalid' }, 1); }

@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createFileManagedAccessStore, managedPageOperations, managedSkillOperations, managedTaskOperations } from "./managed-access.js";
 import { createManagedTaskService } from "./managed-task.js";
+import { ProgramPublicHttpError } from "./program-public-http.js";
 import { createFileRunRecordStore, type FileRunRecordStore, type RunRecordStatus } from "./run-record-store.js";
 import { completeRunWithFailure } from "./result-envelope.js";
 import { createFileSkillLibraryService } from "./skill-library.js";
@@ -31,6 +32,133 @@ type ScriptTaskPin = {
 };
 type Actor = { credential_hash: string; principal_id: string; connection_id: string; grant_id: string };
 type SnapshotHandler = (request: Json, runId: string, timeoutMs?: number) => Promise<Json>;
+
+test("program-side public read prepares without a browser service or Page target", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "webenvoy-program-public-read-no-browser-"));
+  const credentialHash = "d".repeat(64);
+  const profile = "profile:program-public-read-test";
+  const origin = "https://github.com";
+  const packageRef = "lode://site-skill/github/opencli-trending-repos";
+  const revisionRef = `${packageRef}@0.1.0#${"a".repeat(40)}`;
+  const sourceRef = `lode://source/site-skill/github/opencli-trending-repos@0.1.0#${"a".repeat(40)}`;
+  const source = Buffer.from("export async function run() {}\n");
+  const scriptSha = `sha256:${createHash("sha256").update(source).digest("hex")}`;
+  const pin = { package_ref: packageRef, revision_ref: revisionRef, package_digest: `sha256:${"b".repeat(64)}`, task_ref: "read-trending" };
+  const policy = {
+    transport: "program_anonymous_https", origin, pathname: "/trending", allow_one_path_segment: true,
+    query_keys: ["since"], headers: { accept: "text/html" }, content_types: ["text/html"],
+    max_response_bytes: 1_048_576, max_redirects: 2, timeout_ms: 10_000
+  };
+  const dispatched = Promise.withResolvers<void>();
+  let publicReadCalls = 0;
+  const sitePackage = {
+    ...pin, version: "0.1.0", source_repository: "WebEnvoy/Lode", package_path: "sites/github/opencli-trending-repos",
+    source_ref: sourceRef, lock_ref: "lode://lock/site-skill/github/opencli-trending-repos@0.1.0", source_commit: "a".repeat(40),
+    source_admission_ref: "webenvoy.site-task-source-admission/initial", code_admission_ref: "webenvoy.code-admission/site-skill-script/initial",
+    task_ref: "read-trending",
+    capability: { capability_ref: "lode://site-capability/github/opencli-trending-repos@0.1.0", capability_id: "opencli-trending-repos",
+      version: "0.1.0", source_ref: sourceRef, lock_ref: "lode://lock/site-skill/github/opencli-trending-repos@0.1.0", operation_id: "network.public_read", action: "read" },
+    script: { script_ref: "lode://script/site-skill/github/opencli-trending-repos/read@0.1.0", version: "0.1.0", sha256: scriptSha,
+      runtime_kind: "webenvoy.site-skill-script-abi/v1", entrypoint: "run", broker: "webenvoy.site-skill-broker/v1.1",
+      broker_capabilities: ["network.read", "output.write"], path: "scripts/read.mjs", source },
+    task: { task_ref: "read-trending", operation_id: "network.public_read", action: "read",
+      applicability: { origins: [origin], target_type: "public_http_origin" },
+      inputs: { schema_ref: "lode://schema/opencli-trending-input@0.1.0", carrier: "webenvoy.managed-task-inline/v1", max_bytes: 1024 },
+      outputs: { schema_ref: "lode://schema/opencli-trending-output@0.1.0", result_kind: "github_trending", completeness: "required" },
+      verification: { post_check_ref: "lode://check/opencli-trending@0.1.0" },
+      data_handling: { external_egress: "declared" }, network_read: policy },
+    input_schema: { type: "object", properties: { limit: { anyOf: [
+      { type: "integer", minimum: 1, maximum: 25 }, { type: "string", pattern: "^([1-9]|1[0-9]|2[0-5])$" }
+    ], default: 25 } }, additionalProperties: false },
+    output_schema: { type: "object", properties: {}, additionalProperties: true }, post_check: {},
+    manifest_bytes: Buffer.from("{}"), skill_text: Buffer.from("skill"), files: []
+  };
+  try {
+    const accessStore = createFileManagedAccessStore({ directory: join(directory, "access") });
+    const runRecordStore = createFileRunRecordStore({ directory: join(directory, "runs") });
+    const principal = await accessStore.registerPrincipal({ idempotency_key: "public-read-principal", display_name: "public-read-agent", credential_hash: credentialHash });
+    const connection = await accessStore.connect(credentialHash);
+    const grant = await accessStore.createGrant({
+      idempotency_key: "public-read-grant", principal_id: principal.principal_id,
+      allowed_operations: [...managedTaskOperations], profile_refs: [profile], allowed_origins: [origin],
+      expires_at: grantExpiry, creation_template: null, max_created_profiles: 0,
+      skill_scope: { skill_refs: [packageRef], source_refs: [sourceRef, revisionRef] }
+    });
+    await accessStore.setProfilePolicy({ idempotency_key: "public-read-profile-policy", profile_ref: profile,
+      allowed_operations: [...managedTaskOperations], allowed_origins: [origin] });
+    const taskService = createManagedTaskService({
+      accessStore, runRecordStore,
+      skillLibraryService: { async resolveManagedSiteTask() { return sitePackage; } } as unknown as Parameters<typeof createManagedTaskService>[0]["skillLibraryService"],
+      workerIdentity: { owner_uid: 501, agent_uid: 502, mode: "distinct_uid_hardened", owner_socket_acl: "verified" },
+      async publicHttpReader(_policy, call, dependencies, signal) {
+        publicReadCalls += 1;
+        await dependencies?.beforeDispatch?.(new URL("https://github.com/trending"), {
+          url_sha256: "a".repeat(64), pathname: "/trending", hop_index: 0
+        });
+        dispatched.resolve();
+        if ((call as Json).url.includes("since=weekly"))
+          throw new ProgramPublicHttpError("managed_task_network_content_type_denied", "dispatched", false);
+        await new Promise<void>(resolve => signal?.addEventListener("abort", () => resolve(), { once: true }));
+        throw new ProgramPublicHttpError("managed_task_network_cancelled", "dispatched", true);
+      }
+      // No managedBrowserService: program-side reads must not need an Instance or Provider.
+    });
+    const submitRequest = {
+      schema_version: "webenvoy.managed-task-operation/v1", operation: "task.submit", idempotency_key: "public-read-no-page-target",
+      grant_id: grant.grant_id, connection_id: connection.connection_id,
+      task_scope: { operations: ["task.submit"], skill_refs: [packageRef], source_refs: [revisionRef], profile_refs: [profile], origins: [origin] },
+      package: pin, input: { schema_ref: "lode://schema/opencli-trending-input@0.1.0", carrier: "webenvoy.managed-task-inline/v1", value: { limit: 2 } },
+      intent: { summary: "Read public GitHub Trending data.", policy: { risk: "read", execution_intent: "read", timeout_ms: 10_000 } }
+      // Deliberately omit target; the pinned task supplies its exact public origin.
+    };
+    const submitted = await taskService.operate(credentialHash, submitRequest, { agentSocketIngressVerified: true }) as Json;
+    assert.equal(submitted.ok, true, JSON.stringify(submitted));
+    assert.equal(submitted.run.status, "running");
+    const run = await runRecordStore.getRunRecord(submitted.run.run_id);
+    assert.equal(run?.public_result_summary?.target_type, "public_http_origin");
+    assert.equal(run?.public_result_summary?.target_ref, origin);
+    assert.equal(Object.hasOwn(submitted.worker_execution.ticket, "target"), false);
+    assert.equal(submitted.worker_execution.ticket.authorization.profile_ref, profile);
+    const stringLimit = await taskService.operate(credentialHash, { ...submitRequest, idempotency_key: "public-read-string-limit",
+      input: { ...submitRequest.input, value: { limit: "2" } } }, { agentSocketIngressVerified: true }) as Json;
+    assert.equal(stringLimit.ok, true, JSON.stringify(stringLimit));
+    await rejectsWithCode(taskService.operate(credentialHash, { ...submitRequest, idempotency_key: "public-read-out-of-range",
+      input: { ...submitRequest.input, value: { limit: 26 } } }, { agentSocketIngressVerified: true }), ["managed_access_denied"]);
+    const timeoutRequest = { ...submitRequest, idempotency_key: "public-read-inflight-timeout",
+      intent: { ...submitRequest.intent, policy: { ...submitRequest.intent.policy, timeout_ms: 150 } } };
+    const inFlight = await taskService.operate(credentialHash, timeoutRequest, { agentSocketIngressVerified: true }) as Json;
+    const ticketId = inFlight.worker_execution.ticket.ticket_id;
+    await taskService.workerStarted(credentialHash, { ticket_id: ticketId });
+    const pendingRead = taskService.broker(credentialHash, { ticket_id: ticketId, method: "network.read",
+      input: { url: "https://github.com/trending", method: "GET", headers: policy.headers } }).catch(() => undefined);
+    await dispatched.promise;
+    await delay(250);
+    await pendingRead;
+    const timedOut = await runRecordStore.getRunRecord(inFlight.run.run_id);
+    assert.equal(timedOut?.status, "unknown_outcome", "dispatched HTTP with no response remains uncertain");
+    assert.equal(timedOut.public_result_summary?.dispatch_state, "dispatched");
+    assert.equal(timedOut.failure?.code, "managed_task_timeout");
+    const retried = await taskService.operate(credentialHash, timeoutRequest, { agentSocketIngressVerified: true }) as Json;
+    assert.equal(retried.run.run_id, inFlight.run.run_id);
+    assert.equal(retried.run.status, "unknown_outcome");
+    assert.equal(publicReadCalls, 1, "same key never replays a dispatched HTTP request");
+    const knownReject = await taskService.operate(credentialHash, {
+      ...submitRequest, idempotency_key: "public-read-known-rejection"
+    }, { agentSocketIngressVerified: true }) as Json;
+    const rejectedTicketId = knownReject.worker_execution.ticket.ticket_id;
+    await taskService.workerStarted(credentialHash, { ticket_id: rejectedTicketId });
+    await rejectsWithCode(taskService.broker(credentialHash, { ticket_id: rejectedTicketId, method: "network.read",
+      input: { url: "https://github.com/trending?since=weekly", method: "GET", headers: policy.headers } }),
+    ["managed_task_network_content_type_denied"]);
+    const rejected = await taskService.workerFailure(credentialHash, {
+      ticket_id: rejectedTicketId, code: "managed_task_network_content_type_denied"
+    }) as Json;
+    assert.equal(rejected.run.status, "failed", "a known HTTP rejection remains failed");
+    assert.equal(rejected.run.dispatch_state, "dispatched");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 const lodeRoot = process.env.WEBENVOY_LODE_ROOT;
 const profileRef = "profile:managed-site-task-test";

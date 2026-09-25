@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { files, sha } from "../agent-entry/bundle.mjs";
+import { files, sha, INSTALLED_SKILL_VERSION } from "../agent-entry/bundle.mjs";
 
 const appRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const outputRoot = resolve(process.argv[2] ?? "artifacts/webenvoy-standalone-macos-arm64");
@@ -83,7 +83,7 @@ const manifest = {
   schema: "webenvoy-installed-standalone/v1",
   package_kind: "standalone-runtime",
   version: "0.2.0",
-  skill_version: "0.2.0",
+  skill_version: INSTALLED_SKILL_VERSION,
   platform: process.platform,
   arch: process.arch,
   runtime: {

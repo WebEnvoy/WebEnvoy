@@ -78,9 +78,10 @@ Lode site SKILL 或 live 任务证据。
    选择，不等于 code admission；安装和启用不运行 script、不自动登录、启动浏览器或
    取得 ControlLease。
 4. **Runtime gate**：Core 计算 `Profile ceiling ∩ Principal Grant ∩ task scope ∩
-   declared capabilities ∩ current Runtime safety`，Harbor 证明 Instance/Page/
-   document/ControlLease/identity/target 当前可用。Lode 的 action、origin、账号或
-   target 声明只是上界和匹配条件，不是授权。
+   declared capabilities ∩ current Runtime safety`。浏览器现场任务还须由 Harbor
+   证明 Instance/Page/document/ControlLease/identity/target 当前可用；§5.3
+   限定的程序侧匿名读取改由 Core 证明固定 origin、请求策略及当前授权，不伪造页面
+   现场。Lode 的 action、origin、账号或 target 声明只是上界和匹配条件，不是授权。
 5. **Egress gate**：脚本输入、页面材料、normalized output、evidence 和模型/网络/
    文件 receiver 分别经过既有敏感性、Grant、origin、Network、file 或 Model Usage
    合同。默认不把页面或脚本输出送往外部 receiver；未声明或未获准的范围在派发前
@@ -288,8 +289,9 @@ applicability 和当前现场；不接受 `file_refs`、路径、URL selector、
 Token、credential、Provider handle、owner 字段或 Agent 自带 allowlist。`operations` 在一次
 请求中恰好是 `task.submit`；实际 Lode capability operation 仍由 Core 按其既有
 `allowed_operations`、Profile ceiling、ControlLease 和 Runtime contract 重新检查。
-没有浏览器目标的 task 必须提交空的 `profile_refs`/`origins`，而不是借 task scope
-扩大网页范围。
+纯资产且不访问外部目标的 task 必须提交空的 `profile_refs`/`origins`。
+§5.3 的程序侧匿名读取虽无 Page target，仍须提交唯一已获准的 Profile/origin；
+它不能借 task scope 扩大允许的目标。
 
 `package.package_ref`、完整 `revision_ref`、唯一 package-level `package_digest` 和
 `task_ref` 必须来自当前获准的 `skill.inspect` 摘要；`package_ref` 必须等于摘要中
@@ -300,8 +302,10 @@ Agent 自行计算或替换的第二身份。Core/Lode resolver 必须逐项核�
 完整性、source、task declaration、revision 和 `integrity.package_digest` 完全相等；
 任何不一致均在 dispatch 前拒绝。客户端不能把另一个 revision、latest、工作树路径或
 capability ref 冒充该 task。
-`target_ref` 必须是当前 Harbor/Core 已登记的不透明 target ref；不能以网页 URL、selector
-或最后一次页面状态替代。`intent.summary` 是最多 256 个 UTF-8 字符的非敏感摘要；
+浏览器现场任务的 `target_ref` 必须是当前 Harbor/Core 已登记的不透明 target ref；
+不能以网页 URL、selector 或最后一次页面状态替代。§5.3 的程序侧匿名读取不带
+`target` 字段；若提供任何 Page 或公共目标对象则在派发前拒绝。`intent.summary`
+是最多 256 个 UTF-8 字符的非敏感摘要；
 `intent.policy` 只接受现有 Task Intent 的公开 risk、execution_intent 和 timeout 字段。
 
 Core 在 managed projection 内部生成唯一 `run_id`/`intent_id`，并将请求映射为同一
@@ -316,7 +320,9 @@ Core 在 managed projection 内部生成唯一 `run_id`/`intent_id`，并将请�
 - script-only task 不生成伪造的 `capability.ref`。由于既有 Task Intent v0 的 capability
   字段必填，当前 managed projection 在映射前沿 `capability_ref_required` request-invalid
   返回，不创建 Run；其 `script_ref`/ABI/hash 只保留在 inspect 的静态摘要；
-- `scope` 来自 `target`，`policy` 来自已校验的 `intent.policy`；
+- 浏览器任务的 `scope` 来自 `target`；§5.3 的程序侧匿名读取由 pinned task
+  declaration 和已验证的单一 Profile/origin 构成 scope，不创建伪 Page；`policy`
+  来自已校验的 `intent.policy`；
 - `input.summary` 固定为不含正文的受管摘要，`input.refs` 只保留能力本身已有且经
   既有合同校验的 file/material refs；managed-task inline value 不进入 v0 envelope，
   不会把结构化 JSON 塞进 summary；
@@ -519,21 +525,75 @@ module、raw HTTP 或浏览器原生 API；需要文件、网页或网络能力�
 既有 broker/Grant/Network 合同。这个约束属于已准入代码可观察接口；worker 的 OS
 ambient permission 仍由 S1/宿主实际决定，不能把 ABI 描述成“任意不可信代码安全沙箱”。
 
-脚本每次执行同时绑定 Lode `package_ref`、`revision_ref`、`script_ref`、source/hash、
-ABI/broker version、当前 Instance/Page/Frame/document/observation/target、Core Run、
-operation/idempotency、Principal/Grant/task scope、ControlLease 要求和结果/evidence
-关联。超时、取消、worker stop 或 context generation 变化只停止后续步骤；已经派发的
+### 5.3 #594 公共只读 OpenCLI 兼容候选
+
+本节和 [Network Runtime Contract V1 的 #594 补充](network-runtime-contract-v1.md#594-限定的程序侧匿名公共读取v13-候选)
+在相应 PR 合并前是候选，不改变当前 v1 broker 的允许方法。它只为经过静态审查、
+来源/代码准入并显式启用的固定公共只读 adapter 增加
+`webenvoy.site-skill-broker/v1.1` 的 `network.read`，不提供 worker 原生
+`fetch`/socket 或 Agent 任意 HTTP 工具。旧 `broker/v1` 的
+`runtime.invoke`/`output.write` 与既有 GitHub daily-top5 包保持原义。
+本节只为此类任务豁免本文其他段落中的 Page target、Instance、ControlLease、
+observation 和 browser Provider 绑定要求；固定来源、代码准入、有效授权、Run、
+幂等、结果、恢复及 worker 隔离要求仍适用。
+
+这类 task 使用 Lode 声明的内部 capability operation `network.public_read`、
+`action=read` 和 `target_type=public_http_origin`；task 的唯一 origin 同时绑定一个
+真实 Profile 的 Grant、task scope 与 Profile ceiling，但**不要求或伪造**
+Instance/Page/ControlLease/browser Context。普通 Agent 的正式入口仍是
+`webenvoy_task.task.submit/query/stop`，只授予其实际 `task.*` operation 与精确
+package revision；`network.read` 只在该 Run 的 worker ticket 内出现。
+这里豁免的是任务执行时的 browser Provider 绑定；创建真实 Profile 仍遵守
+现行 Provider Selection 合同，需选择已安装且可用的 Provider。程序侧读取不启动
+该 Provider 的 Instance，也不从其 Context、Cookie 或代理取得请求材料。
+`task.submit` 对此目标必须完全省略 `target` 字段；Core 只从已验证的 task declaration 取得
+origin/请求策略，不从 Agent 输入或当前浏览器猜测。页面任务继续要求原 target。
+
+`webenvoy.managed-task-inline/v1` 输入须先按 pinned Lode schema 校验并限于 65536
+UTF-8 bytes，才作为本次 ephemeral value 交给 worker 的 `run(input, broker,
+context)`；Run 只保存 schema ref、carrier、是否有值和摘要，不保存输入正文。
+固定 adapter 的注册元数据和原参数校验可由受审 wrapper 映射到这一个 value，
+`columns` 仍不能代替正式 output schema。worker 可以调用一次
+`broker.network.read({url, method:"GET", headers})`；Core 将其与 pinned task 的
+精确 origin/path/query/header/MIME/budget 策略及当前授权交叉验证，按 Network
+合同在程序侧取得实际 HTTP 响应正文。broker 向该 worker 返回有界的
+`{ok,status,url,body,response_ref,content_type}`；受审兼容 wrapper 可在内存中
+投影 `Response.ok/status/text()/json()`，不把 raw body、header、Cookie 或
+endpoint 送给 Agent。
+Lode `data_handling.external_egress` 使用既有 `declared` 值，表示本任务需要向
+声明的公共目标发送 URL/query/header；精确模式由 `network_read.transport` 固定为
+`program_anonymous_https`。两者都不是授权，不能扩展到凭据或其他目标。
+
+随后 `output.write` 只接受符合 pinned output schema 的 normalized output，
+`source_refs` 恰含 `{ref_id:<本次 response_ref>,source_kind:"public_http_response"}`，
+`evidence_refs` 恰含同一 ref 的
+`{ref_id,evidence_kind:"public_http_response",producer:"core",redaction:"summary_only"}`。
+Core 对同一 opaque ref 的完整性和 post-check 作最终判断，不把正文置于结果摘要。
+没有响应、正文超限、解析失败、分页未证明完整或 post-check 不通过时不得报告
+`available`。每次 broker 调用重新检查 Principal/Grant/当前授权、worker ticket、
+固定 source/script hash、停止及请求预算；更新或撤权不改写历史 Run。已经派发的
+读取若结果丢失，仍保留原 Run 的 `dispatched`/`unknown_outcome`，只查询或对账，
+不自动以新 key 或另一网络/浏览器入口重做。
+
+脚本每次执行仍绑定 Lode `package_ref`、`revision_ref`、`script_ref`、source/hash、
+ABI/broker version、Core Run、operation/idempotency、Principal/Grant/task scope
+和结果/evidence；浏览器任务还绑定当前 Instance/Page/Frame/document/observation/
+target 与 ControlLease，程序侧匿名读取只绑定 pinned origin/请求策略。
+超时、取消、worker stop 或适用的 context generation 变化只停止后续步骤；已经派发的
 外部效果仍按 Core `dispatched`/`unknown_outcome` 保留，不由 script 回滚或重放。
 
 ## 6. Script 与 Runtime capability
 
 Lode `runtime_kind`/entrypoint 必须能由已实现的 `webenvoy.site-skill-script-abi/v1`
 识别；其 source/version/hash、input/output schema、timeout/cancel、effect/action class
-必须和 Core admission 记录及 `webenvoy.site-skill-broker/v1` 版本精确相等。每次派发
-继续绑定 `package_ref`、`revision_ref`、`script_ref`、当前 Instance/Page/Frame/document
-generation、observation/target ref、已接受的 capability refs、Principal/Grant/task
-scope、ControlLease、Core Run、operation/idempotency 和结果/evidence 关联。broker 是
-唯一脚本 capability surface，不增加独立授权或 Run。
+必须和 Core admission 记录及对应 broker 版本精确相等。现行页面任务使用
+`webenvoy.site-skill-broker/v1`，§5.3 的程序侧匿名读取候选使用受限的 v1.1；
+不得把版本不匹配的脚本降级到另一 broker。每次派发均绑定
+`package_ref`、`revision_ref`、`script_ref`、已接受的 capability refs、
+Principal/Grant/task scope、Core Run、operation/idempotency 和结果/evidence；
+页面任务另绑定当前 Instance/Page/Frame/document generation、observation/target
+ref 和 ControlLease，§5.3 任务另绑定固定 origin/请求策略。broker 是唯一脚本
+capability surface，不增加独立授权或 Run。
 
 script 可以请求当前 observation 并基于最新结果取得新的 target。导航、节点替换、
 人工接管、ControlLease generation、Runtime 重启或 document generation 改变后，旧

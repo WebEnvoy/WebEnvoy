@@ -48,6 +48,7 @@ export function normalizeStoredTargetRef(value: string): string | undefined {
   if (!value || value.length > 2048 || value.trim() !== value || /[\u0000-\u001f\u007f-\u009f]/.test(value)) return undefined;
   if (value.includes("://")) {
     if (!/^https?:/i.test(value)) return undefined;
+    if (normalizePublicOrigin(value) === value) return value;
     const normalized = normalizePublicHttpTarget(value);
     return normalized.ok ? normalized.target_ref : undefined;
   }

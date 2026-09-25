@@ -141,7 +141,7 @@ export const managedTaskInputSchema = {
   oneOf: [
     {
       properties: { operation: { const: 'task.submit' } },
-      required: ['idempotency_key', 'package', 'target', 'input', 'intent'],
+      required: ['idempotency_key', 'package', 'input', 'intent'],
       ...noManagedTaskFields(['selector'])
     },
     {
@@ -226,10 +226,12 @@ export function validateManagedTaskRequest(value) {
   const packageRef = assertExactObject(value.package, ['package_ref', 'revision_ref', 'package_digest', 'task_ref'], code);
   for (const key of ['package_ref', 'revision_ref', 'task_ref']) assertString(packageRef[key], code);
   if (typeof packageRef.package_digest !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(packageRef.package_digest)) throw new Error(code);
-  const target = assertExactObject(value.target, ['target_type', 'target_ref'], code);
-  assertString(target.target_type, code);
-  assertString(target.target_ref, code, { max: 2048 });
-  if (target.target_ref.includes('://')) throw new Error(code);
+  if (Object.hasOwn(value, 'target')) {
+    const target = assertExactObject(value.target, ['target_type', 'target_ref'], code);
+    assertString(target.target_type, code);
+    assertString(target.target_ref, code, { max: 2048 });
+    if (target.target_ref.includes('://')) throw new Error(code);
+  }
   const input = assertExactObject(value.input, ['schema_ref', 'carrier', 'value'], code);
   assertString(input.schema_ref, code);
   if (input.carrier === 'none') {

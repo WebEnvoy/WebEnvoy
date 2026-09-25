@@ -7,7 +7,8 @@ import test from 'node:test';
 
 const host = join(dirname(fileURLToPath(import.meta.url)), 'managed-site-worker.mjs');
 
-async function runWorker(source, brokerReplies = [], { closeInput = false, allowSilentExit = false, executionTimeoutMs = 4_000 } = {}) {
+async function runWorker(source, brokerReplies = [], { closeInput = false, allowSilentExit = false, executionTimeoutMs = 4_000,
+  brokerCapabilities = ['runtime.invoke', 'output.write'] } = {}) {
   const child = spawn(process.execPath, ['--experimental-vm-modules', host], {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: {}
@@ -43,7 +44,7 @@ async function runWorker(source, brokerReplies = [], { closeInput = false, allow
   });
   child.stderr.setEncoding('utf8');
   child.stderr.on('data', chunk => { stderr += chunk; });
-  const request = { source, input: {}, context: { run_id: 'run-1' }, broker_capabilities: ['runtime.invoke', 'output.write'], execution_timeout_ms: executionTimeoutMs };
+  const request = { source, input: {}, context: { run_id: 'run-1' }, broker_capabilities: brokerCapabilities, execution_timeout_ms: executionTimeoutMs };
   child.stdin.write(`${JSON.stringify(request)}\n`);
   if (closeInput) child.stdin.end();
   const timeout = setTimeout(() => child.kill('SIGKILL'), 6000);
@@ -69,6 +70,21 @@ test('managed site worker runs the fixed ABI and brokers snapshot and output', a
   assert.equal(result.frames[1].input.operation_id, 'instance.snapshot');
   assert.equal(result.frames[2].method, 'output.write');
   assert.deepEqual(result.frames[2].input, { summary: 'bounded page text', run: 'run-1' });
+});
+
+test('managed site worker exposes only network.read for a pinned v1.1 public-read task and consumes one response', async () => {
+  const response = { ok: true, status: 200, url: 'https://public.example/api?q=abc', body: '{"rows":[]}', response_ref: 'webenvoy:public-http-response/00000000-0000-4000-8000-000000000001', content_type: 'application/json' };
+  const result = await runWorker(
+    'export async function run(input, broker) { const response = await broker.network.read({url:"https://public.example/api?q=abc",method:"GET",headers:{accept:"application/json"}}); await broker.output.write({status:response.status, body:response.body}); await broker.network.read({}); }',
+    [{ ok: true, result: response }, { ok: true, result: { accepted: true } }],
+    { brokerCapabilities: ['network.read', 'output.write'] }
+  );
+  assert.equal(result.frames.at(-1)?.type, 'failure');
+  assert.equal(result.frames.at(-1)?.code, 'managed_site_capability_call_already_used');
+  assert.deepEqual(result.frames.filter(frame => frame.type === 'broker.request').map(frame => frame.method), ['network.read', 'output.write']);
+  assert.equal(result.frames[1].input.url, response.url);
+  assert.deepEqual(result.frames[2].input, { status: 200, body: response.body });
+  assert.equal(result.frames.some(frame => frame.method === 'runtime.invoke'), false);
 });
 
 test('managed site worker rejects module imports', async () => {
