@@ -112,6 +112,7 @@ async function createPrivateDerivedRevision(lodeAssetsPath: string, tempRoot: st
   assert.equal(approvedManagedSiteTaskPackageFor(packageRef), undefined, "the base is not runnable by default");
   const root = join(tempRoot, `private-lode-${version.replaceAll(".", "-")}`);
   await execFileAsync("git", ["clone", "--quiet", "--local", "--no-hardlinks", lodeAssetsPath, root]);
+  await git(root, "fetch", "--quiet", lodeAssetsPath, `+${base.source_commit}:refs/heads/opencli-source-base`);
   await git(root, "checkout", "--quiet", "--detach", base.source_commit);
   await git(root, "config", "user.name", "Private Overlay Test");
   await git(root, "config", "user.email", "overlay-test@example.invalid");
@@ -242,6 +243,7 @@ test("OpenCLI private overlay is admitted, installed, run through its pinned bro
     });
     const baseRoot = join(tempRoot, "public-opencli-base");
     await execFileAsync("git", ["clone", "--quiet", "--local", "--no-hardlinks", lodeRoot!, baseRoot]);
+    await git(baseRoot, "fetch", "--quiet", lodeRoot!, `+${base.source_commit}:refs/heads/opencli-source-base`);
     await git(baseRoot, "checkout", "--quiet", "--detach", base.source_commit);
     await cp(join(lodeRoot!, packagePath), join(baseRoot, packagePath), { recursive: true, force: true });
     await cp(join(lodeRoot!, "registry/local-packages.json"), join(baseRoot, "registry/local-packages.json"));
