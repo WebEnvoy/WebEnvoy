@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/core/account-binding-owner-operation-request.v1.schema.json",
+  "title": "WebEnvoy Core owner account binding operation request",
+  "description": "Owner-only Core request to inspect existing Harbor bindings or explicitly bind an existing verified observation. It does not discover or assert account identity.",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/$defs/inspect" },
+    { "$ref": "#/$defs/bind" }
+  ],
+  "$defs": {
+    "textRef": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[A-Za-z0-9:_./-]+$" },
+    "accountSystemRef": { "type": "string", "pattern": "^account-system:[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+    "accountRef": { "type": "string", "pattern": "^account:sha256:[a-f0-9]{64}$" },
+    "base": {
+      "type": "object",
+      "required": ["schema_version", "operation"],
+      "properties": {
+        "schema_version": { "const": "webenvoy.account-binding-owner-operation/v1" },
+        "operation": { "type": "string" }
+      }
+    },
+    "inspect": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "required": ["identity_environment_ref"],
+          "properties": {
+            "operation": { "const": "inspect" },
+            "identity_environment_ref": { "$ref": "#/$defs/textRef" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "bind": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "required": ["identity_environment_ref", "profile_ref", "runtime_session_ref", "observation_ref", "account_system_ref", "account_ref", "idempotency_key", "confirm"],
+          "properties": {
+            "operation": { "const": "bind" },
+            "identity_environment_ref": { "$ref": "#/$defs/textRef" },
+            "profile_ref": { "$ref": "#/$defs/textRef" },
+            "runtime_session_ref": { "$ref": "#/$defs/textRef" },
+            "observation_ref": { "$ref": "#/$defs/textRef" },
+            "account_system_ref": { "$ref": "#/$defs/accountSystemRef" },
+            "account_ref": { "$ref": "#/$defs/accountRef" },
+            "idempotency_key": { "$ref": "#/$defs/textRef" },
+            "confirm": { "const": true }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    }
+  },
+  "x-webenvoy": {
+    "owner": "Core trusted owner account binding API",
+    "status": "accepted-v1",
+    "schema_version": "webenvoy.account-binding-owner-operation/v1",
+    "compatibility_boundary": "Owner-authenticated inspect/bind route. Bind accepts exact refs from an existing verified Harbor observation and explicit owner confirmation; Core derives the current Core lease holder and Harbor repeats its existing fresh-observation gate. Agent account.bind remains not_exposed.",
+    "source_adrs": ["docs/specs/account-system-local-definition-v1.md", "docs/specs/cli-integration-v1.md", "docs/architecture/runtime-capability-plane.md"],
+    "field_owners": {
+      "operation": "Core owner API",
+      "identity_environment_ref": "Harbor identity environment",
+      "profile_ref": "Harbor owner session facts",
+      "runtime_session_ref": "Harbor owner session facts",
+      "observation_ref": "Harbor verified observation",
+      "account_system_ref": "enabled local AccountSystem revision",
+      "account_ref": "Harbor verified observation",
+      "idempotency_key": "Harbor existing account-binding receipt",
+      "confirm": "trusted owner"
+    }
+  }
+}

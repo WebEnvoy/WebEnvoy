@@ -1,0 +1,11 @@
+# Core Owner Account Binding API V1
+
+Owner: WebEnvoy Core for the trusted-user route; Harbor for observation verification and persisted binding. Request schema: [`account-binding-owner-operation-request.schema.json`](../../packages/schemas/schemas/account-binding-owner-operation-request.schema.json).
+
+The only route is `POST /owner/account-bindings/operations`, protected by the existing Core owner Bearer gate. Agent credentials cannot call it. Bodies are limited to 64 KiB and reject unknown fields. `inspect` returns the existing Harbor account-binding projection for one identity environment. `bind` requires `confirm: true`, the exact identity environment, Profile, Runtime Session, observation, AccountSystem, account refs, and an idempotency key.
+
+Core reads the named owner Runtime Session through its internal Harbor supervisor route, verifies that its Profile and identity environment match the request and that its Core ControlLease is held, then derives `holder_ref` from Harbor's current session facts. The caller cannot supply a holder. Core sends the existing observation and derived holder to Harbor's account-binding route. Harbor remains authoritative: it checks the saved verified observation, performs a fresh observation, compares account system/ref and control generation, then persists through the existing identity-environment manager. This owner route does not add an identity observer, infer login state, or create another binding state machine.
+
+Account refs are stable `account:sha256:<lowercase-hex>` references produced by Harbor's site observer. The owner selects and confirms an exact observed ref; the route does not accept a login name or raw identity evidence. Local AccountSystem definitions remain Core metadata and do not authorize or assert the observed identity. A Harbor-specific observer is separately owned by Harbor and must be based on verified site evidence; neither a template nor Agent input can declare one.
+
+`account.bind` remains `not_exposed` to Agent capability projection. The owner CLI is the trusted-user entry. If a bind response is lost, the CLI reports `unknown_outcome` with the original idempotency key and does not retry. The owner can inspect current bindings with the same route before deciding what to do next; the route continues to use Harbor's existing idempotency receipt and fresh-observation gate.

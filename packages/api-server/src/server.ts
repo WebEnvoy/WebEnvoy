@@ -43,6 +43,7 @@ import {
 
 import { authorizeCoreRequest, handleManagedAccessApi, type ManagedAccessApiOptions } from "./managed-access-api.js";
 import { handleAccountSystemOwnerApi, type AccountSystemOwnerApiService } from "./account-system-owner-api.js";
+import { handleAccountBindingOwnerApi, type AccountBindingOwnerApiService } from "./account-binding-owner-api.js";
 import { handleSiteTaskAdmissionOwnerApi, type SiteTaskAdmissionOwnerApiService } from "./site-task-admission-owner-api.js";
 
 type JsonBody = Record<string, unknown>;
@@ -50,6 +51,7 @@ type FileTaskThreadStore = ReturnType<typeof createFileTaskThreadStore>;
 
 export type ApiServerOptions = ManagedAccessApiOptions & {
   accountSystemDefinitionService?: AccountSystemOwnerApiService;
+  accountBindingOwnerService?: AccountBindingOwnerApiService;
   siteTaskAdmissionService?: SiteTaskAdmissionOwnerApiService;
   runRecordStore?: FileRunRecordStore;
   authorizationDecisionStore?: FileAuthorizationDecisionStore;
@@ -271,6 +273,7 @@ async function route(request: IncomingMessage, response: ServerResponse, options
   const path = requestUrl.pathname;
   if (!authorizeCoreRequest(request, response, path, options)) return;
   if (await handleAccountSystemOwnerApi(request, response, path, options.accountSystemDefinitionService)) return;
+  if (await handleAccountBindingOwnerApi(request, response, path, options.accountBindingOwnerService)) return;
   if (await handleSiteTaskAdmissionOwnerApi(request, response, path, options.siteTaskAdmissionService)) return;
   if (await handleManagedAccessApi(request, response, path, options)) return;
   const ownerSessionRunsMatch = /^\/owner\/runtime-sessions\/([^/]+)\/runs$/.exec(path);
