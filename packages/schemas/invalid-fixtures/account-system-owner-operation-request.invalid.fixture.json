@@ -16,6 +16,22 @@
     {
       "name": "owner CAS is required for enable",
       "instance": { "operation": "enable", "local_definition_ref": "webenvoy:account-system/00000000-0000-4000-8000-000000000000", "revision_ref": "webenvoy:account-system-revision/00000000-0000-4000-8000-000000000000@1#sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+    },
+    {
+      "name": "refresh requires a fixed template ref",
+      "instance": { "schema_version": "webenvoy.account-system-owner-operation/v1", "operation": "create_refresh_draft", "local_definition_ref": "webenvoy:account-system/00000000-0000-4000-8000-000000000000", "base_revision_ref": "webenvoy:account-system-revision/00000000-0000-4000-8000-000000000000@1#sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+    },
+    {
+      "name": "refresh rejects an unversioned template ref",
+      "instance": { "schema_version": "webenvoy.account-system-owner-operation/v1", "operation": "create_refresh_draft", "local_definition_ref": "webenvoy:account-system/00000000-0000-4000-8000-000000000000", "base_revision_ref": "webenvoy:account-system-revision/00000000-0000-4000-8000-000000000000@1#sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "template_ref": "lode://account-system/github" }
+    },
+    {
+      "name": "merge resolution choice is explicit and bounded",
+      "instance": { "schema_version": "webenvoy.account-system-owner-operation/v1", "operation": "update_draft", "draft_ref": "webenvoy:account-system-draft/00000000-0000-4000-8000-000000000000", "definition": {}, "conflict_resolutions": [{ "path": "/version", "choice": "automatic" }] }
+    },
+    {
+      "name": "merge resolution is limited to an editable public metadata path",
+      "instance": { "schema_version": "webenvoy.account-system-owner-operation/v1", "operation": "update_draft", "draft_ref": "webenvoy:account-system-draft/00000000-0000-4000-8000-000000000000", "definition": {}, "conflict_resolutions": [{ "path": "/source/version", "choice": "template" }] }
     }
   ]
 }

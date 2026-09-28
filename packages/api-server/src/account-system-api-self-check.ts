@@ -13,6 +13,7 @@ const service = {
   },
   async list() { return []; },
   async createDraft(input: unknown) { calls.push({ operation: "create_draft", value: input }); return {}; },
+  async createRefreshDraft(input: unknown) { calls.push({ operation: "create_refresh_draft", value: input }); return {}; },
   async updateDraft(input: unknown) { calls.push({ operation: "update_draft", value: input }); return {}; },
   async checkDraft(input: unknown) { calls.push({ operation: "check_draft", value: input }); return {}; },
   async pinDraft(input: unknown) { calls.push({ operation: "pin_draft", value: input }); return {}; },
@@ -49,6 +50,22 @@ try {
   const rejectedExtra = await post({ ...importRequest, identity_method: "inferred" }, ownerToken);
   assert.equal(rejectedExtra.status, 400);
   assert.equal(calls.length, 1, "invalid fields do not reach the owner service");
+  const refreshRequest = { schema_version: "webenvoy.account-system-owner-operation/v1", operation: "create_refresh_draft",
+    local_definition_ref: "webenvoy:account-system/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    base_revision_ref: "webenvoy:account-system-revision/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa@1#sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    template_ref: "lode://account-system/github@1.0.1" };
+  const refresh = await post(refreshRequest, ownerToken);
+  assert.equal(refresh.status, 200);
+  assert.deepEqual(calls.at(-1), { operation: "create_refresh_draft", value: {
+    local_definition_ref: refreshRequest.local_definition_ref, base_revision_ref: refreshRequest.base_revision_ref, template_ref: refreshRequest.template_ref
+  } });
+  const update = await post({ schema_version: "webenvoy.account-system-owner-operation/v1", operation: "update_draft", draft_ref: "webenvoy:account-system-draft/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    definition: {}, conflict_resolutions: [{ path: "/version", choice: "template" }] }, ownerToken);
+  assert.equal(update.status, 200);
+  assert.deepEqual(calls.at(-1), { operation: "update_draft", value: {
+    draft_ref: "webenvoy:account-system-draft/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", definition: {},
+    conflict_resolutions: [{ path: "/version", choice: "template" }]
+  } });
   const resolve = await post({ schema_version: "webenvoy.account-system-owner-operation/v1", operation: "resolve", local_definition_ref: "webenvoy:account-system/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", historical: false }, ownerToken);
   assert.equal(resolve.status, 200);
   assert.equal(calls.at(-1)?.operation, "resolve");

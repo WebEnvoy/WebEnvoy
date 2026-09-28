@@ -1,0 +1,8 @@
+{
+  "$schema": "account-system-owner-operation-request.schema.json",
+  "schema_version": "webenvoy.account-system-owner-operation/v1",
+  "operation": "create_refresh_draft",
+  "local_definition_ref": "webenvoy:account-system/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  "base_revision_ref": "webenvoy:account-system-revision/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa@1#sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "template_ref": "lode://account-system/github@1.0.1"
+}

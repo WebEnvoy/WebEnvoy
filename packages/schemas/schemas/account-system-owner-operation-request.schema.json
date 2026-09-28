@@ -8,6 +8,7 @@
     { "$ref": "#/$defs/importTemplate" },
     { "$ref": "#/$defs/list" },
     { "$ref": "#/$defs/createDraft" },
+    { "$ref": "#/$defs/createRefreshDraft" },
     { "$ref": "#/$defs/updateDraft" },
     { "$ref": "#/$defs/checkDraft" },
     { "$ref": "#/$defs/pinDraft" },
@@ -23,7 +24,9 @@
     "importTemplate": { "allOf": [{ "$ref": "#/$defs/base" }, { "type": "object", "required": ["template_ref"], "properties": { "operation": { "const": "import_template" }, "template_ref": { "type": "string", "pattern": "^lode://account-system/[a-z0-9][a-z0-9._-]*@[0-9]+\\.[0-9]+\\.[0-9]+$" } } }], "unevaluatedProperties": false },
     "list": { "type": "object", "additionalProperties": false, "required": ["schema_version", "operation"], "properties": { "schema_version": { "const": "webenvoy.account-system-owner-operation/v1" }, "operation": { "const": "list" } } },
     "createDraft": { "allOf": [{ "$ref": "#/$defs/base" }, { "type": "object", "required": ["local_definition_ref", "base_revision_ref"], "properties": { "operation": { "const": "create_draft" }, "local_definition_ref": { "$ref": "#/$defs/textRef" }, "base_revision_ref": { "$ref": "#/$defs/textRef" } } }], "unevaluatedProperties": false },
-    "updateDraft": { "allOf": [{ "$ref": "#/$defs/base" }, { "type": "object", "required": ["draft_ref", "definition"], "properties": { "operation": { "const": "update_draft" }, "draft_ref": { "$ref": "#/$defs/textRef" }, "definition": { "type": "object" } } }], "unevaluatedProperties": false },
+    "createRefreshDraft": { "allOf": [{ "$ref": "#/$defs/base" }, { "type": "object", "required": ["local_definition_ref", "base_revision_ref", "template_ref"], "properties": { "operation": { "const": "create_refresh_draft" }, "local_definition_ref": { "$ref": "#/$defs/textRef" }, "base_revision_ref": { "$ref": "#/$defs/textRef" }, "template_ref": { "type": "string", "pattern": "^lode://account-system/[a-z0-9][a-z0-9._-]*@[0-9]+\\.[0-9]+\\.[0-9]+$" } } }], "unevaluatedProperties": false },
+    "conflictResolution": { "type": "object", "additionalProperties": false, "required": ["path", "choice"], "properties": { "path": { "enum": ["/version", "/display_name", "/related_domains", "/products", "/login_entry/label", "/login_entry/url", "/admin_entry_points", "/known_shared_login_relationships"] }, "choice": { "enum": ["local", "template"] } } },
+    "updateDraft": { "allOf": [{ "$ref": "#/$defs/base" }, { "type": "object", "required": ["draft_ref", "definition"], "properties": { "operation": { "const": "update_draft" }, "draft_ref": { "$ref": "#/$defs/textRef" }, "definition": { "type": "object" }, "conflict_resolutions": { "type": "array", "maxItems": 8, "items": { "$ref": "#/$defs/conflictResolution" } } } }], "unevaluatedProperties": false },
     "checkDraft": { "allOf": [{ "$ref": "#/$defs/base" }, { "type": "object", "required": ["draft_ref"], "properties": { "operation": { "const": "check_draft" }, "draft_ref": { "$ref": "#/$defs/textRef" } } }], "unevaluatedProperties": false },
     "pinDraft": { "allOf": [{ "$ref": "#/$defs/base" }, { "type": "object", "required": ["draft_ref", "expected_record_version"], "properties": { "operation": { "const": "pin_draft" }, "draft_ref": { "$ref": "#/$defs/textRef" }, "expected_record_version": { "$ref": "#/$defs/recordVersion" } } }], "unevaluatedProperties": false },
     "enable": { "allOf": [{ "$ref": "#/$defs/base" }, { "type": "object", "required": ["local_definition_ref", "revision_ref", "expected_record_version"], "properties": { "operation": { "const": "enable" }, "local_definition_ref": { "$ref": "#/$defs/textRef" }, "revision_ref": { "$ref": "#/$defs/textRef" }, "expected_record_version": { "$ref": "#/$defs/recordVersion" } } }], "unevaluatedProperties": false },
@@ -35,8 +38,8 @@
     "owner": "Core owner AccountSystem API",
     "status": "accepted-v1",
     "schema_version": "webenvoy.account-system-owner-operation/v1",
-    "compatibility_boundary": "Owner-authenticated POST body for local AccountSystem import, edit, CAS pin, enable, rollback, disable and inspection. Agent credentials cannot call this route.",
+    "compatibility_boundary": "Owner-authenticated POST body for local AccountSystem import, refresh merge, edit, CAS pin, enable, rollback, disable and inspection. Agent credentials cannot call this route.",
     "source_adrs": ["docs/specs/account-system-local-definition-v1.md", "docs/specs/skill-library-lifecycle-v1.md"],
-    "field_owners": { "operation": "Core", "template_ref": "Lode fixed template index", "definition": "Core local copy validated against pinned Lode template", "expected_record_version": "Core CAS" }
+    "field_owners": { "operation": "Core", "template_ref": "Lode fixed template index", "definition": "Core local copy validated against pinned Lode template", "conflict_resolutions": "Core owner choice for a reported refresh merge conflict", "expected_record_version": "Core CAS" }
   }
 }

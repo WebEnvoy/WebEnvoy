@@ -1,0 +1,10 @@
+{
+  "$schema": "account-system-owner-operation-request.schema.json",
+  "schema_version": "webenvoy.account-system-owner-operation/v1",
+  "operation": "update_draft",
+  "draft_ref": "webenvoy:account-system-draft/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  "definition": {},
+  "conflict_resolutions": [
+    { "path": "/version", "choice": "template" }
+  ]
+}
