@@ -70,10 +70,21 @@ export function normalizeManagedProviderObservation(value: unknown): ManagedProv
   const title = typeof raw.title === "string" && raw.title.length <= 256 && !/[\u0000-\u001f\u007f]|(?:token|cookie|password|secret|authorization)\s*[=:]/i.test(raw.title) ? raw.title : null;
   const ready = raw.ready_state === "complete" || raw.ready_state === "interactive";
   const document_generation = Number.isSafeInteger(raw.document_generation) && Number(raw.document_generation) >= 1 ? Number(raw.document_generation) : undefined;
-  const verified = ready && current_url?.startsWith("https://creator.xiaohongshu.com/") && typeof raw.stable_id === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(raw.stable_id);
-  return { page: { current_url, title, status: current_url && ready ? "ready" : "unknown", facts: [], ...(document_generation === undefined ? {} : { document_generation }) }, account: verified
-    ? { status: "verified", account_system_ref: "account-system:xiaohongshu", account_ref: `account:sha256:${createHash("sha256").update(JSON.stringify({ site_id: "xiaohongshu", stable_id: raw.stable_id })).digest("hex")}` }
-    : unknownManagedAccount() };
+  const xhsVerified = ready && current_url?.startsWith("https://creator.xiaohongshu.com/") && typeof raw.stable_id === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(raw.stable_id);
+  const githubProfilePath = (() => {
+    try {
+      const parsed = new URL(current_url ?? "");
+      return parsed.origin === "https://github.com" && /^\/[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/?$/.test(parsed.pathname);
+    } catch { return false; }
+  })();
+  const githubVerified = ready && githubProfilePath && raw.account_source_kind === "github.profile_meta.self_match/v1" &&
+    typeof raw.stable_id === "string" && /^[1-9][0-9]{0,19}$/.test(raw.stable_id);
+  const account = xhsVerified
+    ? { status: "verified" as const, account_system_ref: "account-system:xiaohongshu", account_ref: `account:sha256:${createHash("sha256").update(JSON.stringify({ site_id: "xiaohongshu", stable_id: raw.stable_id })).digest("hex")}` }
+    : githubVerified
+      ? { status: "verified" as const, account_system_ref: "account-system:github", account_ref: `account:sha256:${createHash("sha256").update(JSON.stringify({ site_id: "github", stable_id: raw.stable_id })).digest("hex")}` }
+      : unknownManagedAccount();
+  return { page: { current_url, title, status: current_url && ready ? "ready" : "unknown", facts: [], ...(document_generation === undefined ? {} : { document_generation }) }, account };
 }
 
 type ObservePage = (input?: ManagedProviderPageInput) => Promise<ManagedProviderObservation>;

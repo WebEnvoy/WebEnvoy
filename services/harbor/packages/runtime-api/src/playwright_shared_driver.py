@@ -55,6 +55,31 @@ OBSERVATION_ROLES = frozenset({
 })
 OBSERVATION_SELECTOR = 'button,a[href],input,textarea,select,[role],[contenteditable="true"],[contenteditable=""]'
 ARIA_SNAPSHOT_ROOT = re.compile(r'^-\s+([A-Za-z][A-Za-z0-9_-]*)(?:\s+"((?:[^"\\]|\\.)*)")?(?::.*)?$')
+GITHUB_PROFILE_IDENTITY_EXPRESSION = r'''() => {
+  const content = selector => {
+    const elements = [...document.querySelectorAll(selector)];
+    if (elements.length !== 1) return null;
+    const value = elements[0].getAttribute("content");
+    return typeof value === "string" ? value : null;
+  };
+  const viewer = content('meta[name="user-login"]');
+  const profile = content('meta[property="profile:username"]');
+  const dimensionLogin = content('meta[name="octolytics-dimension-user_login"]');
+  const stableId = content('meta[name="octolytics-dimension-user_id"]');
+  const validLogin = value => typeof value === "string" && /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(value);
+  const sameLogin = validLogin(viewer) && validLogin(profile) && validLogin(dimensionLogin) &&
+    viewer.toLowerCase() === profile.toLowerCase() && viewer.toLowerCase() === dimensionLogin.toLowerCase();
+  const path = location.pathname.toLowerCase();
+  const selfProfilePath = sameLogin && (path === `/${profile.toLowerCase()}` || path === `/${profile.toLowerCase()}/`);
+  const verified = location.origin === "https://github.com" && selfProfilePath && typeof stableId === "string" && /^[1-9][0-9]{0,19}$/.test(stableId);
+  return {
+    current_url: location.origin + location.pathname,
+    title: document.title.slice(0, 256),
+    ready_state: document.readyState,
+    stable_id: verified ? stableId : null,
+    account_source_kind: verified ? "github.profile_meta.self_match/v1" : null
+  };
+}'''
 
 
 class ObservationFailure(Exception):
@@ -1470,7 +1495,7 @@ class Driver:
         if state.scope_semantics == "agent_operations_v2" and origin_of(current or "") not in state.origins:
             raw = {"current_url": origin_of(current or "") or "unknown", "title": "", "ready_state": "loading", "stable_id": None}
         else:
-            raw = await state.page.evaluate("""() => ({ current_url: location.origin + location.pathname, title: document.title.slice(0,256), ready_state: document.readyState, stable_id: null })""")
+            raw = await state.page.evaluate(GITHUB_PROFILE_IDENTITY_EXPRESSION)
         if state.generation != generation:
             current = safe_url(state.page.url)
             raw = {"current_url": current, "title": "", "ready_state": "loading", "stable_id": None}

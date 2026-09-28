@@ -187,6 +187,31 @@ test("the shared fixed expression requires visible creator labels to match the a
   assert.equal(normalizeManagedProviderObservation(evaluate()).account.status, "unknown");
 });
 
+test("GitHub account refs require the shared driver self-profile metadata verdict and a stable decimal ID", () => {
+  const stableId = "583231";
+  const verified = normalizeManagedProviderObservation({
+    current_url: "https://github.com/octocat", title: "GitHub", ready_state: "complete", document_generation: 2,
+    stable_id: stableId, account_source_kind: "github.profile_meta.self_match/v1"
+  });
+  assert.deepEqual(verified.account, {
+    status: "verified", account_system_ref: "account-system:github",
+    account_ref: `account:sha256:${createHash("sha256").update(JSON.stringify({ site_id: "github", stable_id: stableId })).digest("hex")}`
+  });
+  assert.equal(JSON.stringify(verified).includes(stableId), false, "the stable ID is hashed before Harbor returns the observation");
+  for (const input of [
+    { stable_id: null, account_source_kind: null },
+    { stable_id: stableId, account_source_kind: null },
+    { stable_id: "0", account_source_kind: "github.profile_meta.self_match/v1" },
+    { stable_id: "58a231", account_source_kind: "github.profile_meta.self_match/v1" },
+    { stable_id: stableId, account_source_kind: "github.profile_meta.self_match/v1", current_url: "https://github.com/octocat/repositories" },
+    { stable_id: stableId, account_source_kind: "github.profile_meta.self_match/v1", current_url: "https://github.com.evil/octocat" },
+    { stable_id: stableId, account_source_kind: "github.profile_meta.self_match/v1", ready_state: "loading" }
+  ]) {
+    const result = normalizeManagedProviderObservation({ current_url: "https://github.com/octocat", title: "GitHub", ready_state: "complete", ...input });
+    assert.deepEqual(result.account, { status: "unknown", account_system_ref: null, account_ref: null });
+  }
+});
+
 
 test("stop refuses a different principal holding the same Core control-owner kind", async () => {
   const runtime = new HarborRuntime(createFixtureLauncher("ready"));
