@@ -13,7 +13,14 @@ const coreEndpoint = `http://127.0.0.1:${corePort}`;
 const harborEndpoint = `http://127.0.0.1:${harborPort}`;
 let inspectCalls = 0;
 let inspectBody;
+let accountInspectCalls = 0;
 const harbor = createServer(async (request, response) => {
+  if (request.method === "GET" && request.url === "/runtime/identity-environments/identity%3Amissing") {
+    accountInspectCalls += 1;
+    response.writeHead(404, { "content-type": "application/json; charset=utf-8" });
+    response.end(JSON.stringify({ failure_class: "identity_environment_missing" }));
+    return;
+  }
   if (request.method === "POST" && request.url === "/runtime/profile-recovery/inspect") {
     inspectCalls += 1;
     const chunks = [];
@@ -58,6 +65,15 @@ try {
   assert.equal(result.failure?.code, "profile_not_found", JSON.stringify(result));
   assert.equal(inspectCalls, 1);
   assert.deepEqual(inspectBody, { profile_ref: "profile:packaged-unknown" });
+  const accountResponse = await fetch(`${coreEndpoint}/owner/account-bindings/operations`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${supervisorToken}`, "content-type": "application/json" },
+    body: JSON.stringify({ schema_version: "webenvoy.account-binding-owner-operation/v1", operation: "inspect", identity_environment_ref: "identity:missing" }),
+  });
+  const accountResult = await accountResponse.json();
+  assert.equal(accountResponse.status, 404, JSON.stringify(accountResult));
+  assert.equal(accountResult.error?.code, "identity_environment_missing");
+  assert.equal(accountInspectCalls, 1);
   console.log("Packaged Core recovery entry smoke passed: unknown Profile rejected through owner inspect without 503.");
 } catch (error) {
   throw new Error(`${error instanceof Error ? error.message : String(error)}${stderr ? `\n${stderr}` : ""}`);

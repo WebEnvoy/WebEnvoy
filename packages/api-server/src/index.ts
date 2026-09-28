@@ -33,6 +33,7 @@ import { createApiServer } from "./server.js";
 import { createHttpAccountBindingOwnerApiService } from "./account-binding-owner-api.js";
 
 export { createApiServer } from "./server.js";
+export { createHttpAccountBindingOwnerApiService } from "./account-binding-owner-api.js";
 
 export const apiServerHost = "127.0.0.1";
 

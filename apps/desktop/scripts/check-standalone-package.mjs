@@ -24,6 +24,8 @@ const packagedCoreEntry = await readFile(join(packageRoot, "dist-electron/runtim
 assert.match(packagedCoreEntry,
   /createManagedTaskService\(\{[\s\S]*?\.\.\.\(accountSystemDefinitionService === undefined \? \{\} : \{ accountSystemDefinitionService \}\)/,
   "packaged Core must pass the installed AccountSystem resolver to task submission");
+assert.match(packagedCoreEntry, /createHttpAccountBindingOwnerApiService\(/);
+assert.match(packagedCoreEntry, /\.\.\.\(accountBindingOwnerService === undefined \? \{\} : \{ accountBindingOwnerService \}\)/);
 assert.equal(await fixedNodeVersion(packageRoot), `v${manifest.runtime.node_version}`);
 
 const verifyScript = `import { verifyBundle } from './agent-entry/bundle.mjs'; console.log(JSON.stringify(await verifyBundle(process.cwd())));`;

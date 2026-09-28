@@ -138,7 +138,7 @@ function coreStartScript() {
   return `import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { createApiServer } from "@webenvoy/api-server";
+import { createApiServer, createHttpAccountBindingOwnerApiService } from "@webenvoy/api-server";
 import {
   createFileAuthorizationDecisionStore,
   createFileExecutionPolicyConfigStore,
@@ -202,6 +202,9 @@ const harborRuntimeClient = harborRuntimeUrl
   : undefined;
 const managedFileService = harborRuntimeUrl
   ? createHttpManagedFileOwnerClient({ baseUrl: harborRuntimeUrl, supervisorToken: process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN ?? "" })
+  : undefined;
+const accountBindingOwnerService = harborRuntimeUrl && process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN
+  ? createHttpAccountBindingOwnerApiService({ baseUrl: harborRuntimeUrl, supervisorToken: process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN })
   : undefined;
 
 if (harborRuntimeClient) {
@@ -290,6 +293,7 @@ const server = createApiServer({
   managedAccessStore,
   ...(accountSystemDefinitionService === undefined ? {} : { accountSystemDefinitionService }),
   ...(managedAccountSystemService === undefined ? {} : { managedAccountSystemService }),
+  ...(accountBindingOwnerService === undefined ? {} : { accountBindingOwnerService }),
   ...(managedSiteTaskAdmissionService === undefined ? {} : { siteTaskAdmissionService: managedSiteTaskAdmissionService }),
   managedSkillService,
   ...(managedTaskService === undefined ? {} : { managedTaskService }),
