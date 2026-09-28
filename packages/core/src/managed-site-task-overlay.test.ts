@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
-import { mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import test from "node:test";
 import { tmpdir } from "node:os";
@@ -132,10 +132,12 @@ async function createPrivateDerivedRevision(lodeAssetsPath: string, tempRoot: st
   const scriptPath = join(packageRoot, scriptDeclaration.path);
   const script = await readFile(scriptPath, "utf8");
   const mismatch = "block.match(/([\\d,]+)\\s+stars\\s+(?:today|this week|this month)/i)";
-  const repaired = "block.match(/\\+?([\\d,]+)\\s+stars\\s+(?:today|this week|this month)/i)";
+  const replacement = version === "0.1.1"
+    ? "block.match(/([\\d,]+)\\s+stars\\s+this week/i)"
+    : "block.match(/\\+?([\\d,]+)\\s+stars\\s+(?:today|this week|this month)/i)";
   assert(script.includes(mismatch), "the fixed OpenCLI adapter must have the expected bounded repair point");
-  await writeFile(scriptPath, script.replace(mismatch, repaired));
-  await writeFile(join(packageRoot, "SKILL.md"), `${await readFile(join(packageRoot, "SKILL.md"), "utf8")}\n\nPrivate repair draft ${version}: the daily stars field accepts the observed optional leading plus. The scope, one-request budget, broker, and output contract remain unchanged.\n`);
+  await writeFile(scriptPath, script.replace(mismatch, replacement));
+  await writeFile(join(packageRoot, "SKILL.md"), `${await readFile(join(packageRoot, "SKILL.md"), "utf8")}\n\nPrivate draft ${version}: ${version === "0.1.1" ? "controlled daily-stars mismatch" : "repair the daily-stars mismatch"}. The scope, one-request budget, broker, and output contract remain unchanged.\n`);
   await writeFile(join(packageRoot, "references/recovery.md"), `${await readFile(join(packageRoot, "references/recovery.md"), "utf8")}\n\nFor a parser mismatch, keep the original Run and evidence, create a private derived draft, inspect its exact diff and dependencies, pin and test it, then ask the owner to enable or roll back with the existing revision controls. Never replay an unknown Run.\n`);
 
   const sourcePlaceholder = "0".repeat(40);
@@ -238,6 +240,19 @@ test("OpenCLI private overlay is admitted, installed, run through its pinned bro
       runtime: { approvedBasePackageFor: approvedManagedSiteTaskBasePackageFor, verifyPackageRoot: verifySiteSkillPackageRoot,
         scriptCodeAdmissionRef: managedSiteScriptCodeAdmissionRef }
     });
+    const baseRoot = join(tempRoot, "public-opencli-base");
+    await execFileAsync("git", ["clone", "--quiet", "--local", "--no-hardlinks", lodeRoot!, baseRoot]);
+    await git(baseRoot, "checkout", "--quiet", "--detach", base.source_commit);
+    await cp(join(lodeRoot!, packagePath), join(baseRoot, packagePath), { recursive: true, force: true });
+    await cp(join(lodeRoot!, "registry/local-packages.json"), join(baseRoot, "registry/local-packages.json"));
+    await git(baseRoot, "config", "user.name", "Private Overlay Test");
+    await git(baseRoot, "config", "user.email", "overlay-test@example.invalid");
+    await gitCommit(baseRoot, "review public OpenCLI base");
+    const baseRepo = await admissionStore.selectAuthoringRepository({ path: baseRoot }) as Json;
+    const baseCandidate = await admissionStore.inspectCandidate({ repository_ref: baseRepo.repository_ref, package_ref: packageRef,
+      base_revision_ref: null, task_ref: taskRef }) as Json;
+    const baseReceipt = await admissionStore.admitSource({ candidate_ref: baseCandidate.candidate_ref }) as Json;
+    assert.equal(baseReceipt.code_active, false);
     const firstRepo = await admissionStore.selectAuthoringRepository({ path: first.root }) as Json;
     const firstCandidate = await admissionStore.inspectCandidate({ repository_ref: firstRepo.repository_ref, package_ref: packageRef,
       base_revision_ref: base.revision_ref, task_ref: taskRef }) as Json;
@@ -245,7 +260,7 @@ test("OpenCLI private overlay is admitted, installed, run through its pinned bro
     const diff = await admissionStore.candidateDiff({ candidate_ref: firstCandidate.candidate_ref }) as Json;
     assert.match(diff.diff, /opencli-adapter\.mjs/);
     assert.match(diff.diff, /registry\/local-packages\.json/);
-    assert.match(diff.diff, /optional leading plus/);
+    assert.match(diff.diff, /controlled daily-stars mismatch/);
     assert(!firstCandidate.changed_paths.some((path: string) => path === "package.json" || path.startsWith("node_modules/")),
       "the repair draft adds no executable dependencies");
     const sourceReceipt = await admissionStore.admitSource({ candidate_ref: firstCandidate.candidate_ref }) as Json;
@@ -316,24 +331,36 @@ test("OpenCLI private overlay is admitted, installed, run through its pinned bro
     const prepared = await managedTask.operate(credentialHash, taskInput, { agentSocketIngressVerified: true }) as Json;
     assert.equal(prepared.ok, true, JSON.stringify(prepared));
     assert.equal(prepared.run.status, "running");
-    const submitted = await runManagedSiteWorker(prepared.worker_execution.ticket, managedTask);
-    assert.equal(submitted.run.status, "succeeded", JSON.stringify(submitted));
-    const submittedRecord = await runRecordStore.getRunRecord(submitted.run.run_id);
-    assert(submittedRecord?.public_result_summary);
-    assert.equal(submittedRecord.public_result_summary.revision_ref, first.revisionRef);
-    assert.equal(submittedRecord.public_result_summary.source_admission_ref, sourceReceipt.admission_ref);
-    assert.equal(submittedRecord.public_result_summary.code_admission_ref, admitted.code_admission_ref);
-    assert.equal(submitted.result.data.normalized.parameters.since, "daily");
-    assert.equal(submitted.result.data.normalized.parameters.limit, 5);
-    assert.equal(submitted.result.data.normalized.records.length, 5);
-    assert.equal(submitted.result.data.normalized.records[0].starsSince, 500);
-    assert.equal(submitted.result.post_check.status, "passed");
+    const failed = await runManagedSiteWorker(prepared.worker_execution.ticket, managedTask);
+    assert.equal(failed.run.status, "failed", "the controlled daily-stars mismatch must fail before repair");
+    assert.equal(failed.result.failure.code, "managed_site_script_failed");
+    const failedRecord = await runRecordStore.getRunRecord(failed.run.run_id);
+    assert.equal(failedRecord?.public_result_summary?.revision_ref, first.revisionRef);
+    assert.equal(failedRecord?.public_result_summary?.source_admission_ref, sourceReceipt.admission_ref);
+    assert.equal(failedRecord?.public_result_summary?.code_admission_ref, admitted.code_admission_ref);
 
     const installedSecond = await installFirst("skill.install", "install-overlay-012", { revision_ref: second.revisionRef, source_ref: second.sourceRef }) as Json;
     assert.equal(installedSecond.status, "succeeded", JSON.stringify(installedSecond));
     const updatedSecond = await installFirst("skill.update", "update-overlay-012", { target_revision_ref: second.revisionRef,
       source_ref: second.sourceRef, expected_current_revision_ref: first.revisionRef, expected_record_version: installedSecond.result.skill.record_version }) as Json;
     assert.equal(updatedSecond.result.skill.enabled_revision_ref, second.revisionRef);
+    const repairedInput = {
+      ...taskInput, idempotency_key: "opencli-overlay-repaired-daily-five",
+      task_scope: { ...taskInput.task_scope, source_refs: [second.revisionRef] },
+      package: { ...taskInput.package, revision_ref: second.revisionRef, package_digest: second.packageDigest },
+      input: { ...taskInput.input, schema_ref: second.task.inputs.schema_ref }
+    };
+    const repairedPrepared = await managedTask.operate(credentialHash, repairedInput, { agentSocketIngressVerified: true }) as Json;
+    assert.equal(repairedPrepared.run.status, "running", JSON.stringify(repairedPrepared));
+    const repaired = await runManagedSiteWorker(repairedPrepared.worker_execution.ticket, managedTask);
+    assert.equal(repaired.run.status, "succeeded", JSON.stringify(repaired));
+    assert.equal(repaired.result.data.normalized.parameters.since, "daily");
+    assert.equal(repaired.result.data.normalized.parameters.limit, 5);
+    assert.equal(repaired.result.data.normalized.records.length, 5);
+    assert.equal(repaired.result.data.normalized.records[0].starsSince, 500);
+    assert.equal(repaired.result.post_check.status, "passed");
+    const repairedRecord = await runRecordStore.getRunRecord(repaired.run.run_id);
+    assert.equal(repairedRecord?.public_result_summary?.revision_ref, second.revisionRef);
     const rolledBack = await installFirst("skill.rollback", "rollback-overlay-011", { target_revision_ref: first.revisionRef,
       source_ref: first.sourceRef, expected_current_revision_ref: second.revisionRef, expected_record_version: updatedSecond.result.skill.record_version }) as Json;
     assert.equal(rolledBack.result.skill.enabled_revision_ref, first.revisionRef);
@@ -345,18 +372,20 @@ test("OpenCLI private overlay is admitted, installed, run through its pinned bro
       runRecordStore: reopenedRuns, lodeAssetsPath: first.root, managedSiteTaskAdmissionStore: admissionStore });
     const reopenedTask = createManagedTaskService({ accessStore: reopenedAccess, runRecordStore: reopenedRuns, skillLibraryService: reopenedLibrary,
       publicHttpReader: async () => { throw new Error("historical Run query must not redispatch"); } });
-    const historical = await reopenedTask.operate(credentialHash, {
-      schema_version: "webenvoy.managed-task-operation/v1", operation: "task.query", grant_id: grant.grant_id,
-      connection_id: reopenedConnection.connection_id,
-      task_scope: { operations: ["task.query"], skill_refs: [packageRef], source_refs: [first.revisionRef], profile_refs: [profileRef], origins: [origin] },
-      selector: { run_id: submitted.run.run_id }
-    }) as Json;
-    assert.equal(historical.ok, true, JSON.stringify(historical));
-    assert.equal(historical.run.run_id, submitted.run.run_id);
-    const historicalRecord = await reopenedRuns.getRunRecord(historical.run.run_id);
-    assert.equal(historicalRecord?.public_result_summary?.revision_ref, first.revisionRef);
-    assert.equal(historical.result.data.normalized.records.length, 5);
-    assert.equal(httpCalls, 1, "historical readback does not replay the public request");
+    for (const [run, revision, status] of [[failed, first.revisionRef, "failed"], [repaired, second.revisionRef, "succeeded"]] as const) {
+      const historical = await reopenedTask.operate(credentialHash, {
+        schema_version: "webenvoy.managed-task-operation/v1", operation: "task.query", grant_id: grant.grant_id,
+        connection_id: reopenedConnection.connection_id,
+        task_scope: { operations: ["task.query"], skill_refs: [packageRef], source_refs: [revision], profile_refs: [profileRef], origins: [origin] },
+        selector: { run_id: run.run.run_id }
+      }) as Json;
+      assert.equal(historical.ok, true, JSON.stringify(historical));
+      assert.equal(historical.run.status, status);
+      const historicalRecord = await reopenedRuns.getRunRecord(historical.run.run_id);
+      assert.equal(historicalRecord?.public_result_summary?.revision_ref, revision);
+      if (status === "succeeded") assert.equal(historical.result.data.normalized.records.length, 5);
+    }
+    assert.equal(httpCalls, 2, "historical readback does not replay either public request");
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }

@@ -49,6 +49,7 @@ export const approvedGitHubTrendingSiteTaskPackage = {
 export const approvedManagedSiteTaskPackages = [approvedManagedSiteTaskPackage, approvedGitHubTrendingSiteTaskPackage] as const;
 /** Fixed source base for owner-reviewed private overlays; this does not admit the base package for installation or execution. */
 const approvedGitHubOpenCliTrendingOverlayBase = {
+  allow_initial_admission: true,
   package_ref: "lode://site-skill/github/opencli-trending-repos",
   package_path: "sites/github/opencli-trending-repos",
   task_ref: "read-trending-repositories",

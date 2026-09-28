@@ -194,7 +194,7 @@ function candidateRefMatches(candidate: StoredCandidate): boolean {
 }
 
 export type SiteTaskAdmissionRuntime = {
-  approvedBasePackageFor(packageRef: string): ExtendedSiteSkillPackagePin | undefined;
+  approvedBasePackageFor(packageRef: string): (ExtendedSiteSkillPackagePin & { allow_initial_admission?: true }) | undefined;
   verifyPackageRoot(root: string, pin: ExtendedSiteSkillPackagePin): Promise<Pick<VerifiedSiteTask,
     "package_ref" | "revision_ref" | "package_digest" | "source_ref" | "source_commit" | "task_ref" | "files">>;
   scriptCodeAdmissionRef(pin: ExtendedSiteSkillPackagePin): string;
@@ -236,7 +236,9 @@ async function candidateDiffRange(root: string, baseRevisionRef: string | null, 
     if (!base || base.revision_ref !== baseRevisionRef) return fail("managed_site_task_base_revision_unapproved");
     return { range: `${base.source_commit}..${authoringCommit}`, packagePath: base.package_path };
   }
-  if (runtime.approvedBasePackageFor(pin.package_ref)) return fail("managed_site_task_base_revision_unapproved");
+  const base = runtime.approvedBasePackageFor(pin.package_ref);
+  if (base && (!base.allow_initial_admission || pin.revision_ref !== base.revision_ref || pin.package_digest !== base.package_digest))
+    return fail("managed_site_task_base_revision_unapproved");
   const parent = await git(root, ["rev-parse", `${pin.source_commit}^`]).then(result => result.stdout.trim()).catch(() => "");
   if (!commitPattern.test(parent)) return fail("managed_site_task_source_commit_unreviewable");
   return { range: `${parent}..${authoringCommit}`, packagePath: pin.package_path };
@@ -615,7 +617,8 @@ export function createFileManagedSiteTaskAdmissionStore(options: {
     const base = options.runtime.approvedBasePackageFor(packageRef);
     const baseRevisionRef = nullableText(baseRevisionRefValue);
     if (base) {
-      if (baseRevisionRef === null || base.revision_ref !== baseRevisionRef) return fail("managed_site_task_base_revision_unapproved");
+      if (baseRevisionRef === null ? !base.allow_initial_admission : base.revision_ref !== baseRevisionRef)
+        return fail("managed_site_task_base_revision_unapproved");
     } else if (baseRevisionRef !== null) {
       return fail("managed_site_task_base_revision_unapproved");
     }
@@ -631,7 +634,9 @@ export function createFileManagedSiteTaskAdmissionStore(options: {
         (item.pin.revision_ref !== pin.revision_ref || item.pin.package_digest !== pin.package_digest || item.pin.task_ref !== pin.task_ref))) {
       return fail("managed_site_task_initial_admission_exists");
     }
-    if (base && (pin.revision_ref === base.revision_ref || !versionGreater(pin.revision_ref.split("@").at(-1)?.split("#")[0], base.revision_ref.split("@").at(-1)?.split("#")[0]) ||
+    if (base && baseRevisionRef === null && (pin.revision_ref !== base.revision_ref || pin.package_digest !== base.package_digest))
+      return fail("managed_site_task_base_revision_unapproved");
+    if (base && baseRevisionRef !== null && (pin.revision_ref === base.revision_ref || !versionGreater(pin.revision_ref.split("@").at(-1)?.split("#")[0], base.revision_ref.split("@").at(-1)?.split("#")[0]) ||
         pin.source_repository !== base.source_repository || pin.source_path !== base.source_path || pin.task_ref !== base.task_ref || pin.capability_asset_ref !== base.capability_asset_ref)) return fail("managed_site_task_source_not_derived_from_base");
     const verified = await options.runtime.verifyPackageRoot(root, pin);
     if (verified.package_ref !== packageRef || verified.revision_ref !== pin.revision_ref || verified.package_digest !== pin.package_digest || verified.source_ref !== pin.source_ref ||
