@@ -32,6 +32,7 @@ jobs:
       SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       PACKAGE_ROOT: /tmp/webenvoy-opencli-ci/webenvoy-standalone-macos-arm64
       LODE_ROOT: ${{ github.workspace }}/.runtime-sources/lode
+      AUTHORING_ROOT: ${{ github.workspace }}/.runtime-sources/lode-opencli-authoring
       EVIDENCE_ROOT: /tmp/webenvoy-opencli-evidence
       MATERIAL_ROOT: /tmp/webenvoy-opencli-provider-materials
     steps:
@@ -91,6 +92,19 @@ jobs:
           test -z "$(git -C "$LODE_ROOT" status --porcelain)"
           sudo -n -u nobody -- /usr/bin/id -u >/dev/null
 
+      - name: Prepare fixed OpenCLI authoring ancestry
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init -q "$AUTHORING_ROOT"
+          git -C "$AUTHORING_ROOT" fetch --no-tags "$LODE_ROOT" "$(git -C "$LODE_ROOT" rev-parse HEAD)" 464c7210b2efb79314292848781b472741bb996b
+          tree="$(git -C "$LODE_ROOT" rev-parse HEAD^{tree})"
+          bridge="$(GIT_AUTHOR_NAME='WebEnvoy CI' GIT_AUTHOR_EMAIL='ci@webenvoy.invalid' GIT_COMMITTER_NAME='WebEnvoy CI' GIT_COMMITTER_EMAIL='ci@webenvoy.invalid' GIT_AUTHOR_DATE='2000-01-01T00:00:00Z' GIT_COMMITTER_DATE='2000-01-01T00:00:00Z' git -C "$AUTHORING_ROOT" commit-tree "$tree" -p 464c7210b2efb79314292848781b472741bb996b -m 'CI authoring bridge for locked Lode assets')"
+          git -C "$AUTHORING_ROOT" checkout --detach "$bridge"
+          test "$(git -C "$AUTHORING_ROOT" rev-parse HEAD^{tree})" = "$tree"
+          git -C "$AUTHORING_ROOT" merge-base --is-ancestor 464c7210b2efb79314292848781b472741bb996b HEAD
+          test -z "$(git -C "$AUTHORING_ROOT" status --porcelain)"
+
       - name: Build and verify one standalone candidate
         env:
           WEBENVOY_LODE_ASSETS_SOURCE_DIR: ${{ env.LODE_ROOT }}
@@ -120,7 +134,7 @@ jobs:
           "$MATERIAL_ROOT/venv/bin/python" -I -B -c 'import importlib.metadata as m; assert m.version("camoufox") == "0.5.6"; assert m.version("playwright") == "1.60.0"'
 
       - name: Run three fixed public tasks through the installed entry
-        run: node apps/desktop/scripts/standalone-opencli-public-read-check.mjs "$PACKAGE_ROOT" "$LODE_ROOT" "$EVIDENCE_ROOT" "$MATERIAL_ROOT"
+        run: node apps/desktop/scripts/standalone-opencli-public-read-check.mjs "$PACKAGE_ROOT" "$LODE_ROOT" "$EVIDENCE_ROOT" "$MATERIAL_ROOT" "$AUTHORING_ROOT"
 
       - name: Preserve bounded candidate evidence
         if: always()
