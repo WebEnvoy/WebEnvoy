@@ -20,6 +20,7 @@ import {
   createFileAccountSystemDefinitionStore,
   createManagedAccountSystemReadService,
   createFileManagedSiteTaskAdmissionStore,
+  approvedManagedSiteTaskBasePackageFor,
   approvedManagedSiteTaskPackageFor,
   managedSiteScriptCodeAdmissionRef,
   verifySiteSkillPackageRoot,
@@ -143,7 +144,7 @@ if (import.meta.url === entrypoint) {
         managedDataRoot: runtimeDataRoot,
         ...(skillLibraryDirectory === undefined ? {} : { managedMaterializationPaths: [skillLibraryDirectory, join(skillLibraryDirectory, "skill-library")] }),
         runtime: {
-          approvedBasePackageFor: approvedManagedSiteTaskPackageFor,
+          approvedBasePackageFor: approvedManagedSiteTaskBasePackageFor,
           verifyPackageRoot: verifySiteSkillPackageRoot,
           scriptCodeAdmissionRef: managedSiteScriptCodeAdmissionRef
         }

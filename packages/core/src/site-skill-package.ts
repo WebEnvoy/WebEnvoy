@@ -47,6 +47,31 @@ export const approvedGitHubTrendingSiteTaskPackage = {
   }
 } as const;
 export const approvedManagedSiteTaskPackages = [approvedManagedSiteTaskPackage, approvedGitHubTrendingSiteTaskPackage] as const;
+/** Fixed source base for owner-reviewed private overlays; this does not admit the base package for installation or execution. */
+const approvedGitHubOpenCliTrendingOverlayBase = {
+  package_ref: "lode://site-skill/github/opencli-trending-repos",
+  package_path: "sites/github/opencli-trending-repos",
+  task_ref: "read-trending-repositories",
+  revision_ref: "lode://site-skill/github/opencli-trending-repos@0.1.0#464c7210b2efb79314292848781b472741bb996b",
+  package_digest: "sha256:2d6fbc1df2dfced60203a095ca2b263964c35948bba11943c0fd31718800cb94",
+  manifest_sha256: "bcfec83cef3f63e96f9d604b00e2311e7ea1ac173efcc220d2f057defb453f21",
+  source_repository: "WebEnvoy/Lode",
+  source_path: "sites/github/opencli-trending-repos",
+  source_commit: "464c7210b2efb79314292848781b472741bb996b",
+  source_ref: "lode://source/site-skill/github/opencli-trending-repos@0.1.0#464c7210b2efb79314292848781b472741bb996b",
+  lock_ref: "lode://lock/site-skill/github/opencli-trending-repos@0.1.0",
+  capability_asset_ref: "lode://site-capability/github/opencli-trending-repos@0.1.0",
+  script: {
+    script_ref: "lode://script/site-skill/github/opencli-trending-repos/read-trending-repositories@0.1.0",
+    path: "scripts/opencli-adapter.mjs",
+    version: "0.1.0",
+    sha256: "sha256:a51487318974c1c81a7786fef263d8e93b890c427099e2a550cfaa2223ed3863",
+    runtime_kind: "webenvoy.site-skill-script-abi/v1",
+    entrypoint: "run",
+    broker: "webenvoy.site-skill-broker/v1.1",
+    broker_capabilities: ["network.read", "output.write"]
+  }
+} as const;
 export const approvedManagedSiteTaskSourceRef = "lode://source/site-skill/controlled-local/page-summary@1.0.0#48ba83eff3d8321eae1699155e6be5a64b8efc5d" as const;
 export const approvedManagedSiteTaskCapabilityRef = "lode:capability/managed-page-snapshot" as const;
 export const approvedManagedSiteTaskCapabilityVersion = "1.0.0" as const;
@@ -387,6 +412,12 @@ export async function verifySiteSkillPackageRoot(lodeAssetsPath: string, pin: Si
 
 export function approvedManagedSiteTaskPackageFor(packageRef: string) {
   return approvedManagedSiteTaskPackages.find(pin => pin.package_ref === packageRef);
+}
+
+/** Resolve only a source base for a derived owner overlay; runnable packages remain in approvedManagedSiteTaskPackages. */
+export function approvedManagedSiteTaskBasePackageFor(packageRef: string) {
+  return approvedManagedSiteTaskPackageFor(packageRef) ??
+    (approvedGitHubOpenCliTrendingOverlayBase.package_ref === packageRef ? approvedGitHubOpenCliTrendingOverlayBase : undefined);
 }
 
 export async function resolveApprovedSiteTaskPackage(lodeAssetsPath: string | undefined, pin: SiteSkillPackagePin = approvedManagedSiteTaskPackage): Promise<VerifiedSiteTask> {

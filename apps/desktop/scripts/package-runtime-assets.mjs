@@ -147,6 +147,7 @@ import {
   createFileAccountSystemDefinitionStore,
   createManagedAccountSystemReadService,
   createFileManagedSiteTaskAdmissionStore,
+  approvedManagedSiteTaskBasePackageFor,
   approvedManagedSiteTaskPackageFor,
   managedSiteScriptCodeAdmissionRef,
   verifySiteSkillPackageRoot,
@@ -249,7 +250,7 @@ const managedSiteTaskAdmissionService = lodeAssetsPath
       managedDataRoot: runtimeDataDir,
       managedMaterializationPaths: [skillLibraryDirectory, join(skillLibraryDirectory, "skill-library")],
       runtime: {
-        approvedBasePackageFor: approvedManagedSiteTaskPackageFor,
+        approvedBasePackageFor: approvedManagedSiteTaskBasePackageFor,
         verifyPackageRoot: verifySiteSkillPackageRoot,
         scriptCodeAdmissionRef: managedSiteScriptCodeAdmissionRef
       }
