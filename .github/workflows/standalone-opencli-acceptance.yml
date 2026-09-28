@@ -76,6 +76,11 @@ jobs:
           path: .runtime-sources/lode
           fetch-depth: 0
           persist-credentials: false
+      - name: Fetch fixed OpenCLI base source for owner admission
+        shell: bash
+        run: |
+          git -C "$LODE_ROOT" fetch --no-tags origin +464c7210b2efb79314292848781b472741bb996b:refs/remotes/origin/opencli-pinned-source
+          git -C "$LODE_ROOT" cat-file -e 464c7210b2efb79314292848781b472741bb996b^{commit}
       - name: Verify exact source inputs
         shell: bash
         run: |
