@@ -266,6 +266,17 @@ caller key 是调用方在提交前生成并保存的稳定 `idempotency_key`。
 
 实现和帮助必须逐项遵守这张矩阵。除表中现有 receipt、operation selector、目标路径／file_ref 语义和 ControlLease CAS 外，不得新增幂等机制；无法查询或对账时必须保留 unknown／unavailable。
 
+#### 5.3.2 owner Account binding
+
+Account/Profile binding 是单独的可信 owner 决定。AccountSystem 模板和 Agent 不能声明或推断登录身份；Core 只把 owner 提供的已观察 refs 转交 Harbor，Harbor 对当前 holder 复核原 observation 并执行 fresh observation 后持久化。该入口不增加 Agent Grant 权限，`account.bind` 仍为 `not_exposed`。
+
+    webenvoy account bindings --data-dir DIR --identity-environment-ref REF
+    webenvoy account bind --data-dir DIR --profile-ref PROFILE --identity-environment-ref REF --runtime-session-ref SESSION --observation-ref OBSERVATION --account-system-ref ACCOUNT_SYSTEM --account-ref ACCOUNT --idempotency-key KEY --confirm
+
+`bind` 的 refs 必须来自准确 Runtime Session 的已完成 `instance.observe` 结果。Core 从 owner-authenticated Harbor Session facts 检查 Session、Profile、identity environment 一致，要求 control owner 和 lock owner 都是 `core_task`、lock 为 `held`，并从该事实派生 holder；CLI 不能提供 holder。Harbor 再验证 `account_system_ref` 和 `account_ref` 与保存的 verified observation 一致，重新观察当前现场，并要求 control generation 未改变。owner 明确传入 `--confirm` 才派发；没有可用 verified observation、Profile 不匹配、ControlLease 已变化或观察结果未知时 fail closed。
+
+Account `idempotency_key` 遵循 Harbor 的有界 opaque-ref 字符集和长度，由 owner 在派发前保存。响应丢失返回 `unknown_outcome`，不自动重放；用 `account bindings` 读取当前绑定事实后再决定后续操作。该查询不会证明某个特定请求是否提交，只报告当前 Harbor binding。详见 [Core Owner Account Binding API V1](../contracts/account-binding-owner-api-v1.md)。
+
 ### 5.4 owner 文件管理
 
     webenvoy files import --data-dir DIR --source-path PATH --profile-ref PROFILE [--display-name NAME] [--mime-type TYPE] [--operation-ref REF]
@@ -420,6 +431,8 @@ account.bind 可以存在于 Core capability definition，但当前未暴露给 
 | instance takeover | 无 | owner-authenticated POST /runtime/sessions/{ref}/handoff（core_task held）或 POST /runtime/sessions/{ref}/lock（released），均带 harbor-control-precondition/v1 | Harbor ControlLease |
 | instance handback | 无 | owner-authenticated POST /runtime/sessions/{ref}/release，带 harbor-control-precondition/v1 | Harbor ControlLease |
 | instance stop | 无 | owner-authenticated POST /runtime/sessions/{ref}/stop | Harbor exact Instance |
+| account bindings | 无 | owner-authenticated POST /owner/account-bindings/operations，operation=inspect | Core 路由到 Harbor 现存 identity environment 与 binding projection |
+| account bind | 无 | owner-authenticated POST /owner/account-bindings/operations，operation=bind | Core 校验当前 Harbor Session 并派生 holder；Harbor 复核原 observation、fresh observe 并持久化既有 binding |
 
 owner session routes must be reachable only through a trusted owner control plane. If the current local service does not yet proxy these Harbor supervisor routes, implementation must add the narrow owner-authenticated forwarding seam; it must not expose them through Agent MCP or create a second direct Harbor client in CLI.
 

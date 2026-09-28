@@ -98,24 +98,28 @@ function exportLockedAssets(repository, lock, target) {
 }
 
 async function verifyAccountSystemTemplate(root) {
-  const templateRef = "lode://account-system/github@1.0.0";
-  const expectedPath = "account-systems/github/1.0.0.json";
-  const expectedSha = "sha256:8b022fc329a6f75887e465ab561c83ba74d2ab2af1ef0e51a41f3d06b1b4c777";
   await assertRegularAsset(root, "registry/account-system-templates.json");
-  await assertRegularAsset(root, expectedPath);
   const index = JSON.parse(await readFile(path.join(root, "registry/account-system-templates.json"), "utf8"));
   if (index.schema_version !== "lode.account-system-template-index.v1" || index.index_id !== "lode.account-system-templates" || !Array.isArray(index.entries)) {
     throw new Error("account_system_template_index_invalid");
   }
-  const matches = index.entries.filter((entry) => entry?.template_ref === templateRef);
-  if (matches.length !== 1 || matches[0].version !== "1.0.0" || matches[0].path !== expectedPath || matches[0].sha256 !== expectedSha) {
-    throw new Error("account_system_template_pin_invalid");
+  for (const [version, expectedSha] of Object.entries({
+    "1.0.0": "sha256:8b022fc329a6f75887e465ab561c83ba74d2ab2af1ef0e51a41f3d06b1b4c777",
+    "1.0.1": "sha256:add162eae7ca949ce55605bb76ab76d99e4de376a3fff82aa592af68b1680192"
+  })) {
+    const templateRef = `lode://account-system/github@${version}`;
+    const expectedPath = `account-systems/github/${version}.json`;
+    await assertRegularAsset(root, expectedPath);
+    const matches = index.entries.filter((entry) => entry?.template_ref === templateRef);
+    if (matches.length !== 1 || matches[0].version !== version || matches[0].path !== expectedPath || matches[0].sha256 !== expectedSha) {
+      throw new Error("account_system_template_pin_invalid");
+    }
+    const bytes = await readFile(path.join(root, expectedPath));
+    if (`sha256:${createHash("sha256").update(bytes).digest("hex")}` !== expectedSha) throw new Error("account_system_template_digest_mismatch");
+    const template = JSON.parse(bytes.toString("utf8"));
+    if (template.schema_version !== "lode.account-system-template.v1" || template.template_ref !== templateRef ||
+        template.account_system_id !== "github" || template.version !== version) throw new Error("account_system_template_content_invalid");
   }
-  const bytes = await readFile(path.join(root, expectedPath));
-  if (`sha256:${createHash("sha256").update(bytes).digest("hex")}` !== expectedSha) throw new Error("account_system_template_digest_mismatch");
-  const template = JSON.parse(bytes.toString("utf8"));
-  if (template.schema_version !== "lode.account-system-template.v1" || template.template_ref !== templateRef ||
-      template.account_system_id !== "github" || template.version !== "1.0.0") throw new Error("account_system_template_content_invalid");
 }
 
 async function assertRegularAsset(root, relativePath) {

@@ -249,6 +249,54 @@ test('owner AccountSystem CLI calls the Core owner API and keeps local refs on t
   }
 });
 
+test('owner account CLI inspects and explicitly binds through the Core owner route', async () => {
+  const dir = await (await import('node:fs/promises')).mkdtemp(join(tmpdir(), 'webenvoy-cli-account-binding-'));
+  const socketPath = join(dir, 'owner-control.sock');
+  const requests = [];
+  const server = createServer(async (request, response) => {
+    const chunks = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    requests.push({ path: request.url, method: request.method, body: JSON.parse(Buffer.concat(chunks).toString('utf8')) });
+    response.setHeader('content-type', 'application/json');
+    response.end(JSON.stringify({ ok: true, result: request.url.endsWith('/account-bindings/operations') && requests.at(-1).body.operation === 'inspect'
+      ? { identity_environment_ref: 'identity:github', account_bindings: [], legacy_binding_present: false }
+      : { identity_environment_ref: 'identity:github', account_binding: { account_system_ref: 'account-system:github', account_ref: `account:sha256:${'a'.repeat(64)}`, observation_ref: 'observation:github', bound_at: '2026-09-28T10:00:00.000Z' } } }));
+  });
+  try {
+    await new Promise((resolve, reject) => { server.once('error', reject); server.listen(socketPath, resolve); });
+    await chmod(socketPath, 0o600);
+    const help = await runCli(['help', 'account']);
+    const inspected = await runCli(['account', 'bindings', '--data-dir', dir, '--identity-environment-ref', 'identity:github']);
+    const bound = await runCli(['account', 'bind', '--data-dir', dir, '--profile-ref', 'profile:github', '--identity-environment-ref', 'identity:github',
+      '--runtime-session-ref', 'session:github', '--observation-ref', 'observation:github', '--account-system-ref', 'account-system:github',
+      '--account-ref', `account:sha256:${'a'.repeat(64)}`, '--idempotency-key', 'bind-github-once-001', '--confirm']);
+    assert.equal(help.code, 0);
+    assert.match(help.stdout, /Harbor rechecks the\s+same observation/);
+    assert.equal(inspected.code, 0);
+    assert.equal(bound.code, 0);
+    assert.deepEqual(requests.map(({ path, method, body }) => ({ path, method, body })), [
+      { path: '/owner/account-bindings/operations', method: 'POST', body: {
+        schema_version: 'webenvoy.account-binding-owner-operation/v1', operation: 'inspect', identity_environment_ref: 'identity:github'
+      } },
+      { path: '/owner/account-bindings/operations', method: 'POST', body: {
+        schema_version: 'webenvoy.account-binding-owner-operation/v1', operation: 'bind', identity_environment_ref: 'identity:github',
+        profile_ref: 'profile:github', runtime_session_ref: 'session:github', observation_ref: 'observation:github',
+        account_system_ref: 'account-system:github', account_ref: `account:sha256:${'a'.repeat(64)}`,
+        idempotency_key: 'bind-github-once-001', confirm: true
+      } }
+    ]);
+    const unconfirmed = await runCli(['account', 'bind', '--data-dir', dir, '--profile-ref', 'profile:github', '--identity-environment-ref', 'identity:github',
+      '--runtime-session-ref', 'session:github', '--observation-ref', 'observation:github', '--account-system-ref', 'account-system:github',
+      '--account-ref', `account:sha256:${'a'.repeat(64)}`, '--idempotency-key', 'bind-github-once-002']);
+    assert.equal(unconfirmed.code, 2);
+    assert.equal(JSON.parse(unconfirmed.stderr).error.code, 'account_binding_confirm_required');
+    assert.equal(requests.length, 2, 'missing owner confirmation is refused before dispatch');
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('owner site-task admission CLI sends owner Git inspection through Core and documents the lifecycle', async () => {
   const dir = await (await import('node:fs/promises')).mkdtemp(join(tmpdir(), 'wsa-'));
   const socketPath = join(dir, 'owner-control.sock');

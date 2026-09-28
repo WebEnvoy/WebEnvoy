@@ -12,6 +12,11 @@ export const approvedAccountSystemTemplates = {
     version: "1.0.0",
     path: "account-systems/github/1.0.0.json",
     sha256: "sha256:8b022fc329a6f75887e465ab561c83ba74d2ab2af1ef0e51a41f3d06b1b4c777"
+  },
+  "lode://account-system/github@1.0.1": {
+    version: "1.0.1",
+    path: "account-systems/github/1.0.1.json",
+    sha256: "sha256:add162eae7ca949ce55605bb76ab76d99e4de376a3fff82aa592af68b1680192"
   }
 } as const;
 
@@ -48,6 +53,13 @@ type StoredDefinition = {
   record_version: number;
   revisions: StoredRevision[];
 };
+type StoredMergeConflict = {
+  path: string;
+  base: unknown;
+  local: unknown;
+  template: unknown;
+  resolution?: "local" | "template";
+};
 type StoredDraft = {
   draft_ref: string;
   local_definition_ref: string;
@@ -59,6 +71,7 @@ type StoredDraft = {
   created_at: string;
   updated_at: string;
   pinned_revision_ref: string | null;
+  merge_conflicts?: StoredMergeConflict[];
 };
 type AccountSystemState = {
   schema_version: typeof accountSystemDefinitionStoreSchemaVersion;
@@ -170,6 +183,87 @@ function canonical(value: unknown): string {
   if (isObject(value)) return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`;
   return JSON.stringify(value);
 }
+const mergeConflictPaths = new Set([
+  "/version", "/display_name", "/related_domains", "/products", "/login_entry/label", "/login_entry/url",
+  "/admin_entry_points", "/known_shared_login_relationships"
+]);
+function same(left: unknown, right: unknown): boolean { return canonical(left) === canonical(right); }
+function mergeValue(base: unknown, local: unknown, template: unknown, path: string, conflicts: StoredMergeConflict[]): unknown {
+  if (same(local, base)) return structuredClone(template);
+  if (same(template, base) || same(local, template)) return structuredClone(local);
+  if (isObject(base) && isObject(local) && isObject(template) &&
+      same(Object.keys(base).sort(), Object.keys(local).sort()) && same(Object.keys(base).sort(), Object.keys(template).sort())) {
+    const merged: JsonObject = {};
+    for (const key of Object.keys(base)) {
+      const child = path + "/" + key.replaceAll("~", "~0").replaceAll("/", "~1");
+      merged[key] = mergeValue(base[key], local[key], template[key], child, conflicts);
+    }
+    return merged;
+  }
+  conflicts.push({ path, base: structuredClone(base), local: structuredClone(local), template: structuredClone(template) });
+  return structuredClone(local);
+}
+/** Three-way merge only the owner-editable public fields; provenance and identity metadata come from the approved pin. */
+export function mergeAccountSystemDefinitions(base: AccountSystemTemplate, local: AccountSystemTemplate, template: AccountSystemTemplate): {
+  definition: AccountSystemTemplate;
+  conflicts: StoredMergeConflict[];
+} {
+  if (base.account_system_id !== local.account_system_id || base.account_system_id !== template.account_system_id) return fail("account_system_template_identity_conflict");
+  const definition = structuredClone(template) as unknown as JsonObject;
+  const conflicts: StoredMergeConflict[] = [];
+  for (const field of ["version", "display_name", "related_domains", "products", "login_entry", "admin_entry_points", "known_shared_login_relationships"]) {
+    definition[field] = mergeValue(base[field as keyof AccountSystemTemplate], local[field as keyof AccountSystemTemplate],
+      template[field as keyof AccountSystemTemplate], "/" + field, conflicts);
+  }
+  return { definition: definition as unknown as AccountSystemTemplate, conflicts };
+}
+function parseMergeConflicts(value: unknown): StoredMergeConflict[] {
+  if (!Array.isArray(value) || value.length > mergeConflictPaths.size) return fail("account_system_store_invalid");
+  const conflicts = value.map(value => {
+    const item = exactObject(value, ["path", "base", "local", "template"], ["resolution"]);
+    const path = string(item.path, "account_system_store_invalid");
+    if (!mergeConflictPaths.has(path) || item.resolution !== undefined && item.resolution !== "local" && item.resolution !== "template") return fail("account_system_store_invalid");
+    return { path, base: item.base, local: item.local, template: item.template,
+      ...(item.resolution === undefined ? {} : { resolution: item.resolution as "local" | "template" }) };
+  });
+  if (new Set(conflicts.map(conflict => conflict.path)).size !== conflicts.length) return fail("account_system_store_invalid");
+  return conflicts;
+}
+function parseConflictResolutions(value: unknown): Array<{ path: string; choice: "local" | "template" }> {
+  if (!Array.isArray(value) || value.length > mergeConflictPaths.size) return fail("account_system_invalid_input");
+  const resolutions = value.map(value => {
+    if (!isObject(value) || Object.keys(value).length !== 2 || !Object.hasOwn(value, "path") || !Object.hasOwn(value, "choice")) return fail("account_system_invalid_input");
+    const path = string(value.path, "account_system_invalid_input");
+    if (!mergeConflictPaths.has(path) || value.choice !== "local" && value.choice !== "template") return fail("account_system_invalid_input");
+    return { path, choice: value.choice as "local" | "template" };
+  });
+  if (new Set(resolutions.map(item => item.path)).size !== resolutions.length) return fail("account_system_invalid_input");
+  return resolutions;
+}
+function setMergeValue(definition: AccountSystemTemplate, path: string, value: unknown): void {
+  if (!mergeConflictPaths.has(path)) return fail("account_system_merge_conflict_unavailable");
+  const segments = path.slice(1).split("/");
+  let parent = definition as unknown as JsonObject;
+  for (const segment of segments.slice(0, -1)) {
+    const child = parent[segment];
+    if (!isObject(child)) return fail("account_system_merge_conflict_unavailable");
+    parent = child;
+  }
+  parent[segments.at(-1)!] = structuredClone(value);
+}
+function mergeValueAt(definition: AccountSystemTemplate, path: string): unknown {
+  if (!mergeConflictPaths.has(path)) return fail("account_system_merge_conflict_unavailable");
+  let value: unknown = definition;
+  for (const segment of path.slice(1).split("/")) {
+    if (!isObject(value) || !Object.hasOwn(value, segment)) return undefined;
+    value = value[segment];
+  }
+  return value;
+}
+function mergeConflictView(conflicts: StoredMergeConflict[]): JsonObject[] {
+  return conflicts.map(conflict => ({ path: conflict.path, base: structuredClone(conflict.base), local: structuredClone(conflict.local),
+    template: structuredClone(conflict.template), resolution: conflict.resolution ?? null }));
+}
 function nonSensitiveText(value: unknown, code = "account_system_invalid_input"): string { return string(value, code); }
 function revisionRef(value: unknown): string {
   const ref = string(value, "account_system_invalid_input");
@@ -230,10 +324,11 @@ function parseState(value: unknown): AccountSystemState {
     return { local_definition_ref: ref, account_system_id: id, enabled: record.enabled, enabled_revision_ref: enabledRevisionRef, record_version: Number(record.record_version), revisions };
   });
   const drafts = item.drafts.map(value => {
-    const draft = exactObject(value, ["draft_ref", "local_definition_ref", "base_revision_ref", "template_ref", "template_sha256", "template_source", "definition", "created_at", "updated_at", "pinned_revision_ref"]);
+    const draft = exactObject(value, ["draft_ref", "local_definition_ref", "base_revision_ref", "template_ref", "template_sha256", "template_source", "definition", "created_at", "updated_at", "pinned_revision_ref"], ["merge_conflicts"]);
     const ref = localRef(draft.local_definition_ref), base = revisionRef(draft.base_revision_ref);
     const templateRef = string(draft.template_ref, "account_system_store_invalid");
     const definition = validateTemplate(draft.definition, templateRef, { allowLocalVersion: true });
+    const mergeConflicts = draft.merge_conflicts === undefined ? undefined : parseMergeConflicts(draft.merge_conflicts);
     const source = exactObject(draft.template_source, ["publisher", "repository", "path", "version", "evidence_refs"]);
     if (!/^sha256:[a-f0-9]{64}$/.test(String(draft.template_sha256)) || !definitions.some(record => record.local_definition_ref === ref && record.revisions.some(item => item.revision_ref === base))) return fail("account_system_store_invalid");
     const pinned = draft.pinned_revision_ref === null ? null : revisionRef(draft.pinned_revision_ref);
@@ -245,7 +340,8 @@ function parseState(value: unknown): AccountSystemState {
         admin_entry_points: definition.admin_entry_points, ...(definition.identity_method === undefined ? {} : { identity_method: definition.identity_method }),
         known_shared_login_relationships: definition.known_shared_login_relationships, source
       }, templateRef).source,
-      definition, created_at: timestamp(draft.created_at), updated_at: timestamp(draft.updated_at), pinned_revision_ref: pinned };
+      definition, created_at: timestamp(draft.created_at), updated_at: timestamp(draft.updated_at), pinned_revision_ref: pinned,
+      ...(mergeConflicts === undefined ? {} : { merge_conflicts: mergeConflicts }) };
   });
   const refs = definitions.map(record => record.local_definition_ref);
   if (new Set(refs).size !== refs.length || new Set(definitions.map(record => record.account_system_id)).size !== definitions.length ||
@@ -390,12 +486,14 @@ export function createFileAccountSystemDefinitionStore(options: {
   function draftView(draft: StoredDraft): JsonObject {
     return { draft_ref: draft.draft_ref, local_definition_ref: draft.local_definition_ref, base_revision_ref: draft.base_revision_ref,
       template_ref: draft.template_ref, template_sha256: draft.template_sha256, definition: structuredClone(draft.definition),
-      created_at: draft.created_at, updated_at: draft.updated_at, pinned_revision_ref: draft.pinned_revision_ref };
+      created_at: draft.created_at, updated_at: draft.updated_at, pinned_revision_ref: draft.pinned_revision_ref,
+      ...(draft.merge_conflicts === undefined ? {} : { merge_conflicts: mergeConflictView(draft.merge_conflicts) }) };
   }
-  async function createDraftWithTemplate(localDefinitionRefValue: unknown, baseRevisionRefValue: unknown, templateRefValue: string, templateValue: { definition: AccountSystemTemplate; sha256: string }, initialDefinition: AccountSystemTemplate) {
+  async function createDraftWithTemplate(localDefinitionRefValue: unknown, baseRevisionRefValue: unknown, templateRefValue: string, templateValue: { definition: AccountSystemTemplate; sha256: string }, initialDefinition: AccountSystemTemplate, mergeConflicts?: StoredMergeConflict[]) {
     return transaction(state => {
       const record = findDefinition(state, localDefinitionRefValue);
       const base = findRevision(record, baseRevisionRefValue);
+      if (mergeConflicts !== undefined && record.enabled_revision_ref !== base.revision_ref) return fail("account_system_conflict");
       if (initialDefinition.account_system_id !== record.account_system_id) return fail("account_system_invalid_definition");
       const draft: StoredDraft = {
         draft_ref: `webenvoy:account-system-draft/${randomUUID()}`,
@@ -405,7 +503,8 @@ export function createFileAccountSystemDefinitionStore(options: {
         template_sha256: templateValue.sha256,
         template_source: structuredClone(templateValue.definition.source),
         definition: structuredClone(initialDefinition),
-        created_at: nowIso(options.clock), updated_at: nowIso(options.clock), pinned_revision_ref: null
+        created_at: nowIso(options.clock), updated_at: nowIso(options.clock), pinned_revision_ref: null,
+        ...(mergeConflicts === undefined ? {} : { merge_conflicts: structuredClone(mergeConflicts) })
       };
       state.drafts.push(draft);
       return draftView(draft);
@@ -446,11 +545,36 @@ export function createFileAccountSystemDefinitionStore(options: {
       if (source.sha256 !== base.template_sha256) return fail("account_system_template_corrupt");
       return createDraftWithTemplate(ref, baseRef, base.template_ref, source, base.definition);
     },
-    async updateDraft(input: { draft_ref: string; definition: unknown }): Promise<JsonObject> {
+    async createRefreshDraft(input: { local_definition_ref: string; base_revision_ref: string; template_ref: string }): Promise<JsonObject> {
+      const ref = localRef(input?.local_definition_ref), baseRef = revisionRef(input?.base_revision_ref);
+      const templateRef = nonSensitiveText(input?.template_ref);
+      if (!templateRefPattern.test(templateRef)) return fail("account_system_invalid_input");
+      const state = await readState(), record = findDefinition(state, ref), base = findRevision(record, baseRef);
+      if (record.enabled_revision_ref !== base.revision_ref) return fail("account_system_conflict");
+      if (templateRef === base.template_ref) return fail("account_system_draft_unchanged");
+      const [baseSource, template] = await Promise.all([
+        readApprovedTemplate(options.lodeAssetsPath, base.template_ref),
+        readApprovedTemplate(options.lodeAssetsPath, templateRef)
+      ]);
+      if (baseSource.sha256 !== base.template_sha256) return fail("account_system_template_corrupt");
+      const merged = mergeAccountSystemDefinitions(baseSource.definition, base.definition, template.definition);
+      return createDraftWithTemplate(ref, baseRef, templateRef, template, merged.definition, merged.conflicts);
+    },
+    async updateDraft(input: { draft_ref: string; definition: unknown; conflict_resolutions?: unknown }): Promise<JsonObject> {
       return transaction(state => {
         const draft = findDraft(state, input?.draft_ref);
         if (draft.pinned_revision_ref) return fail("account_system_draft_conflict");
-        const definition = validateOwnerEdit(draft, input.definition);
+        let definition = validateOwnerEdit(draft, input.definition);
+        if (input.conflict_resolutions !== undefined) {
+          if (draft.merge_conflicts === undefined) return fail("account_system_invalid_input");
+          for (const resolution of parseConflictResolutions(input.conflict_resolutions)) {
+            const conflict = draft.merge_conflicts.find(item => item.path === resolution.path);
+            if (!conflict) return fail("account_system_merge_conflict_unavailable");
+            setMergeValue(definition, conflict.path, resolution.choice === "local" ? conflict.local : conflict.template);
+            conflict.resolution = resolution.choice;
+          }
+          definition = validateOwnerEdit(draft, definition);
+        }
         draft.definition = structuredClone(definition);
         draft.updated_at = nowIso(options.clock);
         return draftView(draft);
@@ -459,8 +583,25 @@ export function createFileAccountSystemDefinitionStore(options: {
     async checkDraft(input: { draft_ref: string }): Promise<JsonObject> {
       const state = await readState(), draft = findDraft(state, input?.draft_ref), record = findDefinition(state, draft.local_definition_ref), base = findRevision(record, draft.base_revision_ref);
       const definition = validateOwnerEdit(draft, draft.definition);
+      if ((draft.template_ref !== base.template_ref) !== (draft.merge_conflicts !== undefined)) return fail("account_system_store_invalid");
       const source = await readApprovedTemplate(options.lodeAssetsPath, draft.template_ref);
       if (source.sha256 !== draft.template_sha256) return fail("account_system_template_corrupt");
+      let unresolvedConflicts: string[] = [];
+      let mergeConflicts: JsonObject[] | undefined;
+      if (draft.merge_conflicts !== undefined) {
+        const baseSource = await readApprovedTemplate(options.lodeAssetsPath, base.template_ref);
+        if (baseSource.sha256 !== base.template_sha256) return fail("account_system_template_corrupt");
+        const expectedConflicts = mergeAccountSystemDefinitions(baseSource.definition, base.definition, source.definition).conflicts;
+        const storedConflicts = draft.merge_conflicts.map(({ resolution: _resolution, ...conflict }) => conflict);
+        if (!same(storedConflicts, expectedConflicts)) return fail("account_system_store_invalid");
+        unresolvedConflicts = expectedConflicts.filter(conflict => {
+          const stored = draft.merge_conflicts!.find(item => item.path === conflict.path)!;
+          if (!stored.resolution) return true;
+          const selected = stored.resolution === "local" ? conflict.local : conflict.template;
+          return !same(mergeValueAt(definition, conflict.path), selected);
+        }).map(conflict => conflict.path);
+        mergeConflicts = mergeConflictView(draft.merge_conflicts);
+      }
       const changed = changedPaths(base.definition, definition).sort();
       const unresolvedRefs: string[] = [];
       for (const relationship of definition.known_shared_login_relationships) {
@@ -471,8 +612,11 @@ export function createFileAccountSystemDefinitionStore(options: {
         }
       }
       return { draft_ref: draft.draft_ref, local_definition_ref: draft.local_definition_ref, base_revision_ref: draft.base_revision_ref,
-        template_ref: draft.template_ref, template_sha256: draft.template_sha256, valid: changed.length > 0 && unresolvedRefs.length === 0,
+        template_ref: draft.template_ref, template_sha256: draft.template_sha256,
+        valid: changed.length > 0 && unresolvedRefs.length === 0 && unresolvedConflicts.length === 0,
         changed_paths: changed, dependency_check: { state: unresolvedRefs.length === 0 ? "complete" : "blocked", unresolved_refs: unresolvedRefs },
+        ...(mergeConflicts === undefined ? {} : { merge_conflicts: mergeConflicts, unresolved_conflicts: unresolvedConflicts }),
+        ...(unresolvedConflicts.length > 0 ? { reason: "account_system_merge_conflicts_unresolved" } : {}),
         ...(changed.length === 0 ? { reason: "account_system_draft_unchanged" } : {}),
         ...(unresolvedRefs.length > 0 ? { dependency_failure: "account_system_dependency_unavailable" } : {}) };
     },
@@ -482,7 +626,11 @@ export function createFileAccountSystemDefinitionStore(options: {
       if (draft.pinned_revision_ref) return fail("account_system_draft_conflict");
       if (currentRecord.record_version !== expectedVersion || currentRecord.enabled_revision_ref !== base.revision_ref) return fail("account_system_conflict");
       const check = await this.checkDraft({ draft_ref: ref });
-      if (check.valid !== true) return fail(check.dependency_failure === "account_system_dependency_unavailable" ? "account_system_dependency_unavailable" : "account_system_draft_unchanged");
+      if (check.valid !== true) {
+        if (check.dependency_failure === "account_system_dependency_unavailable") return fail("account_system_dependency_unavailable");
+        if (check.reason === "account_system_merge_conflicts_unresolved") return fail("account_system_merge_conflicts_unresolved");
+        return fail("account_system_draft_unchanged");
+      }
       const checkedDefinitionDigest = digest(canonical(draft.definition));
       return transaction(current => {
         const committedDraft = findDraft(current, ref), record = findDefinition(current, committedDraft.local_definition_ref);

@@ -1,0 +1,6 @@
+{
+  "$schema": "account-binding-owner-operation-request.schema.json",
+  "schema_version": "webenvoy.account-binding-owner-operation/v1",
+  "operation": "inspect",
+  "identity_environment_ref": "identity:profile:github"
+}

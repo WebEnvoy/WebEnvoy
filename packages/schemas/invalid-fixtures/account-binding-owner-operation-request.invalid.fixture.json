@@ -1,0 +1,50 @@
+{
+  "schema": "account-binding-owner-operation-request.schema.json",
+  "cases": [
+    {
+      "name": "explicit binding requires owner confirmation",
+      "instance": {
+        "schema_version": "webenvoy.account-binding-owner-operation/v1",
+        "operation": "bind",
+        "identity_environment_ref": "identity:profile:github",
+        "profile_ref": "profile:github",
+        "runtime_session_ref": "session:github:one",
+        "observation_ref": "observation:github:one",
+        "account_system_ref": "account-system:github",
+        "account_ref": "account:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "idempotency_key": "bind-github-once-001"
+      }
+    },
+    {
+      "name": "owner request cannot supply a Harbor holder",
+      "instance": {
+        "schema_version": "webenvoy.account-binding-owner-operation/v1",
+        "operation": "bind",
+        "identity_environment_ref": "identity:profile:github",
+        "profile_ref": "profile:github",
+        "runtime_session_ref": "session:github:one",
+        "observation_ref": "observation:github:one",
+        "account_system_ref": "account-system:github",
+        "account_ref": "account:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "idempotency_key": "bind-github-once-001",
+        "confirm": true,
+        "holder_ref": "run:caller"
+      }
+    },
+    {
+      "name": "account ref must be a stable account digest ref",
+      "instance": {
+        "schema_version": "webenvoy.account-binding-owner-operation/v1",
+        "operation": "bind",
+        "identity_environment_ref": "identity:profile:github",
+        "profile_ref": "profile:github",
+        "runtime_session_ref": "session:github:one",
+        "observation_ref": "observation:github:one",
+        "account_system_ref": "account-system:github",
+        "account_ref": "octocat",
+        "idempotency_key": "bind-github-once-001",
+        "confirm": true
+      }
+    }
+  ]
+}

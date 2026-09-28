@@ -20,6 +20,7 @@ import {
   createFileAccountSystemDefinitionStore,
   createManagedAccountSystemReadService,
   createFileManagedSiteTaskAdmissionStore,
+  approvedManagedSiteTaskBasePackageFor,
   approvedManagedSiteTaskPackageFor,
   managedSiteScriptCodeAdmissionRef,
   verifySiteSkillPackageRoot,
@@ -29,8 +30,10 @@ import {
 import { createFileTaskThreadStore } from "@webenvoy/core-runtime/internal/task-thread-store";
 
 import { createApiServer } from "./server.js";
+import { createHttpAccountBindingOwnerApiService } from "./account-binding-owner-api.js";
 
 export { createApiServer } from "./server.js";
+export { createHttpAccountBindingOwnerApiService } from "./account-binding-owner-api.js";
 
 export const apiServerHost = "127.0.0.1";
 
@@ -126,6 +129,10 @@ if (import.meta.url === entrypoint) {
   const managedAccountSystemService = managedAccessStore && accountSystemDefinitionService
     ? createManagedAccountSystemReadService({ managedAccessStore, accountSystemDefinitionService })
     : undefined;
+  const accountBindingOwnerService = process.env.WEBENVOY_HARBOR_RUNTIME_URL && process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN
+    ? createHttpAccountBindingOwnerApiService({ baseUrl: process.env.WEBENVOY_HARBOR_RUNTIME_URL,
+        supervisorToken: process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN })
+    : undefined;
   const managedRecoveryService = runRecordStore && process.env.WEBENVOY_HARBOR_RUNTIME_URL
     ? createManagedRecoveryService({ runRecordStore, harborBaseUrl: process.env.WEBENVOY_HARBOR_RUNTIME_URL, supervisorToken: process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN ?? "" })
     : undefined;
@@ -143,7 +150,7 @@ if (import.meta.url === entrypoint) {
         managedDataRoot: runtimeDataRoot,
         ...(skillLibraryDirectory === undefined ? {} : { managedMaterializationPaths: [skillLibraryDirectory, join(skillLibraryDirectory, "skill-library")] }),
         runtime: {
-          approvedBasePackageFor: approvedManagedSiteTaskPackageFor,
+          approvedBasePackageFor: approvedManagedSiteTaskBasePackageFor,
           verifyPackageRoot: verifySiteSkillPackageRoot,
           scriptCodeAdmissionRef: managedSiteScriptCodeAdmissionRef
         }
@@ -174,6 +181,7 @@ if (import.meta.url === entrypoint) {
   const server = createApiServer({
     supervisorToken,
     ...(accountSystemDefinitionService === undefined ? {} : { accountSystemDefinitionService }),
+    ...(accountBindingOwnerService === undefined ? {} : { accountBindingOwnerService }),
     ...(managedAccountSystemService === undefined ? {} : { managedAccountSystemService }),
     ...(managedSiteTaskAdmissionService === undefined ? {} : { siteTaskAdmissionService: managedSiteTaskAdmissionService }),
     ...(managedAccessStore === undefined ? {} : { managedAccessStore }),

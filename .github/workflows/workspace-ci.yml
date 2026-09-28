@@ -108,6 +108,8 @@ jobs:
           ref: ${{ steps.lode-pin.outputs.ref }}
           path: .runtime-sources/lode-core
           persist-credentials: false
+      - name: Fetch fixed OpenCLI source for overlay verification
+        run: git -C "$WEBENVOY_LODE_ROOT" fetch --no-tags origin +464c7210b2efb79314292848781b472741bb996b:refs/remotes/origin/opencli-pinned-source
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:

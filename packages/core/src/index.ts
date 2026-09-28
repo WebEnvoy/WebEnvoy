@@ -413,6 +413,7 @@ export {
   type SiteTaskAdmissionRuntime
 } from "./managed-site-task-admission.js";
 export {
+  approvedManagedSiteTaskBasePackageFor,
   approvedManagedSiteTaskPackageFor,
   managedSiteScriptCodeAdmissionRef,
   verifySiteSkillPackageRoot,

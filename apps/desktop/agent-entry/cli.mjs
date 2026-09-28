@@ -26,6 +26,7 @@ Commands:
   uninstall   Remove receipt-managed host files (owner-only)
   access      Register, grant, revoke, and query owner access (owner-only)
   files       Manage owner-registered file references (owner-only)
+  account     Inspect bindings and explicitly bind a verified observation (owner-only)
   account-system  Import and manage local AccountSystem definitions (owner-only)
   site-task-admission  Review and admit private Git site-task repairs (owner-only)
   recovery    Inspect or apply owner-managed recovery (owner-only)
@@ -57,12 +58,20 @@ Owner control identity is required. File import accepts an optional correlation
 --operation-ref but it is not a receipt key. Export is protected by exclusive
 destination creation; revoke and delete are keyed by the exact --file-ref.
 After a lost response, inspect the same file and destination before retrying.`,
-  'account-system': `Usage: webenvoy account-system <import-template|list|create-draft|update-draft|check-draft|pin-draft|enable|disable|rollback|resolve> --data-dir DIR
+  'account-system': `Usage: webenvoy account-system <import-template|list|create-draft|refresh-draft|update-draft|check-draft|pin-draft|enable|disable|rollback|resolve> --data-dir DIR
 
 Owner-only local AccountSystem definitions. Import a fixed Lode template, edit
 an owner-local draft from a JSON file, inspect its exact field diff and
 dependencies, pin a new immutable revision, then explicitly enable or roll
 back. Template data never infers login identity or credentials.`,
+  account: `Usage: webenvoy account <bindings|bind> --data-dir DIR
+
+bindings --identity-environment-ref REF reads current Harbor account bindings.
+bind requires --profile-ref, --identity-environment-ref, --runtime-session-ref,
+--observation-ref, --account-system-ref, --account-ref, --idempotency-key and
+--confirm. Use refs from a completed instance.observe result. Harbor rechecks the
+same observation and current control holder before binding. After an unknown
+outcome, inspect bindings before taking any further action.`,
   'site-task-admission': `Usage: webenvoy site-task-admission <select-repository|list-repositories|inspect-candidate|candidate-diff|admit-source|admit-code|revoke-code|revoke-source|list-admissions> --data-dir DIR
 
 Owner-only source and code admission from a clean, owner-selected Lode Git
@@ -161,7 +170,8 @@ const VALUE_FLAGS = new Set([
   '--display-name', '--credential-hash', '--idempotency-key', '--grant-file', '--policy-file', '--kind', '--id', '--operation-ref',
   '--source-path', '--profile-ref', '--mime-type', '--file-ref', '--destination-path', '--backup-ref', '--plan-file', '--confirmation-file',
   '--client-file', '--request-file', '--run-id', '--runtime-session-ref', '--expected-control-file', '--agent-uid', '--owner-uid', '--agent-endpoint',
-  '--template-ref', '--local-definition-ref', '--base-revision-ref', '--draft-ref', '--definition-file', '--expected-record-version', '--revision-ref',
+  '--template-ref', '--local-definition-ref', '--base-revision-ref', '--draft-ref', '--definition-file', '--conflict-resolutions-file', '--expected-record-version', '--revision-ref',
+  '--identity-environment-ref', '--observation-ref', '--account-system-ref', '--account-ref',
   '--path', '--repository-ref', '--package-ref', '--task-ref', '--candidate-ref', '--admission-ref'
 ]);
 const COMMAND_FLAGS = new Map([
@@ -181,13 +191,16 @@ const COMMAND_FLAGS = new Map([
   ['account-system:import-template', new Set(['--data-dir', '--template-ref'])],
   ['account-system:list', new Set(['--data-dir'])],
   ['account-system:create-draft', new Set(['--data-dir', '--local-definition-ref', '--base-revision-ref'])],
-  ['account-system:update-draft', new Set(['--data-dir', '--draft-ref', '--definition-file'])],
+  ['account-system:refresh-draft', new Set(['--data-dir', '--local-definition-ref', '--base-revision-ref', '--template-ref'])],
+  ['account-system:update-draft', new Set(['--data-dir', '--draft-ref', '--definition-file', '--conflict-resolutions-file'])],
   ['account-system:check-draft', new Set(['--data-dir', '--draft-ref'])],
   ['account-system:pin-draft', new Set(['--data-dir', '--draft-ref', '--expected-record-version'])],
   ['account-system:enable', new Set(['--data-dir', '--local-definition-ref', '--revision-ref', '--expected-record-version'])],
   ['account-system:disable', new Set(['--data-dir', '--local-definition-ref', '--expected-record-version'])],
   ['account-system:rollback', new Set(['--data-dir', '--local-definition-ref', '--revision-ref', '--expected-record-version'])],
   ['account-system:resolve', new Set(['--data-dir', '--local-definition-ref', '--revision-ref', '--historical'])],
+  ['account:bindings', new Set(['--data-dir', '--identity-environment-ref'])],
+  ['account:bind', new Set(['--data-dir', '--profile-ref', '--identity-environment-ref', '--runtime-session-ref', '--observation-ref', '--account-system-ref', '--account-ref', '--idempotency-key', '--confirm'])],
   ['site-task-admission:select-repository', new Set(['--data-dir', '--path'])],
   ['site-task-admission:list-repositories', new Set(['--data-dir'])],
   ['site-task-admission:inspect-candidate', new Set(['--data-dir', '--repository-ref', '--package-ref', '--base-revision-ref', '--first-admission', '--task-ref'])],
@@ -241,7 +254,7 @@ function validateCliSyntax(name, values) {
     if (topics.length > 3) throw cliError('help_topic_invalid');
     return;
   }
-  const action = ['access', 'files', 'account-system', 'site-task-admission', 'recovery', 'instance', 'agent'].includes(name) ? values[0] : undefined;
+  const action = ['access', 'files', 'account', 'account-system', 'site-task-admission', 'recovery', 'instance', 'agent'].includes(name) ? values[0] : undefined;
   const nestedAgentTask = name === 'agent' && action === 'task';
   const nestedTaskHelp = nestedAgentTask && values[1] === '--help';
   const nestedTaskCommand = nestedAgentTask && !nestedTaskHelp ? values[1] : undefined;
@@ -498,6 +511,29 @@ if (command === 'setup') {
     result = await requestOwner(`/owner/files/${action}`, input);
   } else throw new Error('Use files import, inspect, export, revoke or delete with --data-dir. Owner file paths never enter Agent requests.');
   printResult(result);
+} else if (command === 'account') {
+  const action = args[0];
+  const ownerOperation = (operation, fields = {}) => ownerRequest(dataDir, '/owner/account-bindings/operations', {
+    method: 'POST', body: { schema_version: 'webenvoy.account-binding-owner-operation/v1', operation, ...fields }
+  });
+  let result;
+  if (action === 'bindings') {
+    result = await ownerOperation('inspect', { identity_environment_ref: required('--identity-environment-ref') });
+  } else if (action === 'bind') {
+    if (!args.includes('--confirm')) throw new Error('account_binding_confirm_required');
+    const key = required('--idempotency-key');
+    result = await ownerWriteRequest(dataDir, '/owner/account-bindings/operations', {
+      schema_version: 'webenvoy.account-binding-owner-operation/v1', operation: 'bind',
+      identity_environment_ref: required('--identity-environment-ref'),
+      profile_ref: required('--profile-ref'),
+      runtime_session_ref: required('--runtime-session-ref'),
+      observation_ref: required('--observation-ref'),
+      account_system_ref: required('--account-system-ref'),
+      account_ref: required('--account-ref'),
+      idempotency_key: key, confirm: true
+    });
+  } else throw new Error('Use account bindings or bind with the required owner flags.');
+  printResult(result);
 } else if (command === 'account-system') {
   const action = args[0];
   const requestOwner = async (operation, fields = {}, write = false) => {
@@ -519,10 +555,17 @@ if (command === 'setup') {
     result = await requestOwner('list');
   } else if (action === 'create-draft') {
     result = await requestOwner('create_draft', { local_definition_ref: required('--local-definition-ref'), base_revision_ref: required('--base-revision-ref') }, true);
+  } else if (action === 'refresh-draft') {
+    result = await requestOwner('create_refresh_draft', { local_definition_ref: required('--local-definition-ref'),
+      base_revision_ref: required('--base-revision-ref'), template_ref: required('--template-ref') }, true);
   } else if (action === 'update-draft') {
     const definition = await readJsonFile(required('--definition-file'), 'account_system_definition_file_invalid');
     if (!definition || typeof definition !== 'object' || Array.isArray(definition)) throw new Error('account_system_definition_file_invalid');
-    result = await requestOwner('update_draft', { draft_ref: required('--draft-ref'), definition }, true);
+    const resolutions = arg('--conflict-resolutions-file') === undefined ? undefined :
+      await readJsonFile(arg('--conflict-resolutions-file'), 'account_system_conflict_resolutions_file_invalid');
+    if (resolutions !== undefined && !Array.isArray(resolutions)) throw new Error('account_system_conflict_resolutions_file_invalid');
+    result = await requestOwner('update_draft', { draft_ref: required('--draft-ref'), definition,
+      ...(resolutions === undefined ? {} : { conflict_resolutions: resolutions }) }, true);
   } else if (action === 'check-draft') {
     result = await requestOwner('check_draft', { draft_ref: required('--draft-ref') });
   } else if (action === 'pin-draft') {
@@ -535,7 +578,7 @@ if (command === 'setup') {
     result = await requestOwner('resolve', { local_definition_ref: required('--local-definition-ref'),
       ...(arg('--revision-ref') === undefined ? {} : { revision_ref: arg('--revision-ref') }),
       ...(args.includes('--historical') ? { historical: true } : {}) });
-  } else throw new Error('Use account-system import-template, list, create-draft, update-draft, check-draft, pin-draft, enable, disable, rollback or resolve with --data-dir.');
+  } else throw new Error('Use account-system import-template, list, create-draft, refresh-draft, update-draft, check-draft, pin-draft, enable, disable, rollback or resolve with --data-dir.');
   printResult(result);
 } else if (command === 'site-task-admission') {
   const action = args[0];

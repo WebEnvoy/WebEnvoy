@@ -610,6 +610,98 @@ asyncio.run(run())
   });
 });
 
+test("the consumed shared-driver observer accepts only a same-origin self-profile with three matching login markers", () => {
+  const driver = join(DRIVER_DIR, "playwright_shared_driver.py");
+  const script = String.raw`
+import asyncio, importlib.util, json, os, subprocess, sys, types
+sys.path.insert(0, os.path.dirname(sys.argv[1]))
+playwright = types.ModuleType("playwright"); playwright.__path__ = []
+async_api = types.ModuleType("playwright.async_api")
+class Error(Exception): pass
+class Page: pass
+class Route: pass
+class TimeoutError(Exception): pass
+async_api.Error = Error; async_api.Page = Page; async_api.Route = Route; async_api.TimeoutError = TimeoutError; async_api.async_playwright = lambda: None
+playwright.async_api = async_api; sys.modules["playwright"] = playwright; sys.modules["playwright.async_api"] = async_api
+spec = importlib.util.spec_from_file_location("playwright_shared_driver", sys.argv[1])
+module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+
+node = os.environ["HARBOR_TEST_NODE_EXECUTABLE"]
+evaluate_script = r'''const fixture = JSON.parse(process.argv[2]);
+globalThis.location = fixture.location;
+globalThis.document = {
+  title: "GitHub",
+  readyState: "complete",
+  querySelectorAll(selector) {
+    return (fixture.meta[selector] || []).map(content => ({ getAttribute: name => name === "content" ? content : null }));
+  }
+};
+const evaluate = Function("return (" + process.argv[1] + ")")();
+process.stdout.write(JSON.stringify(evaluate()));'''
+
+class TestPage:
+    def __init__(self, value):
+        self.url = value["location"]["origin"] + value["location"]["pathname"]
+        self.value = value
+    def is_closed(self): return False
+    async def title(self): return "GitHub"
+    async def evaluate(self, expression):
+        assert expression == module.GITHUB_PROFILE_IDENTITY_EXPRESSION
+        result = subprocess.run([node, "-e", evaluate_script, expression, json.dumps(self.value)], text=True, capture_output=True, check=True)
+        return json.loads(result.stdout)
+
+def fixture(viewer="octocat", profile="octocat", dimension="octocat", stable_id="583231", origin="https://github.com", path="/octocat"):
+    return {
+        "location": {"origin": origin, "pathname": path},
+        "meta": {
+            'meta[name="user-login"]': [viewer],
+            'meta[property="profile:username"]': [profile],
+            'meta[name="octolytics-dimension-user_login"]': [dimension],
+            'meta[name="octolytics-dimension-user_id"]': [stable_id]
+        }
+    }
+
+async def observe(value):
+    page = TestPage(value)
+    state = module.PageState("page:github", page, ["https://github.com"])
+    driver_instance = object.__new__(module.Driver)
+    driver_instance.pages = {"page:github": state}
+    driver_instance.current = "page:github"
+    return (await driver_instance.observe({"provider_page_ref": "page:github"}))["observation"]
+
+async def run():
+    passed = await observe(fixture())
+    assert passed["stable_id"] == "583231", passed
+    assert passed["account_source_kind"] == "github.profile_meta.self_match/v1", passed
+    assert "viewer_login" not in passed and "profile_username" not in passed and "dimension_login" not in passed
+    selectors = [
+        'meta[name="user-login"]', 'meta[property="profile:username"]',
+        'meta[name="octolytics-dimension-user_login"]', 'meta[name="octolytics-dimension-user_id"]'
+    ]
+    for value in [
+        fixture(viewer=""), fixture(profile="other"), fixture(dimension="other"), fixture(stable_id="0"),
+        fixture(stable_id="58a231"), fixture(path="/octocat/repositories"), fixture(origin="https://github.com.evil")
+    ]:
+        result = await observe(value)
+        assert result["stable_id"] is None and result["account_source_kind"] is None, result
+    for selector in selectors:
+        missing = fixture()
+        missing["meta"][selector] = []
+        result = await observe(missing)
+        assert result["stable_id"] is None and result["account_source_kind"] is None, result
+        duplicated = fixture()
+        duplicated["meta"][selector].append(duplicated["meta"][selector][0])
+        result = await observe(duplicated)
+        assert result["stable_id"] is None and result["account_source_kind"] is None, result
+
+asyncio.run(run())
+`;
+  execFileSync(process.env.HARBOR_CAMOUFOX_PYTHON ?? "python3", ["-B", "-c", script, driver], {
+    encoding: "utf8",
+    env: { ...process.env, HARBOR_TEST_NODE_EXECUTABLE: process.execPath, PYTHONDONTWRITEBYTECODE: "1" }
+  });
+});
+
 test("keeps Camoufox and Chrome on the shared public observation projection", async () => {
   const root = await mkdtemp(join(tmpdir(), "harbor-shared-observation-probe-"));
   const helper = join(root, "fixture-driver.mjs");

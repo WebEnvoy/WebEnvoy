@@ -3,7 +3,7 @@ import { ManagedAccessError } from "@webenvoy/core-runtime";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 export type AccountSystemOwnerApiService = Pick<FileAccountSystemDefinitionStore,
-  "importTemplate" | "list" | "createDraft" | "updateDraft" | "checkDraft" | "pinDraft" | "enable" | "disable" | "rollback" | "resolve">;
+  "importTemplate" | "list" | "createDraft" | "createRefreshDraft" | "updateDraft" | "checkDraft" | "pinDraft" | "enable" | "disable" | "rollback" | "resolve">;
 
 const routePath = "/owner/account-systems/operations";
 
@@ -79,9 +79,15 @@ export async function handleAccountSystemOwnerApi(
         exactInput(input, ["operation", "local_definition_ref", "base_revision_ref"]);
         result = await service.createDraft({ local_definition_ref: input.local_definition_ref as string, base_revision_ref: input.base_revision_ref as string });
         break;
+      case "create_refresh_draft":
+        exactInput(input, ["operation", "local_definition_ref", "base_revision_ref", "template_ref"]);
+        result = await service.createRefreshDraft({ local_definition_ref: input.local_definition_ref as string, base_revision_ref: input.base_revision_ref as string,
+          template_ref: input.template_ref as string });
+        break;
       case "update_draft":
-        exactInput(input, ["operation", "draft_ref", "definition"]);
-        result = await service.updateDraft({ draft_ref: input.draft_ref as string, definition: input.definition });
+        exactInput(input, ["operation", "draft_ref", "definition"], ["conflict_resolutions"]);
+        result = await service.updateDraft({ draft_ref: input.draft_ref as string, definition: input.definition,
+          ...(input.conflict_resolutions === undefined ? {} : { conflict_resolutions: input.conflict_resolutions }) });
         break;
       case "check_draft":
         exactInput(input, ["operation", "draft_ref"]);

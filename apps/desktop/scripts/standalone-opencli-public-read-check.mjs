@@ -11,6 +11,7 @@ const packageRoot = resolve(process.argv[2] ?? '');
 const lodeRoot = resolve(process.argv[3] ?? '');
 const evidenceRoot = resolve(process.argv[4] ?? '');
 const materialRoot = resolve(process.argv[5] ?? '');
+const authoringRoot = resolve(process.argv[6] ?? lodeRoot);
 const cli = join(packageRoot, 'bin/webenvoy');
 const fixedNode = join(packageRoot, 'runtime/node');
 const root = await mkdtemp('/tmp/webenvoy-opencli-check-');
@@ -175,7 +176,7 @@ try {
   principalId = find(owner(['access', 'register', '--data-dir', ownerData, '--display-name', 'OpenCLI installed CI Agent',
     '--credential-hash', hostCredentialFingerprint, '--idempotency-key', `${root.split('/').at(-1)}-register`]), 'principal_id');
   assert.ok(principalId);
-  const selected = owner(['site-task-admission', 'select-repository', '--data-dir', ownerData, '--path', lodeRoot]);
+  const selected = owner(['site-task-admission', 'select-repository', '--data-dir', ownerData, '--path', authoringRoot]);
   const repositoryRef = find(selected, 'repository_ref'); assert.ok(repositoryRef);
   for (const sample of samples) {
     const manifest = sample.manifest;
