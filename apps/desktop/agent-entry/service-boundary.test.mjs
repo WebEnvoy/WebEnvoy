@@ -93,7 +93,7 @@ const server = createServer((req, res) => { void (async () => {
   if (id === 'core' && req.method === 'GET' && url.pathname === '/owner/runtime-sessions/demo/runs') {
     return send(res, 200, { schema_version: 'webenvoy.owner-session-runs/v1', runtime_session_ref: 'demo', status: 'available', runs: [] });
   }
-  if (id === 'core' && req.method === 'POST' && url.pathname === '/owner/site-task-admissions/operations') {
+  if (id === 'core' && req.method === 'POST' && ['/owner/site-task-admissions/operations', '/owner/account-systems/operations', '/owner/account-bindings/operations'].includes(url.pathname)) {
     return send(res, 200, { ok: true, operation: body?.operation });
   }
   if (id === 'harbor' && req.method === 'GET' && url.pathname === '/runtime/sessions') {
@@ -240,6 +240,13 @@ test('owner service preserves Harbor observation and control after the Core chil
       method: 'POST', body: { operation: 'list_authoring_repositories' } });
     assert.equal(admission.status, 200);
     assert.equal(admission.body.operation, 'list_authoring_repositories');
+    for (const [path, operation] of [['/owner/account-systems/operations', 'list'], ['/owner/account-bindings/operations', 'inspect']]) {
+      const ownerResult = await requestJson({ socketPath: ownerSocket, path, method: 'POST', body: { operation } });
+      assert.equal(ownerResult.status, 200, `${path} must reach packaged Core`);
+      assert.equal(ownerResult.body.operation, operation);
+      const agentResult = await requestJson({ socketPath: agentSocket, path, method: 'POST', body: { operation } });
+      assert.equal(agentResult.status, 403, `${path} must stay on the owner socket`);
+    }
 
     process.kill(core.pid, 'SIGKILL');
     const coreExitDeadline = Date.now() + 5000;
