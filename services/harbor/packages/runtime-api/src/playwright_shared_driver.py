@@ -383,6 +383,7 @@ class PageState:
         self.snapshot_batch: dict[str, Any] | None = None
         self.snapshot_serial = 0
         self.events: list[dict[str, Any]] = []
+        self.status_history: list[dict[str, Any]] = []
         self.request_chains: list[tuple[Any, tuple[str, ...]]] = []
         self.last_url = page.url
         self.relation_pending = False
@@ -1534,7 +1535,7 @@ class Driver:
         events = state.events[start:start + min(int(request.get("limit", MAX_EVENTS)), MAX_EVENTS)]
         network = [event for event in events if event.get("kind") in ("request", "response", "failure")]
         console = [event for event in events if event.get("level") in ("warn", "error", "pageerror")]
-        return {"status": "completed", "page_ref": state.ref, "document_generation": state.generation, "page": await state.facts(), "cursor": str(start), "next_cursor": str(start + len(events)), "truncated": start + len(events) < len(state.events), "observed_at": now(), "network": network, "console": console}
+        return {"status": "completed", "page_ref": state.ref, "document_generation": state.generation, "page": await state.facts(), "cursor": str(start), "next_cursor": str(start + len(events)), "truncated": start + len(events) < len(state.events), "observed_at": now(), "network": network, "console": console, "status_history": state.status_history[:]}
 
     async def environment(self, request: dict[str, Any]) -> dict[str, Any]:
         state = self.state(request)
@@ -2223,6 +2224,9 @@ class Driver:
         if not url or origin_of(url) not in state.origins:
             return
         state.add_event({"event_ref": f"event:{state.ref}:{time.time_ns()}", "request_ref": f"request:{hashlib.sha256(request.url.encode()).hexdigest()[:16]}", "kind": kind, "observed_at": now(), "page_ref": state.ref, "document_generation": state.generation, "method": request.method, "url": url, "origin": origin_of(url), "resource_kind": request.resource_type or "other", **({"status": status} if status is not None else {}), **({"failure_class": failure_class} if failure_class else {})})
+        if kind in ("response", "failure") and (kind == "failure" or request.method not in ("GET", "HEAD") or request.resource_type == "document" or (status is not None and status >= 400)):
+            state.status_history.append({"kind": kind, "observed_at": now(), "page_ref": state.ref, "document_generation": state.generation, "method": request.method, "origin": origin_of(url), "resource_kind": request.resource_type or "other", **({"status": status} if status is not None else {}), **({"failure_class": failure_class} if failure_class else {})})
+            del state.status_history[:-32]
 
     def console_event(self, state: PageState, message: Any) -> None:
         state.add_event({"event_ref": f"event:{state.ref}:{time.time_ns()}", "level": message.type if message.type in ("warn", "error") else "warn", "observed_at": now(), "page_ref": state.ref, "document_generation": state.generation, "text": safe_text(message.text), "origin": origin_of(state.page.url)})

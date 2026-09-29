@@ -70,6 +70,11 @@ test("normalization preserves event bindings and rejects unsafe cross-origin det
       { event_ref: "event:current", kind: "request", observed_at: "2026-09-10T00:00:00.000Z", page_ref: pageRef, document_generation: 2, method: "GET", url: `${origin}/api?secret=hidden`, resource_kind: "fetch" },
       { event_ref: "event:cross", kind: "request", observed_at: "2026-09-10T00:00:00.000Z", page_ref: "page:old", document_generation: 1, method: "GET", url: "https://cross.test/leak", resource_kind: "fetch" }
     ],
+    status_history: [
+      { kind: "response", observed_at: "2026-09-10T00:00:00.000Z", page_ref: pageRef, document_generation: 1, method: "POST", origin, resource_kind: "fetch", status: 422, url: `${origin}/session?token=hidden`, headers: { authorization: "secret" } },
+      { kind: "response", observed_at: "2026-09-10T00:00:00.000Z", page_ref: pageRef, document_generation: 1, method: "POST", origin: "https://cross.test", resource_kind: "fetch", status: 401 },
+      { kind: "failure", observed_at: "2026-09-10T00:00:00.000Z", page_ref: "page:old", document_generation: 1, method: "POST", origin, resource_kind: "fetch", failure_class: "connection" }
+    ],
     console: [
       { event_ref: "event:bearer", level: "error", observed_at: "2026-09-10T00:00:00.000Z", page_ref: pageRef, document_generation: 2, text: "Authorization: Bearer secret" },
       { event_ref: "event:json", level: "error", observed_at: "2026-09-10T00:00:00.000Z", page_ref: pageRef, document_generation: 2, text: '{"token":"secret"}' },
@@ -83,6 +88,7 @@ test("normalization preserves event bindings and rejects unsafe cross-origin det
   assert.equal(result.network.length, 1);
   assert.equal(result.network[0]?.page_ref, pageRef);
   assert.equal(result.network[0]?.document_generation, 2);
+  assert.deepEqual(result.status_history, [{ kind: "response", observed_at: "2026-09-10T00:00:00.000Z", document_generation: 1, method: "POST", resource_kind: "fetch", status: 422 }]);
   assert.equal(result.console.length, 3);
   assert.equal(result.console[0]?.text, "[redacted]");
   assert.equal(result.console[1]?.text, "[redacted]");
