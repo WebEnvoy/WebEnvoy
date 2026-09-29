@@ -610,6 +610,50 @@ asyncio.run(run())
   });
 });
 
+test("retains bounded status codes across navigation without credential-bearing URLs", () => {
+  const driver = join(DRIVER_DIR, "playwright_shared_driver.py");
+  const script = `import asyncio, importlib.util, os, sys, types
+from types import SimpleNamespace
+sys.path.insert(0, os.path.dirname(sys.argv[1]))
+playwright = types.ModuleType("playwright"); playwright.__path__ = []
+async_api = types.ModuleType("playwright.async_api")
+class Error(Exception): pass
+class PageType: pass
+class Route: pass
+class TimeoutError(Exception): pass
+async_api.Error = Error; async_api.Page = PageType; async_api.Route = Route; async_api.TimeoutError = TimeoutError; async_api.async_playwright = lambda: None
+playwright.async_api = async_api; sys.modules["playwright"] = playwright; sys.modules["playwright.async_api"] = async_api
+spec = importlib.util.spec_from_file_location("driver", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+class Page:
+    url = "https://example.test/error"
+    def is_closed(self): return False
+    async def title(self): return "Error"
+page = Page()
+state = module.PageState("page:1", page, ["https://example.test"])
+instance = object.__new__(module.Driver)
+instance.pages = {"page:1": state}
+instance.current = "page:1"
+instance.state = lambda request: state
+instance.request_scope = lambda state, request: None
+post = SimpleNamespace(url="https://example.test/session?token=secret", method="POST", resource_type="fetch")
+instance.add_network(state, post, "response", 422)
+state.generation += 1
+image = SimpleNamespace(url="https://example.test/image?token=secret", method="GET", resource_type="image")
+for _ in range(100): instance.add_network(state, image, "response", 200)
+result = asyncio.run(instance.diagnostics({"origin": "https://example.test"}))
+assert len(result["status_history"]) == 1, result["status_history"]
+assert result["status_history"][0]["document_generation"] == 1
+assert result["status_history"][0]["status"] == 422
+assert "session" not in str(result["status_history"])
+assert "secret" not in str(result["status_history"])
+for _ in range(40): instance.add_network(state, post, "response", 429)
+assert len(state.status_history) == 32
+`;
+  execFileSync(process.env.HARBOR_CAMOUFOX_PYTHON ?? "python3", ["-B", "-c", script, driver], { stdio: "pipe" });
+});
+
 test("the consumed shared-driver observer accepts only a same-origin self-profile with three matching login markers", () => {
   const driver = join(DRIVER_DIR, "playwright_shared_driver.py");
   const script = String.raw`

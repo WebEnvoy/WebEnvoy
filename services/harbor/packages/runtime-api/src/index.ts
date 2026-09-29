@@ -302,6 +302,7 @@ export type {
   RuntimeDiagnosticsNetworkEvent,
   RuntimeDiagnosticsResponse,
   RuntimeDiagnosticsResult,
+  RuntimeDiagnosticsStatusEvent,
   RuntimeDiagnosticsUnavailable
 } from "./runtime-diagnostics.js";
 export { HARBOR_APP_RUNTIME_STATUS_FIXTURE_SCHEMA, HARBOR_CORE_RUNTIME_FACTS_SCHEMA, HARBOR_VIEWER_CONTROL_FACTS_SCHEMA } from "./viewer-control.js";

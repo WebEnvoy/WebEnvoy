@@ -48,6 +48,16 @@ export interface RuntimeDiagnosticsConsoleEvent {
   source?: { url: string; line?: number; column?: number };
 }
 
+export interface RuntimeDiagnosticsStatusEvent {
+  kind: "response" | "failure";
+  observed_at: string;
+  document_generation: number;
+  method: string;
+  resource_kind: DiagnosticsResourceKind;
+  status?: number;
+  failure_class?: DiagnosticsFailureClass;
+}
+
 export interface RuntimeDiagnosticsInput {
   origin: string;
   /** Core-derived Profile ∩ Grant ∩ task origin set; never Agent supplied. */
@@ -75,6 +85,7 @@ export interface RuntimeDiagnosticsResult {
   observed_at: string;
   network: RuntimeDiagnosticsNetworkEvent[];
   console: RuntimeDiagnosticsConsoleEvent[];
+  status_history: RuntimeDiagnosticsStatusEvent[];
 }
 
 export interface RuntimeDiagnosticsUnavailable {
@@ -178,6 +189,7 @@ export function normalizeRuntimeDiagnostics(value: unknown, context: { runtime_s
   const documentGeneration = Number(raw.document_generation);
   const network: RuntimeDiagnosticsNetworkEvent[] = [];
   const consoleEvents: RuntimeDiagnosticsConsoleEvent[] = [];
+  const statusHistory: RuntimeDiagnosticsStatusEvent[] = [];
   let remainingEvents = MAX_EVENTS;
   if (!Array.isArray(raw.network) || !Array.isArray(raw.console)) return diagnosticsUnavailable("provider_unavailable");
   for (const event of raw.network.slice(0, MAX_EVENTS)) {
@@ -220,9 +232,24 @@ export function normalizeRuntimeDiagnostics(value: unknown, context: { runtime_s
     consoleEvents.push({ event_ref: item.event_ref, level, observed_at: observedAt, page_ref: eventPageRef, document_generation: eventGeneration, text: safe.text, truncated: safe.truncated || item.truncated === true, ...(sourceFacts ? { source: sourceFacts } : {}) });
     remainingEvents -= 1;
   }
+  if (raw.status_history !== undefined && !Array.isArray(raw.status_history)) return diagnosticsUnavailable("provider_unavailable");
+  for (const event of (raw.status_history as unknown[] | undefined)?.slice(-32) ?? []) {
+    if (!event || typeof event !== "object") continue;
+    const item = event as Record<string, unknown>;
+    if (item.page_ref !== pageRef || item.origin !== currentOrigin ||
+      !Number.isSafeInteger(item.document_generation) || Number(item.document_generation) < 1 || Number(item.document_generation) > documentGeneration ||
+      (item.kind !== "response" && item.kind !== "failure") || typeof item.method !== "string") continue;
+    const observedAt = timestamp(item.observed_at);
+    const method = item.method.trim().slice(0, 16).toUpperCase();
+    if (!observedAt || !method || !/^[A-Z!#$%&'*+.^_`|~-]+$/.test(method)) continue;
+    const status = Number.isInteger(item.status) && Number(item.status) >= 100 && Number(item.status) <= 599 ? Number(item.status) : undefined;
+    const failure = failureClass(item.failure_class);
+    if (item.kind === "response" && status === undefined || item.kind === "failure" && failure === undefined) continue;
+    statusHistory.push({ kind: item.kind, observed_at: observedAt, document_generation: Number(item.document_generation), method, resource_kind: resourceKind(item.resource_kind), ...(item.kind === "response" ? { status } : { failure_class: failure }) });
+  }
   const observedAt = timestamp(raw.observed_at);
   if (!observedAt) return diagnosticsUnavailable("provider_unavailable");
-  return { status: "completed", schema_version: HARBOR_RUNTIME_DIAGNOSTICS_SCHEMA, runtime_session_ref: context.runtime_session_ref, profile_ref: context.profile_ref, page_ref: pageRef, document_generation: documentGeneration, page: { current_url: currentUrl, title: typeof page.title === "string" ? safeDiagnosticsText(page.title).text : null, status: ["loading", "ready", "failed", "closed", "unavailable", "unknown"].includes(String(page.status)) ? page.status as RuntimePageStatus : "unknown" }, cursor: raw.cursor, next_cursor: raw.next_cursor, truncated: raw.truncated === true, observed_at: observedAt, network, console: consoleEvents };
+  return { status: "completed", schema_version: HARBOR_RUNTIME_DIAGNOSTICS_SCHEMA, runtime_session_ref: context.runtime_session_ref, profile_ref: context.profile_ref, page_ref: pageRef, document_generation: documentGeneration, page: { current_url: currentUrl, title: typeof page.title === "string" ? safeDiagnosticsText(page.title).text : null, status: ["loading", "ready", "failed", "closed", "unavailable", "unknown"].includes(String(page.status)) ? page.status as RuntimePageStatus : "unknown" }, cursor: raw.cursor, next_cursor: raw.next_cursor, truncated: raw.truncated === true, observed_at: observedAt, network, console: consoleEvents, status_history: statusHistory };
 }
 
 export type RuntimeDiagnosticsProbe = (input: RuntimeDiagnosticsInput) => Promise<RuntimeDiagnosticsResponse>;

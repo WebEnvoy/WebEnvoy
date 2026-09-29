@@ -1,6 +1,6 @@
 # Network Runtime Contract V1
 
-状态：Accepted；版本：1.2；owner：Harbor / Provider Driver（观察）、Core（授权与 Run）。产品归口：[Work Item #498](https://github.com/WebEnvoy/WebEnvoy/issues/498)，后续能力由 [FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497)、受管浏览器文件 [#523](https://github.com/WebEnvoy/WebEnvoy/issues/523) 与授权语义 [#544](https://github.com/WebEnvoy/WebEnvoy/issues/544) 承载。产品依据：[canonical 产品规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)；架构依据：[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)、[Browser Runtime Capabilities V1](browser-runtime-capabilities-v1.md)、[Managed Browser Files V1](browser-files-v1.md)。
+状态：Accepted；版本：1.3；owner：Harbor / Provider Driver（观察）、Core（授权与 Run）。产品归口：[Work Item #498](https://github.com/WebEnvoy/WebEnvoy/issues/498)，后续能力由 [FR #497](https://github.com/WebEnvoy/WebEnvoy/issues/497)、受管浏览器文件 [#523](https://github.com/WebEnvoy/WebEnvoy/issues/523) 与授权语义 [#544](https://github.com/WebEnvoy/WebEnvoy/issues/544) 承载。产品依据：[canonical 产品规范](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)；架构依据：[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)、[Browser Runtime Capabilities V1](browser-runtime-capabilities-v1.md)、[Managed Browser Files V1](browser-files-v1.md)。
 
 > **S4 Proposed 后续**：[主动 Network Spec #565](https://github.com/WebEnvoy/WebEnvoy/issues/565) 将定义有界 response body、request modification、脱敏、授权、结果与恢复。它尚未接受，不改变本合同当前只读、有界 metadata 和既有文件归属 wire；不得据规划提前暴露正文或拦截修改。
 
@@ -117,6 +117,7 @@ are not forwarded:
 | `observed_at` | UTC ISO timestamp of the read, distinct from each event's timestamp |
 | `truncated` | Boolean indicating the bounded window did not represent all available/history events |
 | `network`, `console` | Arrays sharing a total read limit of 64; console items follow [Console V1](console-runtime-contract-v1.md) |
+| `status_history` | At most 32 in-memory response/failure summaries for the selected Page and current origin, including prior document generations; no URL, request reference, headers or body |
 
 Each Network item contains `event_ref`, `kind` (`request`, `response`,
 `failure`), `observed_at`, `page_ref`, `document_generation`, `method` (at
@@ -146,6 +147,16 @@ The cursor binds the Instance, Page, generation and ring position. The
 provider may report `cursor_stale` when
 the bounded ring has evicted the requested position. `truncated` means the
 returned window reached its limit or the provider evicted older events.
+
+`status_history` is a separate moving window for diagnosis across navigation.
+It retains document responses, non-GET/HEAD responses, HTTP errors, and
+transport failures. Each item has `kind`, `observed_at`, `document_generation`,
+`method`, `resource_kind`, and either `status` (100–599) or `failure_class`.
+Harbor accepts only facts from the selected Page, the current authorized
+origin, and a generation no later than the current document. The Driver keeps
+at most 32 summaries in Instance memory; they are lost when the Instance
+stops and have no cursor or completeness guarantee. A missing status cannot
+be interpreted as a successful request.
 
 ## Privacy and limits
 
