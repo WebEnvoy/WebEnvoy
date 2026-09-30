@@ -18,7 +18,7 @@ export const REQUIRED_AGENT_ASSETS = [
 ];
 export const INSTALLED_AGENT_MANIFEST_SCHEMA = 'webenvoy-installed-agent/v1';
 export const STANDALONE_MANIFEST_SCHEMA = 'webenvoy-installed-standalone/v1';
-export const INSTALLED_SKILL_VERSION = '0.3.0';
+export const INSTALLED_SKILL_VERSION = '0.4.0';
 export async function files(directory, prefix = '') {
   const out = {};
   for (const name of (await readdir(directory)).sort()) {

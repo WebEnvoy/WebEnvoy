@@ -1,10 +1,10 @@
 # Grant Wire Contract V1
 
-状态：Accepted；版本：v1.5（v1 兼容系列）；owner：Core。产品归口：[Work Item #508](https://github.com/WebEnvoy/WebEnvoy/issues/508)、已安装恢复 [#505](https://github.com/WebEnvoy/WebEnvoy/issues/505)、Provider 默认 [#516](https://github.com/WebEnvoy/WebEnvoy/issues/516)、受管浏览器文件 [#523](https://github.com/WebEnvoy/WebEnvoy/issues/523) 与站点 SKILL [#563](https://github.com/WebEnvoy/WebEnvoy/issues/563)。本合同冻结恢复 Grant、SKILL 资源范围、Provider preference/创建模板、browser-files 文件范围、managed-browser scope semantics 和 site-task Agent projection 的跨进程语义；既有 Principal、Connection、Profile Grant、撤销和交集规则仍由 Core owner API 维护。
+状态：Accepted；版本：v1.6（v1 兼容系列）；owner：Core。产品归口：[Work Item #508](https://github.com/WebEnvoy/WebEnvoy/issues/508)、已安装恢复 [#505](https://github.com/WebEnvoy/WebEnvoy/issues/505)、Provider 默认 [#516](https://github.com/WebEnvoy/WebEnvoy/issues/516)、受管浏览器文件 [#523](https://github.com/WebEnvoy/WebEnvoy/issues/523)、站点 SKILL [#563](https://github.com/WebEnvoy/WebEnvoy/issues/563) 与 Profile 元数据 [#599](https://github.com/WebEnvoy/WebEnvoy/issues/599)。本合同冻结恢复 Grant、SKILL 资源范围、Provider preference/创建模板、browser-files 文件范围、managed-browser scope semantics、site-task Agent projection 和 Profile 元数据 operation 值的跨进程语义；既有 Principal、Connection、Profile Grant、撤销和交集规则仍由 Core owner API 维护。
 
 ## 版本与兼容规则
 
-v1.0 的 recovery 与 v1.1 的 `skill_scope` 语义保持不变。v1.2 新增 preference operation 值，并允许新创建模板把 `provider_id` 明确设为 null；v1.3 新增可选 `file_scope` 与 browser task `file_refs`；v1.4 新增可选 `scope_semantics`，并以本节的 owner v2 lifecycle 兼容修订补齐正式 API/CLI；v1.5 新增 site task 的 `task.submit`、`task.query`、`task.stop` operation。site task 的普通结构化参数由版本化 managed-task request 携带并按 Lode pinned input schema 校验，不增加第二个材料注册表或 Grant scope。上述扩展不改变既有网页 `profile_refs`、`allowed_origins`、`allowed_operations` 的含义。未携带 `scope_semantics` 的 Grant/Profile policy 解释为 `legacy_request_guard_v1`；首次 legacy→v2 仍只能沿用原 owner 确认路径，Agent/task 请求不能指定或升级语义。之后的续发、重签、替换和 v2 policy 调整只走本节的 owner API/CLI/App 入口。
+v1.0 的 recovery 与 v1.1 的 `skill_scope` 语义保持不变。v1.2 新增 preference operation 值，并允许新创建模板把 `provider_id` 明确设为 null；v1.3 新增可选 `file_scope` 与 browser task `file_refs`；v1.4 新增可选 `scope_semantics`，并以本节的 owner v2 lifecycle 兼容修订补齐正式 API/CLI；v1.5 新增 site task 的 `task.submit`、`task.query`、`task.stop` operation；v1.6 新增 `profile.metadata.update` operation 值，不增加 Grant 字段。site task 的普通结构化参数由版本化 managed-task request 携带并按 Lode pinned input schema 校验，不增加第二个材料注册表或 Grant scope。上述扩展不改变既有网页 `profile_refs`、`allowed_origins`、`allowed_operations` 的交集含义。未携带 `scope_semantics` 的 Grant/Profile policy 解释为 `legacy_request_guard_v1`；首次 legacy→v2 仍只能沿用原 owner 确认路径，Agent/task 请求不能指定或升级语义。之后的续发、重签、替换和 v2 policy 调整只走本节的 owner API/CLI/App 入口。
 
 ### Managed browser scope semantics
 
@@ -70,6 +70,12 @@ Browser task scope 在保留 `operations`、`profile_refs`、`origins` 的同时
 新版 reader 读取没有 `skill_scope` 的旧 Grant 时必须成功，但该 Grant 没有任何 SKILL 权限；不能自动补全全库 scope、`skill.*` operation 或来源。旧严格 reader 遇到新增 `skill_scope` 字段或 `skill.*` operation 必须明确拒绝，不能自动降级、忽略字段或继续执行；因此旧消费者不能被喂入新字段，兼容边界由严格解析和拒绝保证。新版 reader 仍须通过逐项 `allowed_operations` 和 scope 交集检查。
 
 实现对含 v1.1 extension 的存储做旧版本读写时，必须保留 `skill_scope` 或明确拒绝写入；不得静默丢弃 scope 造成授权回退。v1.1 → 旧版本降级不能把带 scope 的 Grant 当作无 scope 的可写副本。未来增加 Grant 字段、改变交集规则、改变旧字段含义或使旧消费者必须理解新字段时，必须升级合同修订并给出迁移与拒绝规则；不能依靠忽略未知字段继续执行。
+
+## Profile metadata management V1.6
+
+`profile.metadata.update` 是明确、逐项授予的 Profile 管理 operation，不由 `profile.read`、`profile.list`、`profile.create`、环境、浏览器或 SKILL 权限推出。请求只作用于 Grant 与 task scope 中的同一个 Profile，`origins` 必须为空；它不需要活动 Instance、Provider 或 Profile storage lock，也不修改网站身份、Account、环境或本地 Profile storage。`name`／`tags` 的字段限制、Harbor 单一规范化 owner、默认与复制规则，以及 Core Run／Harbor receipt/query/no-replay 语义由 [Plugin Runtime Exposure V1 §#599](plugin-runtime-exposure-v1.md#599-profile-display-metadata-management) 定义。
+
+v1.6 reader 必须继续读取不含 `profile.metadata.update` 的旧 Grant，且旧 Grant 不因此获得此权限；只有 `allowed_operations` 明确包含该值且 task scope 再次选择该 operation/Profile 时才能修改。v1.5 或更旧的严格 reader 不认识该新增 operation 值时必须拒绝含该值的 Grant，不能忽略后继续执行。
 
 ## SKILL Grant 与 task scope
 

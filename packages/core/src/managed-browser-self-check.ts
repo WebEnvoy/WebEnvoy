@@ -27,6 +27,7 @@ const forwardedDiagnosticsOrigins: string[][] = [];
 let managedSession: Record<string, unknown>;
 let sessionStopped = false;
 let dropResponse = false, omitProviderSelection = false;
+let metadataUpdates = 0, dropMetadataResponse = false;
 let interactions = 0, dropInteractionResponse = false, refuseInteraction = false, waitConditionTimeout = false, crossOriginInteraction = false;
 const forwardedInteractionOrigins: string[][] = [];
 const forwardedInteractionInputs: Record<string, unknown>[] = [];
@@ -91,7 +92,7 @@ const server = createServer((req, res) => { void (async () => {
   let value: unknown;
   if (req.url === "/runtime/managed-operation-catalog") value = {
     schema_version: "webenvoy.harbor-operation-catalog.v0", catalog_ref: "harbor://managed-operations", catalog_version: "1",
-    operations: [...managedOperations.filter(op => !(managedInteractionOperations as readonly string[]).includes(op) && !op.startsWith("provider.preference.")).map(operation_id => ({ operation_id, category: (managedFileOperations as readonly string[]).includes(operation_id) || operation_id === "environment.update" || operation_id === "recovery.request" || ["page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward"].includes(operation_id) ? "prepare" : ["profile.create", "account.bind"].includes(operation_id) ? "commit" : "read", target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: (managedFileOperations as readonly string[]).includes(operation_id) ? ["harbor://managed-profile", "harbor://controlled-page", "harbor://managed-file"] : ["harbor://managed-profile"] })),
+    operations: [...managedOperations.filter(op => !(managedInteractionOperations as readonly string[]).includes(op) && !op.startsWith("provider.preference.")).map(operation_id => ({ operation_id, category: (managedFileOperations as readonly string[]).includes(operation_id) || operation_id === "environment.update" || operation_id === "recovery.request" || ["page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward"].includes(operation_id) ? "prepare" : ["profile.create", "profile.metadata.update", "account.bind"].includes(operation_id) ? "commit" : "read", target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: (managedFileOperations as readonly string[]).includes(operation_id) ? ["harbor://managed-profile", "harbor://controlled-page", "harbor://managed-file"] : ["harbor://managed-profile"] })),
       ...["provider.preference.read", "provider.preference.set", "provider.preference.clear"].map(operation_id => ({ operation_id, category: operation_id === "provider.preference.read" ? "read" : "commit", target_scope: { target_types: ["provider_preference"] }, resource_requirement_refs: ["harbor://browser-provider-preference"] })),
       ...["controlled-page.observe", "controlled-page.interact"].map(operation_id => ({ operation_id, category: operation_id === "controlled-page.interact" ? "prepare" : "read", target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: ["harbor://managed-profile", "harbor://controlled-page"] }))]
   };
@@ -134,6 +135,18 @@ const server = createServer((req, res) => { void (async () => {
   else if (req.url === "/runtime/identity-environment-mutations") {
     let body = ""; for await (const chunk of req) body += chunk;
     const input = JSON.parse(body);
+    if (input.operation === "profile.metadata.update") {
+      const record = profiles.find(item => item.identity_environment_ref === input.identity_environment_ref);
+      if (!record) value = { status: "rejected", failure: { code: "identity_environment_missing" } };
+      else {
+        metadataUpdates++;
+        if (input.name !== undefined) record.name = input.name.trim();
+        if (input.tags !== undefined) record.tags = [...new Set(input.tags.map((tag: string) => tag.trim()))];
+        value = { status: "completed", operation: input.operation, identity_environment_ref: input.identity_environment_ref, record, failure: null };
+      }
+      receipts.set(input.idempotency_key, value);
+      if (dropMetadataResponse) { req.socket.destroy(); return; }
+    } else {
     requestedProviders.push(input.identity_environment.requested_provider_id);
     const selectedProvider = input.identity_environment.requested_provider_id ?? browserPreference;
     if (!selectedProvider) {
@@ -144,11 +157,12 @@ const server = createServer((req, res) => { void (async () => {
       res.setHeader("content-type", "application/json"); res.end(JSON.stringify(value)); return;
     }
     creates++;
-    const record = { refs: { profile_ref: `profile:${creates}` }, identity_environment_ref: `identity:${creates}`, site: { origin: "https://example.com" }, status: { readiness: "ready" }, account_bindings: [], environment_summary: { provider_id: selectedProvider } };
+    const record = { refs: { profile_ref: `profile:${creates}` }, identity_environment_ref: `identity:${creates}`, name: `profile:${creates}`, tags: [], site: { origin: "https://example.com", display_name: "Example" }, status: { readiness: "ready" }, account_bindings: [], environment_summary: { provider_id: selectedProvider } };
     profiles.push(record); value = { status: "completed", record, ...(omitProviderSelection ? {} : { provider_selection: { schema_version: "harbor-provider-selection/v1", source: input.identity_environment.requested_provider_id ? "explicit_request" : "user_default", selected_provider_id: selectedProvider } }) };
     receipts.set(input.idempotency_key, value);
     await afterCreate?.();
     if (dropResponse) { req.socket.destroy(); return; }
+    }
   } else if (req.url?.startsWith("/runtime/identity-environment-mutations/")) value = receipts.get(decodeURIComponent(req.url.split("/").at(-1)!)) ?? environmentReceipts.get(decodeURIComponent(req.url.split("/").at(-1)!));
   else if (req.url === "/runtime/identity-environments") { await afterProfileList?.(); value = { identity_environments: profiles }; }
   else if (req.url === "/runtime/identity-environments/identity%3A1/environment") {
@@ -628,6 +642,52 @@ try {
   assert.equal(pageMutations, pageMutationsBeforeLoss + 1, "human-held Page mutation must not reach the provider");
   managedSession.control_owner = "core_task";
   managedSession.control_lock = { state: "held", holder_ref: principal.principal_id };
+  const metadataOperations = ["profile.metadata.update"] as const;
+  await accessStore.setProfilePolicy({ idempotency_key: "metadata-policy", profile_ref: "profile:1", allowed_operations: [...metadataOperations], allowed_origins: [] });
+  const metadataGrant = await accessStore.createGrant({ idempotency_key: "metadata-grant", principal_id: principal.principal_id, profile_refs: ["profile:1"], allowed_operations: [...metadataOperations], allowed_origins: [], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
+  const metadataRequest = { idempotency_key: "metadata-update", connection_id: connection.connection_id, grant_id: metadataGrant.grant_id,
+    operation: "profile.metadata.update", profile_ref: "profile:1", name: "  GitHub research  ", tags: [" team ", "github", "team"],
+    task_scope: { operations: [...metadataOperations], profile_refs: ["profile:1"], origins: [] } };
+  const sessionsBeforeMetadata = sessionReads;
+  const providersBeforeMetadata = providerCatalogReads;
+  sessionStopped = true;
+  const metadataUpdated = await service.submit(credentialHash, metadataRequest);
+  assert.equal(metadataUpdated.status, "succeeded", JSON.stringify(metadataUpdated));
+  assert.equal((metadataUpdated.result as { profile: { name: string } }).profile.name, "GitHub research");
+  assert.deepEqual((metadataUpdated.result as { profile: { tags: string[] } }).profile.tags, ["team", "github"]);
+  assert.equal((metadataUpdated.result as { profile: { site: { display_name: string } } }).profile.site.display_name, "Example");
+  assert.equal(metadataUpdates, 1);
+  assert.equal(sessionReads, sessionsBeforeMetadata, "Profile metadata does not require a Runtime Session");
+  assert.equal(providerCatalogReads, providersBeforeMetadata, "Profile metadata does not require Provider availability");
+  const metadataReplay = await service.submit(credentialHash, metadataRequest);
+  assert.equal(metadataReplay.run_id, metadataUpdated.run_id, "same wire key returns the original metadata Run");
+  assert.equal(metadataUpdates, 1, "same-key metadata replay does not post another Harbor mutation");
+  await assert.rejects(service.submit(credentialHash, { ...metadataRequest, name: "Different name" }), /managed_browser_idempotency_conflict/);
+  await assert.rejects(service.submit(credentialHash, { ...metadataRequest, name: "GitHub research" }), /managed_browser_idempotency_conflict/, "wire-distinct input is not silently normalized before idempotency comparison");
+  await assert.rejects(service.submit(credentialHash, { ...metadataRequest, idempotency_key: "metadata-task-scope-denied", task_scope: { ...metadataRequest.task_scope, operations: ["profile.read"] } }), /managed_access_denied/);
+  await assert.rejects(service.submit(credentialHash, { ...metadataRequest, idempotency_key: "metadata-origin-scope-denied", task_scope: { ...metadataRequest.task_scope, origins: ["https://example.com"] } }), /managed_access_denied/);
+  await assert.rejects(service.submit(credentialHash, { ...metadataRequest, idempotency_key: "metadata-origin-denied", origin: "https://example.com" }), /managed_browser_invalid_input/);
+  await assert.rejects(service.submit(credentialHash, { ...metadataRequest, idempotency_key: "metadata-profile-denied", profile_ref: "profile:2", task_scope: { ...metadataRequest.task_scope, profile_refs: ["profile:2"] } }), /managed_access_denied/);
+  const oldReadGrant = await accessStore.createGrant({ idempotency_key: "metadata-old-read-grant", principal_id: principal.principal_id, profile_refs: ["profile:1"], allowed_operations: ["profile.read"], allowed_origins: [], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
+  await assert.rejects(service.submit(credentialHash, { ...metadataRequest, idempotency_key: "metadata-old-grant-denied", grant_id: oldReadGrant.grant_id }), /managed_access_denied/);
+  await assert.rejects(service.submit(credentialHash, { ...metadataRequest, idempotency_key: "metadata-fields-forbidden-on-read", grant_id: oldReadGrant.grant_id, operation: "profile.read", name: "unexpected", tags: [] }), /managed_browser_invalid_input/);
+  const lostMetadataRequest = { ...metadataRequest, idempotency_key: "metadata-lost-response", name: "Confirmed after query", tags: [] };
+  dropMetadataResponse = true;
+  const unknownMetadata = await service.submit(credentialHash, lostMetadataRequest);
+  assert.equal(unknownMetadata.status, "unknown_outcome");
+  assert.equal(metadataUpdates, 2);
+  dropMetadataResponse = false;
+  const reconciledMetadata = await service.query(credentialHash, unknownMetadata.run_id);
+  assert.equal(reconciledMetadata.status, "unknown_outcome");
+  assert.equal(reconciledMetadata.reconciliation, "completed");
+  assert.equal((reconciledMetadata.result as { profile: { name: string } }).profile.name, "Confirmed after query");
+  assert.deepEqual((reconciledMetadata.result as { profile: { tags: string[] } }).profile.tags, []);
+  assert.equal(metadataUpdates, 2, "query reads the original Harbor mutation receipt without replay");
+  await accessStore.setProfilePolicy({ idempotency_key: "metadata-policy-ceiling-removed", profile_ref: "profile:1", allowed_operations: ["profile.read"], allowed_origins: [] });
+  await assert.rejects(service.submit(credentialHash, { ...metadataRequest, idempotency_key: "metadata-profile-ceiling-denied", name: "Must not dispatch" }), /managed_access_denied/);
+  assert.equal(metadataUpdates, 2, "Profile ceiling denial must happen before the Harbor mutation owner");
+  sessionStopped = false;
+  await accessStore.setProfilePolicy({ idempotency_key: "metadata-policy-restore", profile_ref: "profile:1", allowed_operations: ["profile.list", "profile.read"], allowed_origins: ["https://example.com"] });
   const environmentOps = ["environment.read", "environment.update"];
   await accessStore.setProfilePolicy({ idempotency_key: "environment-policy", profile_ref: "profile:1", allowed_operations: environmentOps, allowed_origins: ["https://example.com"] });
   const environmentGrant = await accessStore.createGrant({ idempotency_key: "environment-grant", principal_id: principal.principal_id, profile_refs: ["profile:1"], allowed_operations: environmentOps, allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });

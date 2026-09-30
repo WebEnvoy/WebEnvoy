@@ -61,8 +61,14 @@ export function isIdentityEnvironmentMutationRequest(value: unknown): value is I
     return onlyKeys(input, ["operation", "idempotency_key", "identity_environment"]) &&
       isIdentityEnvironmentMutationInput(input.identity_environment, input.operation as "create" | "import");
   }
-  if (!["edit", "copy_full", "copy_environment", "remove", "delete"].includes(input.operation)) return false;
+  if (!["edit", "profile.metadata.update", "copy_full", "copy_environment", "remove", "delete"].includes(input.operation)) return false;
   if (!nonEmptyString(input.identity_environment_ref)) return false;
+  if (input.operation === "profile.metadata.update") {
+    if (!onlyKeys(input, ["operation", "idempotency_key", "identity_environment_ref", "name", "tags"]) ||
+      (!Object.hasOwn(input, "name") && !Object.hasOwn(input, "tags"))) return false;
+    if (!optionalMetadataString(input.name)) return false;
+    return input.tags === undefined || Array.isArray(input.tags) && input.tags.length <= 16 && input.tags.every(metadataString);
+  }
   if (input.operation === "edit") {
     return onlyKeys(input, ["operation", "idempotency_key", "identity_environment_ref", "configuration"]) &&
       isIdentityEnvironmentConfiguration(input.configuration);
@@ -216,6 +222,10 @@ function isHttpOrigin(value: unknown): value is string {
 
 function nonEmptyString(value: unknown): value is string { return typeof value === "string" && Boolean(value.trim()); }
 function optionalString(value: unknown): boolean { return value === undefined || typeof value === "string"; }
+function metadataString(value: unknown): boolean {
+  return typeof value === "string" && Boolean(value.trim()) && value.length <= 512 && !/[\u0000-\u001f\u007f]/.test(value);
+}
+function optionalMetadataString(value: unknown): boolean { return value === undefined || metadataString(value); }
 function optionalNullableString(value: unknown): boolean { return value === undefined || value === null || typeof value === "string"; }
 function optionalRef(value: unknown): boolean { return value === undefined || nonEmptyString(value); }
 function optionalNumber(value: unknown): boolean { return value === undefined || typeof value === "number" && Number.isFinite(value); }
