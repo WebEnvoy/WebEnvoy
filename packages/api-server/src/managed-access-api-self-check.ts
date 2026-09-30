@@ -274,7 +274,14 @@ async function assertManagementPolicyApi(): Promise<void> {
     }));
     else if (request.url === "/runtime/identity-environment-mutations") {
       request.resume(); creates++;
-      response.end(JSON.stringify({ status: "completed", record: { refs: { profile_ref: "profile:policy" }, identity_environment_ref: "identity:policy", site: { origin: "https://example.com" }, status: { readiness: "ready" } }, provider_selection: { schema_version: "harbor-provider-selection/v1", source: "explicit_request", selected_provider_id: "camoufox" } }));
+      response.end(JSON.stringify({
+        schema_version: "harbor-identity-environment-mutation/v1", operation: "create", status: "completed",
+        identity_environment_ref: "identity:policy", source_identity_environment_ref: null,
+        record: { refs: { profile_ref: "profile:policy" }, identity_environment_ref: "identity:policy", site: { origin: "https://example.com" }, status: { readiness: "ready" } },
+        provider_selection: { schema_version: "harbor-provider-selection/v1", source: "explicit_request", selected_provider_id: "camoufox" },
+        effects: { index: "registered", local_data: "created", login_state: "preserved_unverified" }, failure: null,
+        public_boundary: { output: "status_and_redacted_refs_only", raw_material: "not_exposed", not_exposed: ["cookie", "token", "password", "profile_storage", "local_path"] }
+      }));
     } else { response.writeHead(404); response.end("{}"); }
   });
   const harborPort = await listen(harbor);
@@ -325,15 +332,16 @@ async function assertManagementPolicyApi(): Promise<void> {
     assert.equal(creates, 0);
     const path = "/agent-access/management-policy";
     assert.deepEqual((await call(path, owner)).body, { ok: true, configuration: null });
-    const mutation = { schema_version: "webenvoy.execution-policy-mutation.v0", idempotency_key: "allow-management", expected_source_version: null, modes: { read: "auto", commit: "auto" } };
+    const mutation = { schema_version: "webenvoy.execution-policy-mutation.v0", idempotency_key: "allow-management", expected_source_version: null, modes: { read: "auto", commit: "auto", destructive: "auto" } };
     assert.equal((await call(path, agent)).status, 401);
     assert.equal((await call(path, agent, "PUT", mutation)).status, 401);
-    assert.equal((await call(path, owner, "PUT", { ...mutation, modes: { destructive: "auto" } })).status, 400);
+    assert.equal((await call(path, owner, "PUT", { ...mutation, idempotency_key: "unknown-management-mode", modes: { ...mutation.modes, destructive: "automatic" } })).status, 400);
     const updated = await call(path, owner, "PUT", mutation);
     assert.equal(updated.status, 200, JSON.stringify(updated));
     assert.equal(updated.body.configuration.source, "installed_skill_user_version");
     assert.equal(updated.body.configuration.skill_ref, "harbor:managed-browser");
     assert.equal(updated.body.configuration.source_version, "1");
+    assert.equal(updated.body.configuration.modes.destructive, "auto");
     assert.deepEqual((await call(path, owner, "PUT", mutation)).body, updated.body);
     assert.deepEqual((await call(path, owner)).body, updated.body);
     const conflict = await call(path, owner, "PUT", { ...mutation, idempotency_key: "stale-policy" });
