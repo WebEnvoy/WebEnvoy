@@ -10,7 +10,7 @@ import type { SiteBindingInput } from "./identity-environment.js";
 export const HARBOR_IDENTITY_ENVIRONMENT_MUTATION_SCHEMA = "harbor-identity-environment-mutation/v1";
 export const HARBOR_PROVIDER_SELECTION_SCHEMA = "harbor-provider-selection/v1";
 
-export type IdentityEnvironmentMutationOperation = "create" | "import" | "edit" | "copy_full" | "copy_environment" | "remove" | "delete";
+export type IdentityEnvironmentMutationOperation = "create" | "import" | "edit" | "profile.metadata.update" | "copy_full" | "copy_environment" | "remove" | "delete";
 
 export interface IdentityEnvironmentConfigurationUpdate {
   provider_id?: BrowserProviderId;
@@ -92,6 +92,7 @@ export type IdentityEnvironmentMutationRequest =
   | (MutationBase & { operation: "create"; identity_environment: IdentityEnvironmentCreateInput })
   | (MutationBase & { operation: "import"; identity_environment: IdentityEnvironmentImportInput })
   | (MutationBase & { operation: "edit"; identity_environment_ref: string; configuration: IdentityEnvironmentConfigurationUpdate })
+  | (MutationBase & { operation: "profile.metadata.update"; identity_environment_ref: string; name?: string; tags?: string[] })
   | (MutationBase & { operation: "copy_full" | "copy_environment"; identity_environment_ref: string })
   | (MutationBase & { operation: "remove"; identity_environment_ref: string })
   | (MutationBase & { operation: "delete"; identity_environment_ref: string; confirmation: "delete_local_data" });

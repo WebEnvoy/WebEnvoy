@@ -60,6 +60,8 @@ export function createStoredIdentityRecord(
     operation,
     created_at,
     updated_at: new Date().toISOString(),
+    name: facts.profile_ref,
+    tags: [],
     identity_environment: facts,
     consistency: consistency(facts, input.observed_environment),
     local_material_refs: {
@@ -97,6 +99,9 @@ export function executeIdentityEnvironmentMutation(
   if (!request.idempotency_key?.trim() || request.idempotency_key.length > 200) {
     return rejected(request.operation, requestRef(request), "invalid_request", false, []);
   }
+  if (request.operation === "profile.metadata.update" && !validProfileMetadata(request)) {
+    return rejected(request.operation, request.identity_environment_ref, "invalid_request", false, []);
+  }
   const hash = requestHash(request);
   const receipt = store.receipts.get(request.idempotency_key);
   if (receipt) {
@@ -127,6 +132,8 @@ export function executeIdentityEnvironmentMutation(
         return createOrImport(materializedRequest, hash, store, options);
       case "edit":
         return edit(materializedRequest, hash, store, options);
+      case "profile.metadata.update":
+        return updateProfileMetadata(materializedRequest, hash, store);
       case "copy_full":
       case "copy_environment":
         return copy(materializedRequest, hash, store, options);
@@ -261,6 +268,33 @@ function edit(
   const records = new Map(store.records).set(request.identity_environment_ref, record);
   return commitSimple(store, request.idempotency_key, hash, completed("edit", store.public_record(record), null, "updated", "unchanged", "unchanged"), records);
 }
+function validProfileMetadata(request: Extract<IdentityEnvironmentMutationRequest, { operation: "profile.metadata.update" }>): boolean {
+  if (request.name === undefined && request.tags === undefined) return false;
+  if (request.name !== undefined && (typeof request.name !== "string" || !request.name.trim() || request.name.length > 512 || /[\u0000-\u001f\u007f]/.test(request.name))) return false;
+  if (request.tags !== undefined && (!Array.isArray(request.tags) || request.tags.length > 16 || request.tags.some(tag =>
+    typeof tag !== "string" || !tag.trim() || tag.length > 512 || /[\u0000-\u001f\u007f]/.test(tag)))) return false;
+  return true;
+}
+function updateProfileMetadata(
+  request: Extract<MaterializedIdentityEnvironmentMutationRequest, { operation: "profile.metadata.update" }>,
+  hash: string,
+  store: IdentityEnvironmentMutationStore
+): IdentityEnvironmentMutationResult {
+  const current = store.records.get(request.identity_environment_ref);
+  if (!current) return rejected(request.operation, request.identity_environment_ref, "identity_environment_missing", true, ["refresh_identity_list"]);
+  const name = request.name?.trim();
+  const tags = request.tags === undefined ? undefined : [...new Set(request.tags.map(tag => tag.trim()))];
+  const record: StoredLocalIdentityEnvironmentRecord = {
+    ...current,
+    operation: "updated",
+    updated_at: new Date().toISOString(),
+    ...(name === undefined ? {} : { name }),
+    ...(tags === undefined ? {} : { tags })
+  };
+  const records = new Map(store.records).set(request.identity_environment_ref, record);
+  return commitSimple(store, request.idempotency_key, hash,
+    completed(request.operation, store.public_record(record), null, "updated", "unchanged", "unchanged"), records);
+}
 function copy(
   request: Extract<MaterializedIdentityEnvironmentMutationRequest, { operation: "copy_full" | "copy_environment" }>,
   hash: string,
@@ -351,6 +385,8 @@ function copiedRecord(
   const now = new Date().toISOString();
   return {
     ...source,
+    name: target.profile_ref,
+    tags: [],
     account_bindings: full ? source.account_bindings ?? [] : [],
     account_binding_receipts: [],
     operation: "created",
@@ -447,6 +483,7 @@ function profileStorageRefsForMutation(
   store: IdentityEnvironmentMutationStore,
   receipt: StoredIdentityEnvironmentMutationReceipt | undefined
 ): string[] {
+  if (request.operation === "profile.metadata.update") return [];
   if (receipt?.result.identity_environment_ref) {
     const repair = store.repairs.get(receipt.result.identity_environment_ref);
     return repair ? [repair.profile_storage_ref] : [];

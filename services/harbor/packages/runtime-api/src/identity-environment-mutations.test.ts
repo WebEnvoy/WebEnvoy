@@ -21,11 +21,97 @@ import {
   tempDir
 } from "./identity-environment-mutation-test-helpers.js";
 import { materializeIdentityEnvironmentMutation } from "./identity-environment-mutations.js";
-import { profileStoragePath } from "./profile-storage.js";
+import { acquireProfileStorageOwnership, profileStoragePath } from "./profile-storage.js";
 import { startHarborRuntimeServer } from "./server.js";
 import type { IdentityEnvironmentMutationPersistenceState } from "./identity-environment-mutation-types.js";
 
 after(isolateProfileStorage("identity-mutations"));
+
+test("updates Profile organization metadata through the owner receipt without locking browser storage", () => {
+  const dir = tempDir("profile-metadata");
+  const persistence_path = join(dir, "identity-environments.json");
+  try {
+    const manager = new LocalIdentityEnvironmentManager({ persistence_path, provider_detection: testProviderDetection });
+    const created = manager.mutate({ operation: "create", idempotency_key: "metadata-create", identity_environment: createMutationInput() });
+    assert.equal(created.status, "completed");
+    const identity_environment_ref = created.identity_environment_ref!;
+    const profile_ref = created.record!.refs.profile_ref;
+    assert.equal(created.record!.name, profile_ref);
+    assert.deepEqual(created.record!.tags, []);
+
+    const browserStorageOwnership = acquireProfileStorageOwnership([`${profile_ref}:storage`]);
+    try {
+      const request: Extract<IdentityEnvironmentMutationRequest, { operation: "profile.metadata.update" }> = {
+        operation: "profile.metadata.update",
+        idempotency_key: "metadata-update",
+        identity_environment_ref,
+        name: "  GitHub research  ",
+        tags: [" team ", "github", "team", " team "]
+      };
+      const updated = manager.mutate(request);
+      assert.equal(updated.status, "completed");
+      assert.equal(updated.record!.name, "GitHub research");
+      assert.deepEqual(updated.record!.tags, ["team", "github"]);
+      assert.equal(updated.record!.refs.profile_ref, profile_ref);
+      assert.equal(updated.record!.site.display_name, "小红书");
+      assert.deepEqual(manager.mutate(request), updated);
+      updated.record!.tags.push("detached mutation");
+      assert.deepEqual(manager.get(identity_environment_ref)?.tags, ["team", "github"], "public metadata arrays cannot mutate owner state");
+      assert.equal(manager.mutate({ ...request, name: "different" }).failure?.code, "idempotency_conflict");
+      assert.equal(manager.mutate({ ...request, idempotency_key: "metadata-blank", name: "  " }).failure?.code, "invalid_request");
+      assert.equal(manager.mutate({ ...request, idempotency_key: "metadata-empty", name: undefined, tags: undefined }).failure?.code, "invalid_request");
+    } finally {
+      browserStorageOwnership.release();
+    }
+
+    const binding = {
+      account_system_ref: "account-system:metadata-test",
+      account_ref: "account:sha256:metadata-test",
+      observation_ref: "observation:metadata-test",
+      bound_at: new Date().toISOString()
+    };
+    assert.deepEqual(
+      manager.bindObservedAccount(identity_environment_ref, binding, "metadata-binding", "metadata-binding-request-hash").account_bindings,
+      [binding]
+    );
+    const peer = new LocalIdentityEnvironmentManager({ persistence_path, provider_detection: testProviderDetection });
+    const peerEdit = peer.mutate({
+      operation: "edit",
+      idempotency_key: "metadata-peer-environment-edit",
+      identity_environment_ref,
+      configuration: { language: "en-GB" }
+    });
+    assert.equal(peerEdit.status, "completed");
+    assert.equal(peerEdit.record!.environment_summary.language, "en-GB");
+
+    const metadataAfterPeerEdit = manager.mutate({
+      operation: "profile.metadata.update",
+      idempotency_key: "metadata-after-peer-environment-edit",
+      identity_environment_ref,
+      tags: ["team", "github", "updated"]
+    });
+    assert.equal(metadataAfterPeerEdit.status, "completed");
+    assert.equal(metadataAfterPeerEdit.record!.environment_summary.language, "en-GB");
+    assert.deepEqual(metadataAfterPeerEdit.record!.account_bindings, [binding]);
+
+    const reloaded = new LocalIdentityEnvironmentManager({
+      persistence_path,
+      provider_detection: testProviderDetection,
+      stage_profile_copy: () => ({ commit: () => undefined, rollback: () => true, residual: () => false })
+    });
+    assert.equal(reloaded.get(identity_environment_ref)?.name, "GitHub research");
+    assert.deepEqual(reloaded.list()[0]?.tags, ["team", "github", "updated"]);
+    assert.equal(reloaded.get(identity_environment_ref)?.environment_summary.language, "en-GB");
+    assert.deepEqual(reloaded.list()[0]?.account_bindings, [binding]);
+
+    const copy = reloaded.mutate(copyRequest(identity_environment_ref, "metadata-copy"));
+    assert.equal(copy.status, "completed");
+    assert.equal(copy.record!.name, copy.record!.refs.profile_ref);
+    assert.deepEqual(copy.record!.tags, []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("persists idempotent receipts and rejects sensitive or conflicting payloads", () => {
   const dir = tempDir("receipts");
@@ -61,6 +147,27 @@ test("persists idempotent receipts and rejects sensitive or conflicting payloads
     } as IdentityEnvironmentMutationRequest);
     assert.equal(sensitive.failure?.code, "invalid_request");
     assert.equal(readFileSync(persistence_path, "utf8").includes("cookie-secret"), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("reads metadata defaults from legacy records without persisted organization fields", () => {
+  const dir = tempDir("legacy-profile-metadata");
+  const persistence_path = join(dir, "identity-environments.json");
+  try {
+    const created = new LocalIdentityEnvironmentManager({ persistence_path, provider_detection: testProviderDetection }).mutate({
+      operation: "create", idempotency_key: "legacy-metadata-create", identity_environment: createMutationInput()
+    });
+    const persisted = JSON.parse(readFileSync(persistence_path, "utf8")) as { records: Record<string, unknown>[] };
+    delete persisted.records[0]!.name;
+    delete persisted.records[0]!.tags;
+    writeFileSync(persistence_path, JSON.stringify(persisted));
+
+    const reloaded = new LocalIdentityEnvironmentManager({ persistence_path, provider_detection: testProviderDetection });
+    const profile = reloaded.get(created.identity_environment_ref!)!;
+    assert.equal(profile.name, profile.refs.profile_ref);
+    assert.deepEqual(profile.tags, []);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -427,6 +534,18 @@ test("exposes redacted mutation HTTP results with stable authorization and statu
     assert.equal(body.schema_version, "harbor-identity-environment-mutation/v1");
     assert.equal(body.status, "completed");
     const httpIdentityRef = body.identity_environment_ref as string;
+
+    const metadataResponse = await fetch(`${running.url}/runtime/identity-environment-mutations`, {
+      method: "POST",
+      headers: mutationHeaders(token),
+      body: JSON.stringify({ operation: "profile.metadata.update", idempotency_key: "http-metadata-update", identity_environment_ref: httpIdentityRef, name: "  Research  ", tags: [" team ", "team"] })
+    });
+    const metadataBody = await metadataResponse.json() as Record<string, any>;
+    assert.equal(metadataResponse.status, 200);
+    assert.equal(metadataBody.status, "completed");
+    assert.equal(metadataBody.record.name, "Research");
+    assert.deepEqual(metadataBody.record.tags, ["team"]);
+    assert.equal(metadataBody.record.site.display_name, "小红书");
 
     const legacyEdit = await fetch(`${running.url}/runtime/identity-environments/${httpIdentityRef}`, {
       method: "PATCH",

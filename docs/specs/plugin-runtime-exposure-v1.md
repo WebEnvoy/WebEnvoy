@@ -1,6 +1,6 @@
 # Plugin Runtime Exposure V1
 
-状态：Accepted；版本：v1.2（实施基线与 checkpoint 语义修订，不改变既有 MCP operation/wire 枚举）；owner：Core（授权、Run 与结果）、Harbor（Runtime 能力与现场）、Desktop Agent entry（MCP 投影）。产品归口：[Runtime Work Item #498](https://github.com/WebEnvoy/WebEnvoy/issues/498)、[#474](https://github.com/WebEnvoy/WebEnvoy/issues/474)、[#508](https://github.com/WebEnvoy/WebEnvoy/issues/508)、受管浏览器文件 [#523](https://github.com/WebEnvoy/WebEnvoy/issues/523)。依据：[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)、[Browser Runtime Capabilities V1](browser-runtime-capabilities-v1.md)、[Managed SKILL Library Lifecycle V1](skill-library-lifecycle-v1.md)、[Managed Browser Files V1](browser-files-v1.md)。
+状态：Accepted；版本：v1.4（#599 Profile 元数据管理投影）；owner：Core（授权、Run 与结果）、Harbor（Runtime 能力与现场）、Desktop Agent entry（MCP 投影）。产品归口：[Runtime Work Item #498](https://github.com/WebEnvoy/WebEnvoy/issues/498)、[#474](https://github.com/WebEnvoy/WebEnvoy/issues/474)、[#508](https://github.com/WebEnvoy/WebEnvoy/issues/508)、受管浏览器文件 [#523](https://github.com/WebEnvoy/WebEnvoy/issues/523)、Profile 元数据 [#599](https://github.com/WebEnvoy/WebEnvoy/issues/599)。依据：[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)、[Browser Runtime Capabilities V1](browser-runtime-capabilities-v1.md)、[Managed SKILL Library Lifecycle V1](skill-library-lifecycle-v1.md)、[Managed Browser Files V1](browser-files-v1.md)。
 
 本规格冻结首宿主的固定 MCP 投影、授权边界、版本兼容和失败语义。工具可见、Runtime capability 存在、当前 Grant 允许调用以及 Provider 当前可执行性是四个独立事实。
 
@@ -34,6 +34,7 @@
 
 | Runtime/管理能力 | MCP 工具与 operation | 授权和结果归口 |
 | --- | --- | --- |
+| Profile 展示元数据 | `webenvoy_operation`：`profile.metadata.update` | 必须逐项授予同名 operation，并在 `task_scope` 限定一个获准 `profile_ref`、`origins: []`；`name`／`tags` 格式、Harbor 规范化与 receipt 对账见 [#599](#599-profile-display-metadata-management)。 |
 | Page list/open/activate/close and navigation | `webenvoy_operation`：`page.list`、`page.open`、`page.activate`、`page.close`、`page.navigate`、`page.reload`、`page.back`、`page.forward` | 同名 `allowed_operations`；同一 Instance 的 Page/document contract 与关系异常暂停由 [Page, Document and Navigation V1](page-navigation-runtime-contract-v1.md) 维护。 |
 | bounded Network metadata + Console/Page Error | `webenvoy_operation`：`instance.diagnostics` | 既有 `allowed_operations` 中的 `instance.diagnostics`；详见 [Network V1](network-runtime-contract-v1.md) 与 [Console V1](console-runtime-contract-v1.md)。 |
 | Profile environment facts / bounded configuration update | `webenvoy_operation`：`environment.read`、`environment.update` | 既有同名 `allowed_operations`；字段与失败语义由 [Profile Environment V1 §18](profile-environment-v1.md#18-首个正式环境生命周期合同499) 维护。 |
@@ -43,6 +44,14 @@
 | 已安装 site SKILL 的任务元数据 | 既有 `webenvoy_skills`：`skill.inspect` 的可选 `result.skill.site_tasks` | 使用 `webenvoy.site-task-summary/v1`；只投影 Lode 声明且通过现有 `skill_scope`/task scope、来源和完整性过滤的摘要，不做 Runtime 预检或执行。 |
 | 已安装 site SKILL 的受管任务 | `webenvoy_task`：`task.submit`、`task.query`、`task.stop` | 使用 v1.5 `task.*` Grant、site-task 五组 task scope、Lode pinned inline input carrier 和 `webenvoy.managed-task-operation/v1`；内部复用 Core Task/Run/result/unknown，不走 owner `/tasks`/`/runs`。 |
 | 受管浏览器文件 | `webenvoy_operation`：`file.upload`、`file.download`；既有 `webenvoy_query` 查询原 Run/receipt | `file_scope`、task `file_refs`、Profile/Principal/Grant、Page/document、目标新鲜度和 ControlLease 的交集；owner `files import/inspect/export/revoke/delete` 只走受信入口。结果为 `webenvoy.browser-file-result/v1`，正文和路径不投影，详见 [Managed Browser Files V1](browser-files-v1.md)。 |
+
+### #599 Profile display metadata management
+
+`profile.metadata.update` is a Profile management write projected through `webenvoy_operation`; it is not a browser capability and does not start or inspect an Instance. It only updates public display `name` and/or `tags` through Harbor's Profile record owner. `profile.list` and authorized Profile reads return those fields. Existing records default to `name: profile_ref` and `tags: []`; creation uses those defaults. A copy gets the new Profile reference as its name and an empty tag list.
+
+The request must provide at least one of `name` or `tags`. A name is a non-empty string of at most 512 characters; each tag is a non-empty string of at most 512 characters and the list has at most 16 items. Control characters are rejected. Harbor trims the name and tags and removes duplicate tags while retaining first-seen order; `tags: []` clears the list, while an omitted field leaves it unchanged. Core forwards supplied values unchanged so the Run idempotency hash remains bound to the original wire input; Harbor alone normalizes persisted metadata.
+
+Core requires a current Grant with the explicit `profile.metadata.update` operation, the same operation in task scope, and the selected Profile in both Grant and task scope; task scope has `origins: []`. The operation has no Provider, browser session, or Profile-storage ownership-lock prerequisite. It changes no site/account identity, authentication, Provider, environment, Profile storage, or running Instance. The Harbor mutation receipt is returned through the Core Run and may report `completed`, `rejected`, or `repair_required`; a completed receipt confirms the metadata mutation only, not any downstream user goal. After a lost response, query the original Run/key; if reconciliation returns `reconciliation: completed`, that confirms the receipt was reconciled, while the original Run retains its historical `unknown_outcome` and is not thereby reclassified as successful. Query never posts the mutation again. Reusing a key with changed wire input is an idempotency conflict, even when the new values would normalize to the same display metadata.
 
 ### #563 site-task execution projection
 

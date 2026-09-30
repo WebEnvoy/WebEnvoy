@@ -658,7 +658,7 @@ export class HarborRuntime {
       availability: { state: "unknown", reason_codes: ["runtime_facts_unavailable"], facts_at: profile.updated_at },
       execution_checks: ["reauthorize"]
     };
-    const needsSession = !["profile.list", "profile.read", "profile.create", "provider.preference.read", "provider.preference.set", "provider.preference.clear", "environment.read", "environment.update", "instance.start"].includes(operation);
+    const needsSession = !["profile.list", "profile.read", "profile.create", "profile.metadata.update", "provider.preference.read", "provider.preference.set", "provider.preference.clear", "environment.read", "environment.update", "instance.start"].includes(operation);
     const requestedSessionRef = typeof value.runtime_session_ref === "string" ? value.runtime_session_ref : undefined;
     const record = requestedSessionRef ? this.runtimeSessions.getRecord(requestedSessionRef) : (() => {
       const active = this.runtimeSessions.getActiveIdentityEnvironmentSession(profile.identity_environment_ref);
@@ -683,7 +683,8 @@ export class HarborRuntime {
       : selected.provider_id === "chrome_official" && !chromePairing ? selected.role === "qualification" ? "provider_evidence_stale" : "provider_not_qualified"
       : selected.provider_id === "camoufox" && !camoufoxSource ? selected.role === "qualification" ? "provider_evidence_stale" : "provider_not_qualified"
       : null;
-    const providerState = qualificationReason ? "unknown"
+    const providerIndependent = operation === "profile.metadata.update";
+    const providerState = providerIndependent ? "not_applicable" : qualificationReason ? "unknown"
       : adapterAvailable === false ? "unsupported"
       : providerCapabilityKey !== undefined && !providerCapability ? "unknown"
       : providerCapability?.state === "unsupported" ? "unsupported"
@@ -691,7 +692,7 @@ export class HarborRuntime {
       : providerCapability?.state === "limited" || providerCapability?.state === "provider_claim" ? "limited"
       : owner === "unknown" ? "unknown"
       : "supported";
-    const providerReasons = qualificationReason ? [qualificationReason]
+    const providerReasons = providerIndependent ? [] : qualificationReason ? [qualificationReason]
       : adapterAvailable === false ? ["provider_operation_not_implemented"]
       : providerCapabilityKey !== undefined && !providerCapability ? ["capability_missing"]
       : providerCapability?.state === "unsupported" ? ["provider_operation_not_implemented"]
@@ -702,19 +703,19 @@ export class HarborRuntime {
       : [];
     const provider = {
       state: providerState,
-      provider_id: facts.provider_binding.selected_provider_id,
+      provider_id: providerIndependent ? null : facts.provider_binding.selected_provider_id,
       reason_codes: providerReasons,
-      limitations: (selected?.limitations ?? []).slice(0, 16).map((summary, index) => ({ code: `provider_limitation_${index + 1}`, summary: String(summary).slice(0, 256) })),
+      limitations: providerIndependent ? [] : (selected?.limitations ?? []).slice(0, 16).map((summary, index) => ({ code: `provider_limitation_${index + 1}`, summary: String(summary).slice(0, 256) })),
       facts_at: providerFactsAt
     };
     const controlRequiredOperations = ["instance.start", "instance.navigate", "instance.click", "instance.input", "instance.press", "instance.scroll", "instance.wait", "instance.stop", "instance.handoff", "page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward", "file.upload", "file.download"];
     const pageSelectionRequiredOnAmbiguousSession = ["instance.observe", "instance.read", "instance.snapshot", "instance.navigate", "instance.diagnostics"].includes(operation);
-    let availabilityState: "no_known_blocker" | "blocked" | "unknown" = providerState === "unsupported" ? "blocked" : providerState === "unknown" ? "unknown" : "no_known_blocker";
+    let availabilityState: "no_known_blocker" | "blocked" | "unknown" = providerIndependent ? "no_known_blocker" : providerState === "unsupported" ? "blocked" : providerState === "unknown" ? "unknown" : "no_known_blocker";
     let availabilityReasons: string[] = [...providerReasons];
     let availabilityFactsAt: string | null = providerFactsAt;
     if (requestedSessionRef && (!session || session.profile_ref !== value.profile_ref)) { availabilityState = "blocked"; availabilityReasons = ["stale_reference"]; availabilityFactsAt = null; }
     else if (needsSession && !session) { availabilityState = "blocked"; availabilityReasons = ["instance_not_running"]; availabilityFactsAt = providerFactsAt; }
-    else if (session) {
+    else if (session && !providerIndependent) {
       availabilityFactsAt = session.last_seen_at;
       if (!["active", "idle", "locked"].includes(session.lifecycle_state)) { availabilityState = "blocked"; availabilityReasons = ["instance_not_running"]; }
       const humanControl = controlRequiredOperations.includes(operation) && session.control_owner === "user";
@@ -1269,6 +1270,9 @@ export class HarborRuntime {
   }
 
   mutateLocalIdentityEnvironment(request: IdentityEnvironmentMutationRequest): IdentityEnvironmentMutationResult {
+    // Profile organization metadata is persisted by the identity owner and does
+    // not touch a Browser, Session, or Profile storage resource.
+    if (request.operation === "profile.metadata.update") return this.identityEnvironments.mutate(request);
     // These edits change only the owner configuration record. Active launch
     // snapshots and browser storage stay untouched until an explicit restart.
     if (request.operation === "edit" && boundedEnvironmentUpdate(request.configuration) && this.runtimeSessions.isIdentityEnvironmentInUse(request.identity_environment_ref)) return this.identityEnvironments.mutate(request, null, true);

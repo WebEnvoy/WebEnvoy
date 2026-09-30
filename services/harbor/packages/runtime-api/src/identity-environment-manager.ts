@@ -73,6 +73,9 @@ export interface StoredLocalIdentityEnvironmentRecord {
   operation: LocalIdentityEnvironmentOperation;
   created_at: string;
   updated_at: string;
+  /** Organization-facing Profile metadata; optional for persisted v0 records. */
+  name?: string;
+  tags?: string[];
   identity_environment: LocalIdentityEnvironmentFacts;
   consistency: IdentityConsistencyFacts;
   local_material_refs: {
@@ -98,6 +101,8 @@ export interface LocalIdentityEnvironmentPublicRecord {
   identity_environment_ref: string;
   created_at: string;
   updated_at: string;
+  name: string;
+  tags: string[];
   operation: LocalIdentityEnvironmentOperation;
   site: {
     site_id: string;
@@ -626,6 +631,8 @@ function publicRecord(record: StoredLocalIdentityEnvironmentRecord): LocalIdenti
     identity_environment_ref: facts.identity_environment_ref,
     created_at: record.created_at,
     updated_at: record.updated_at,
+    name: record.name ?? facts.profile_ref,
+    tags: [...(record.tags ?? [])],
     operation: record.operation,
     site: {
       site_id: facts.site_binding.site_id,

@@ -28,7 +28,7 @@ import {
 
 type ObjectValue = Record<string, unknown>;
 type EnvironmentConfiguration = { timezone?: string; language?: string; viewport?: string };
-type Request = ManagedAccessRequest & { idempotency_key: string; url?: string; runtime_session_ref?: string; observation_ref?: string; account_system_ref?: string; account_ref?: string;
+type Request = ManagedAccessRequest & { idempotency_key: string; url?: string; name?: string; tags?: string[]; runtime_session_ref?: string; observation_ref?: string; account_system_ref?: string; account_ref?: string;
   page_id?: string; page_ref?: string; document_generation?: number; cursor?: string; limit?: number; target_ref?: string; file_ref?: string; text?: string; key?: string; delta_y?: number; wait_for?: "page_changed" | "text" | "enabled"; timeout_ms?: number; configuration?: EnvironmentConfiguration; backup_ref?: string; operation_ref?: string; provider_id?: "cloakbrowser" | "chrome_official" | "camoufox" };
 type DescribeContext = { grant_id: string; profile_ref: string; task_scope: ManagedAccessRequest["task_scope"] };
 type DescribeInput = { operation: string; connection_id: string; context?: DescribeContext; arguments?: ObjectValue };
@@ -49,7 +49,7 @@ function discoveryExecutionChecks(operation: string): string[] {
   if (["instance.observe", "instance.read", "instance.snapshot", "instance.click", "instance.input", "instance.press", "instance.scroll", "instance.wait", "instance.diagnostics", "page.list", "page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward", "file.upload", "file.download"].includes(operation)) checks.push("verify_page_and_target");
   if (["file.upload", "file.download"].includes(operation)) checks.push("verify_file_material");
   if (["instance.click", "instance.input", "instance.press", "instance.scroll", "instance.wait", "page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward", "file.upload", "file.download", "instance.stop", "instance.handoff", "environment.update", "provider.preference.set", "provider.preference.clear"].includes(operation)) checks.push("acquire_control_if_required");
-  if (!["profile.list", "profile.read", "provider.preference.read", "provider.preference.set", "provider.preference.clear"].includes(operation)) checks.push("check_provider_runtime");
+  if (!["profile.list", "profile.read", "profile.metadata.update", "provider.preference.read", "provider.preference.set", "provider.preference.clear"].includes(operation)) checks.push("check_provider_runtime");
   return [...new Set(checks)];
 }
 class InteractionFailure extends ManagedAccessError {
@@ -257,13 +257,22 @@ function parse(value: unknown): Request {
       (input.operation === "provider.preference.set" ? input.provider_id === undefined : input.provider_id !== undefined)) return fail("managed_browser_invalid_input");
   } else if (input.operation === "profile.create") {
     if (["profile_ref", "runtime_session_ref", "observation_ref", "account_system_ref", "account_ref", "page_id", "page_ref", "document_generation", "cursor", "limit", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms", "configuration", "backup_ref", "operation_ref"].some(key => input[key] !== undefined)) return fail("managed_browser_invalid_input");
+  } else if (input.operation === "profile.metadata.update") {
+    text(input.profile_ref);
+    if (input.name === undefined && input.tags === undefined) return fail("managed_browser_invalid_input");
+    if (input.name !== undefined) {
+      if (typeof input.name !== "string" || !input.name.trim() || input.name.length > 512 || /[\u0000-\u001f\u007f]/.test(input.name)) return fail("managed_browser_invalid_input");
+    }
+    if (input.tags !== undefined) {
+      if (!Array.isArray(input.tags) || input.tags.length > 16 || input.tags.some(tag => typeof tag !== "string" || !tag.trim() || tag.length > 512 || /[\u0000-\u001f\u007f]/.test(tag))) return fail("managed_browser_invalid_input");
+    }
   } else if (input.provider_id !== undefined || !["instance.navigate", "instance.read", "instance.observe"].includes(String(input.operation)) && (["page_id", "page_ref", "document_generation", "cursor", "limit", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms"].some(key => input[key] !== undefined)) ||
     (input.operation !== "account.bind" && ["observation_ref", "account_system_ref", "account_ref"].some(key => input[key] !== undefined))) return fail("managed_browser_invalid_input");
   return input as Request;
 }
 export const parseManagedBrowserRequest = parse;
 function accessRequest(input: Request): ManagedAccessRequest {
-  const { idempotency_key: _key, url: _url, runtime_session_ref: _session, observation_ref: _observation, account_system_ref: _system, account_ref: _account, page_id: _pageId, page_ref: _page, document_generation: _generation, cursor: _cursor, limit: _limit, target_ref: _target, file_ref: _file, text: _text, key: _press, delta_y: _scroll, wait_for: _wait, timeout_ms: _timeout, configuration: _configuration, backup_ref: _backup, operation_ref: _operation, provider_id: _provider, ...access } = input;
+  const { idempotency_key: _key, url: _url, name: _name, tags: _tags, runtime_session_ref: _session, observation_ref: _observation, account_system_ref: _system, account_ref: _account, page_id: _pageId, page_ref: _page, document_generation: _generation, cursor: _cursor, limit: _limit, target_ref: _target, file_ref: _file, text: _text, key: _press, delta_y: _scroll, wait_for: _wait, timeout_ms: _timeout, configuration: _configuration, backup_ref: _backup, operation_ref: _operation, provider_id: _provider, ...access } = input;
   if (managedFileOperations.includes(input.operation as typeof managedFileOperations[number])) access.file_refs = _file === undefined ? [] : [_file];
   return access;
 }
@@ -326,7 +335,7 @@ function describeInputAssessment(input: DescribeInput, context: DescribeContext 
 }
 function publicProfile(value: unknown): ObjectValue {
   const profile = object(value), refs = object(profile.refs);
-  return { profile_ref: text(refs.profile_ref), identity_environment_ref: text(profile.identity_environment_ref), site: profile.site,
+  return { profile_ref: text(refs.profile_ref), identity_environment_ref: text(profile.identity_environment_ref), name: profile.name ?? text(refs.profile_ref), tags: profile.tags ?? [], site: profile.site,
     status: profile.status, account_bindings: profile.account_bindings ?? [], environment_summary: profile.environment_summary };
 }
 function publicProviderSelection(value: unknown): ObjectValue {
@@ -515,6 +524,21 @@ export function createManagedBrowserService(options: {
     if (input.operation === "profile.read") return { profile };
     const identityEnvironmentRef = text(profile.identity_environment_ref);
     const identity = encodeURIComponent(identityEnvironmentRef);
+    if (input.operation === "profile.metadata.update") {
+      await check();
+      const mutation = await runtimeHarbor("/runtime/identity-environment-mutations", {
+        operation: "profile.metadata.update",
+        idempotency_key: runId,
+        identity_environment_ref: identityEnvironmentRef,
+        ...(input.name === undefined ? {} : { name: input.name }),
+        ...(input.tags === undefined ? {} : { tags: input.tags })
+      });
+      if (mutation.status !== "completed") {
+        const failure = mutation.failure && typeof mutation.failure === "object" ? object(mutation.failure) : {};
+        return fail(typeof failure.code === "string" ? failure.code : "managed_browser_runtime_refused");
+      }
+      return { profile: publicProfile(mutation.record), authorization_decision_ref: access.decision_ref };
+    }
     if (isEnvironment(input.operation)) await check();
     if (input.operation === "environment.read") return await runtimeHarbor(`/runtime/identity-environments/${identity}/environment`);
     if (input.operation === "environment.update") return await runtimeHarbor(`/runtime/identity-environments/${identity}/environment`, {
@@ -924,14 +948,14 @@ export function createManagedBrowserService(options: {
         }
         await options.accessStore.checkAccess(credentialHash, accessRequest(input));
         const summary = { principal_id: principal.principal_id, grant_id: input.grant_id, operation: input.operation, request_hash: requestHash,
-          ...(isInteraction(input.operation) || isEnvironment(input.operation) || isPageMutation(input.operation) || managedFileOperations.includes(input.operation as typeof managedFileOperations[number]) ? {
+          ...(input.operation === "profile.metadata.update" || isInteraction(input.operation) || isEnvironment(input.operation) || isPageMutation(input.operation) || managedFileOperations.includes(input.operation as typeof managedFileOperations[number]) ? {
             ...(isInteraction(input.operation) || isPageMutation(input.operation) || managedFileOperations.includes(input.operation as typeof managedFileOperations[number]) ? { runtime_session_ref: input.runtime_session_ref } : {}),
             profile_ref: input.profile_ref, origin: input.origin,
             ...(isInteraction(input.operation) || isPageMutation(input.operation) || managedFileOperations.includes(input.operation as typeof managedFileOperations[number]) ? { dispatch_state: "not_dispatched" } : {}),
             ...(input.file_ref === undefined ? {} : { file_ref: input.file_ref })
           } : {}) };
         await store.createRunRecord({ run_id: runId, task_intent_ref: `managed-intent:${runId}`, capability_ref: "harbor:managed-browser", status: "admitted",
-          admission: { decision: "accepted", action_risk: (["profile.create", "provider.preference.set", "provider.preference.clear", "account.bind", "environment.update"].includes(input.operation) || isInput(input.operation) || isPageMutation(input.operation) || managedFileOperations.includes(input.operation as typeof managedFileOperations[number])) ? "write" : "read" }, public_result_summary: summary });
+          admission: { decision: "accepted", action_risk: (["profile.create", "profile.metadata.update", "provider.preference.set", "provider.preference.clear", "account.bind", "environment.update"].includes(input.operation) || isInput(input.operation) || isPageMutation(input.operation) || managedFileOperations.includes(input.operation as typeof managedFileOperations[number])) ? "write" : "read" }, public_result_summary: summary });
         await store.updateRunRecord(runId, { status: "running" });
         try {
           const result = await execute(credentialHash, input, runId);
@@ -960,6 +984,26 @@ export function createManagedBrowserService(options: {
       const principal = await options.accessStore.authenticateCredential(credentialHash);
       const run = await store.getRunRecord(runId);
       if (!run || run.public_result_summary?.principal_id !== principal.principal_id) return fail("managed_browser_operation_not_found");
+      if (["running", "admitted", "unknown_outcome"].includes(run.status) && run.public_result_summary?.operation === "profile.metadata.update" && !run.public_result_summary?.reconciliation) {
+        await mkdir(directory, { recursive: true, mode: 0o700 });
+        const profileRef = typeof run.public_result_summary?.profile_ref === "string" ? run.public_result_summary.profile_ref : runId;
+        return withFileOwnershipLock(join(directory, `${digest(text(profileRef))}.lock`), 5000, async () => {
+          const current = (await store.getRunRecord(runId))!;
+          if (current.status === "succeeded" || current.public_result_summary?.reconciliation) return response(current);
+          if (["running", "admitted"].includes(current.status)) await completeRunWithFailure(store, runId, {
+            status: "unknown_outcome", failure: { category: "write_outcome", code: "managed_browser_outcome_unknown", phase: "query", recovery_hint: "query_operation_without_replay" }
+          });
+          try {
+            const receipt = await harbor(`/runtime/identity-environment-mutations/${encodeURIComponent(runId)}`);
+            if (["completed", "rejected", "repair_required"].includes(String(receipt.status))) {
+              const result: ObjectValue = { receipt };
+              if (receipt.status === "completed" && receipt.record && typeof receipt.record === "object") result.profile = publicProfile(receipt.record);
+              await store.updateRunRecord(runId, { public_result_summary: { ...current.public_result_summary, reconciliation: "completed", result } });
+            }
+          } catch { /* A missing receipt never proves the metadata write did not occur. */ }
+          return response((await store.getRunRecord(runId))!);
+        });
+      }
       if (["provider.preference.set", "provider.preference.clear"].includes(String(run.public_result_summary?.operation)) &&
         ["running", "admitted", "unknown_outcome"].includes(run.status) && !run.public_result_summary?.reconciliation) {
         await mkdir(directory, { recursive: true, mode: 0o700 });

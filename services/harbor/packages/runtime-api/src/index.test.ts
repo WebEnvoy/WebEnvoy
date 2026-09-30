@@ -334,6 +334,17 @@ test("describes shared managed operations without treating Camoufox CDP as the c
     };
     assert.equal(knownOperation.provider.state, provider === "chrome_official" ? "unknown" : "supported");
     assert.deepEqual(knownOperation.provider.reason_codes, provider === "chrome_official" ? ["provider_not_qualified"] : []);
+    const metadata = runtime.describeManagedCapability({ operation: "profile.metadata.update", profile_ref: profileRef }) as {
+      provider: { state: string; provider_id: string | null; reason_codes: string[] };
+      availability: { state: string; reason_codes: string[] };
+      execution_checks: string[];
+    };
+    assert.equal(metadata.provider.state, "not_applicable");
+    assert.equal(metadata.provider.provider_id, null);
+    assert.deepEqual(metadata.provider.reason_codes, []);
+    assert.equal(metadata.availability.state, "no_known_blocker");
+    assert.deepEqual(metadata.availability.reason_codes, []);
+    assert.deepEqual(metadata.execution_checks, ["reauthorize"]);
   }
 });
 

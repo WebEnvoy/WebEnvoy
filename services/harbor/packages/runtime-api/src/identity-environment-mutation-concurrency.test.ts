@@ -132,6 +132,47 @@ test("fails closed for active sessions and external profile locks", async () => 
   });
 });
 
+test("updates Profile metadata through Harbor Runtime while its Provider session is active", async () => {
+  await withProfileRoot("active-profile-metadata", async () => {
+    const runtime = new HarborRuntime(createFixtureLauncher("ready"));
+    runtime.createLocalIdentityEnvironment({
+      ...identityInput("identity-active-metadata", "profile-active-metadata"),
+      profile_storage_ref: "profile-storage-active-metadata",
+      login_state: "logged_in",
+      storage_state: "present"
+    });
+
+    const session = await runtime.openManagedIdentityEnvironmentSession({
+      identity_environment_ref: "identity-active-metadata",
+      url: "https://www.xiaohongshu.com/explore",
+      control_owner: "agent"
+    });
+    assert.equal("status" in session, false);
+    if ("status" in session) throw new Error("fixture Provider session should be active");
+    assert.equal(runtime.getSession(session.runtime_session_ref)?.lifecycle_state, "active");
+
+    const updated = runtime.mutateLocalIdentityEnvironment({
+      operation: "profile.metadata.update",
+      idempotency_key: "active-profile-metadata-update",
+      identity_environment_ref: "identity-active-metadata",
+      name: "Research workspace",
+      tags: ["research", "active"]
+    });
+    assert.equal(updated.status, "completed", JSON.stringify(updated));
+    assert.equal(updated.record?.name, "Research workspace");
+    assert.deepEqual(updated.record?.tags, ["research", "active"]);
+    assert.equal(runtime.getSession(session.runtime_session_ref)?.lifecycle_state, "active");
+
+    const blockedLifecycleChange = runtime.mutateLocalIdentityEnvironment({
+      operation: "remove",
+      idempotency_key: "active-profile-remove-still-blocked",
+      identity_environment_ref: "identity-active-metadata"
+    });
+    assert.equal(blockedLifecycleChange.failure?.code, "active_session");
+    await runtime.stopSession(session.runtime_session_ref, { control_owner: "agent" });
+  });
+});
+
 test("reserves opening sessions before launcher readiness and forwards persisted configuration", async () => {
   await withProfileRoot("opening", async () => {
     let releaseLaunch!: () => void;

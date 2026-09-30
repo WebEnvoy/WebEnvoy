@@ -8,7 +8,7 @@ export const managedPageOperations = ["page.list", "page.open", "page.activate",
 export const managedSkillOperations = ["skill.list", "skill.inspect", "skill.install", "skill.enable", "skill.read", "skill.update", "skill.rollback", "skill.disable"] as const;
 export const managedTaskOperations = ["task.submit", "task.query", "task.stop"] as const;
 export const managedFileOperations = ["file.upload", "file.download"] as const;
-export const managedOperations = ["profile.list", "profile.read", "profile.create", "provider.preference.read", "provider.preference.set", "provider.preference.clear", "instance.start", "instance.stop", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "instance.navigate", "instance.read", "instance.handoff", "account.bind", "recovery.inspect", "recovery.request", "recovery.status", ...managedPageOperations, ...managedInteractionOperations, ...managedFileOperations, ...managedSkillOperations, ...managedTaskOperations] as const;
+export const managedOperations = ["profile.list", "profile.read", "profile.create", "profile.metadata.update", "provider.preference.read", "provider.preference.set", "provider.preference.clear", "instance.start", "instance.stop", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "instance.navigate", "instance.read", "instance.handoff", "account.bind", "recovery.inspect", "recovery.request", "recovery.status", ...managedPageOperations, ...managedInteractionOperations, ...managedFileOperations, ...managedSkillOperations, ...managedTaskOperations] as const;
 export type ManagedOperation = typeof managedOperations[number];
 export type ManagedSkillOperation = typeof managedSkillOperations[number];
 export type ManagedTaskOperation = typeof managedTaskOperations[number];
@@ -553,6 +553,7 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       // historical Grant. Only browser execution (and recovery mutations)
       // requires the Grant/Profile semantics pair.
       if (!profileScopeIndependentReads.includes(op) && scopeSemantics(profile.scope_semantics) !== grantScope) return fail("managed_access_scope_semantics_mismatch");
+      if (op === "profile.metadata.update" && (targetOrigin !== undefined || task.origins.length !== 0)) return fail("managed_access_denied");
       const authorized_origins = [...new Set(grant.allowed_origins.filter(item => profile.allowed_origins.includes(item) && task.origins.includes(item)))];
       if (targetOrigin !== undefined && !authorized_origins.includes(targetOrigin)) return fail("managed_access_denied");
       if (["instance.start", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "instance.navigate", "instance.read", "account.bind", "page.open", "page.navigate", ...managedInteractionOperations, ...managedFileOperations, ...managedTaskOperations].includes(op) && targetOrigin === undefined) return fail("managed_access_origin_required");

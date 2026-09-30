@@ -13,6 +13,8 @@ const fixtureFile = "attachment:runtime/11111111-1111-4111-8111-111111111111";
 
 function fixtureField(field: string, operation: string): unknown {
   if (field === "profile_ref") return fixtureProfile;
+  if (field === "name") return "Research";
+  if (field === "tags") return ["github", "team"];
   if (field === "origin") return fixtureOrigin;
   if (field === "template_ref") return "template:fixture";
   if (field === "url") return "https://example.com/next";
@@ -73,7 +75,7 @@ const observation = {
   runtime_session_ref: "session:fixture"
 };
 
-assert.equal(managedCapabilityDefinitions.operations.length, 32);
+assert.equal(managedCapabilityDefinitions.operations.length, 33);
 assert.deepEqual(managedCapabilityInputFields("instance.observe"), [
   "idempotency_key", "connection_id", "grant_id", "operation", "task_scope",
   "profile_ref", "origin", "runtime_session_ref", "page_id", "page_ref", "document_generation"
@@ -101,6 +103,13 @@ const download = {
 assert.doesNotThrow(() => parseManagedBrowserRequest(download));
 assert.throws(() => parseManagedBrowserRequest({ ...download, file_ref: "attachment:runtime/11111111-1111-4111-8111-111111111111" }), /managed_browser_invalid_input/);
 assert.throws(() => parseManagedBrowserRequest({ ...download, task_scope: { ...download.task_scope, file_refs: ["attachment:runtime/11111111-1111-4111-8111-111111111111"] } }), /managed_browser_invalid_input/);
+
+const metadata = parserFixture(managedCapabilityDefinition("profile.metadata.update")!);
+assert.deepEqual(parseManagedBrowserRequest({ ...metadata, name: "  Research  ", tags: [" team ", "github", "team"] }).tags, [" team ", "github", "team"]);
+assert.equal(parseManagedBrowserRequest({ ...metadata, name: "  Research  " }).name, "  Research  ");
+assert.throws(() => parseManagedBrowserRequest({ ...metadata, name: "   " }), /managed_browser_invalid_input/);
+assert.throws(() => parseManagedBrowserRequest({ ...metadata, tags: Array.from({ length: 17 }, () => "tag") }), /managed_browser_invalid_input/);
+assert.throws(() => parseManagedBrowserRequest({ ...metadata, name: undefined, tags: undefined }), /managed_browser_invalid_input/);
 
 const snapshot = parserFixture(managedCapabilityDefinition("instance.snapshot")!);
 assert.doesNotThrow(() => parseManagedBrowserRequest({ ...snapshot, limit: 128 }));

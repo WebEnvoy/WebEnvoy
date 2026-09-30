@@ -608,6 +608,8 @@ Plugin 应从 Runtime capability catalog 和当前授权上下文生成有界工
 
 但正式调用时 Core／Harbor必须再次检查，不能信任 Plugin 已过滤。
 
+Profile 展示名与标签由独立的 Profile 管理 operation 维护，见 [Plugin Runtime Exposure V1 §#599](plugin-runtime-exposure-v1.md#599-profile-display-metadata-management) 与 [Grant Wire Contract V1](grant-wire-contract-v1.md#profile-metadata-management-v16)。这项元数据管理不属于十二类浏览器 capability，不增加 Provider 依赖；Core 按 operation 和 Profile 授权，Harbor 是规范化与持久化 owner。
+
 Plugin 不得：
 
 - 自己保存更宽权限；
