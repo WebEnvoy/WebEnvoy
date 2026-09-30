@@ -1571,7 +1571,7 @@ export function createManagedBrowserService(options: {
             await options.accessStore.checkAccess(credentialHash, accessRequest(input));
             await store.updateRunRecord(runId, { evidence_refs: [result.local_revision_ref] });
             await completeRunWithResult(store, runId, { result_ref: `managed-result:${runId}`, result_kind: "account_system_import", data: result,
-              evidence_refs: [result.local_revision_ref], persisted_public_summary: { ...summary, result } });
+              evidence_refs: [result.local_revision_ref], persisted_public_summary: { ...summary, dispatch_state: "dispatched", result } });
           } catch (error) {
             const known = dispatchState === "not_dispatched";
             await completeRunWithFailure(store, runId, { status: known ? "failed" : "unknown_outcome",
@@ -1602,7 +1602,7 @@ export function createManagedBrowserService(options: {
         await store.updateRunRecord(runId, { status: "running" });
         try {
           const result = await execute(credentialHash, input, runId);
-          await completeRunWithResult(store, runId, { result_ref: `managed-result:${runId}`, result_kind: "managed_browser_operation", data: result, persisted_public_summary: { ...summary, ...(isInteraction(input.operation) || isPageMutation(input.operation) || managedFileOperations.includes(input.operation as typeof managedFileOperations[number]) ? { dispatch_state: result.dispatch_state } : {}), result } });
+          await completeRunWithResult(store, runId, { result_ref: `managed-result:${runId}`, result_kind: "managed_browser_operation", data: result, persisted_public_summary: { ...summary, ...(input.operation === "account.bind" ? { dispatch_state: "dispatched" } : {}), ...(isInteraction(input.operation) || isPageMutation(input.operation) || managedFileOperations.includes(input.operation as typeof managedFileOperations[number]) ? { dispatch_state: result.dispatch_state } : {}), result } });
         } catch (error) {
           const current = (await store.getRunRecord(runId))!;
           const receipt = error instanceof InteractionFailure || error instanceof PageFailure || error instanceof FileFailure || error instanceof ScopeBoundaryFailure ? error.receipt : undefined;

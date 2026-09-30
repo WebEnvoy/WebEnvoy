@@ -273,16 +273,19 @@ async function assertManagedAccountSystemRoute(): Promise<void> {
     const importedAgain = await operation(importGrant.grant_id, "agent-import-template");
     assert.equal(importedAgain.status, 200, JSON.stringify(importedAgain.body));
     assert.equal(importedAgain.body.status, "succeeded");
+    assert.equal(importedAgain.body.dispatch_state, "dispatched");
     assert.equal(importedAgain.body.result.local_definition_ref, imported.local_definition_ref);
     assert.equal(importedAgain.body.result.local_revision_ref, imported.revision_ref);
     assert.equal(importedAgain.body.result.template_ref, templateRef);
     const retry = await operation(importGrant.grant_id, "agent-import-template");
     assert.deepEqual(retry.body, importedAgain.body, "same import key returns the one persisted result without another import");
+    assert.equal(retry.body.dispatch_state, "dispatched");
     const query = await fetch(`http://127.0.0.1:${port}/managed-browser/operations/${importedAgain.body.run_id}`, {
       headers: { authorization: `Bearer ${agentToken}` }
     });
     const queried = await query.json() as Record<string, any>;
     assert.equal(queried.status, "succeeded");
+    assert.equal(queried.dispatch_state, "dispatched");
     assert.equal(queried.result.local_revision_ref, imported.revision_ref);
     const originalResult = structuredClone(queried.result);
     const ownerDraft = await definitions.createDraft({ local_definition_ref: String(imported.local_definition_ref), base_revision_ref: String(imported.revision_ref) }) as Record<string, any>;
@@ -299,9 +302,11 @@ async function assertManagedAccountSystemRoute(): Promise<void> {
       headers: { authorization: `Bearer ${agentToken}` }
     });
     const originalRun = await originalRunQuery.json() as Record<string, any>;
+    assert.equal(originalRun.dispatch_state, "dispatched");
     assert.equal(originalRun.result.local_revision_ref, imported.revision_ref, "query returns the immutable import result even after the local definition advances");
     assert.deepEqual(originalRun.result, originalResult);
     const retryAfterOwnerEdit = await operation(importGrant.grant_id, "agent-import-template");
+    assert.equal(retryAfterOwnerEdit.body.dispatch_state, "dispatched");
     assert.deepEqual(retryAfterOwnerEdit.body.result, originalResult, "same-key retry returns the original imported revision after owner edits");
     const changedRequest = await operation(importGrant.grant_id, "agent-import-template", "lode://account-system/github@1.0.1");
     assert.equal(changedRequest.status, 409);
@@ -327,8 +332,10 @@ async function assertManagedAccountSystemRoute(): Promise<void> {
       idempotency_key: "import-then-revoke", operation: "account_system.import_template",
       task_scope: { operations: ["account_system.import_template"], template_refs: [templateRef] }, template_ref: templateRef });
     assert.equal(lateResult.status, "unknown_outcome", "revocation after the importer returned cannot be recorded as a definite no-write failure");
+    assert.equal(lateResult.dispatch_state, "dispatched");
     const lateQuery = await lateBrowser.query(credentialHash, lateResult.run_id);
     assert.equal(lateQuery.status, "unknown_outcome", "query preserves the original uncertain import result and does not replay");
+    assert.equal(lateQuery.dispatch_state, "dispatched");
     const denied = await operation(unscopedReadGrant.grant_id, "unscoped-template-import");
     assert.equal(denied.status, 403);
     assert.equal(denied.body.error.code, "managed_access_denied");

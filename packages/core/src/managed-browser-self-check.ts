@@ -1179,7 +1179,11 @@ try {
   assert.equal((observed.result as { observation: { page: { current_url: string } } }).observation.page.current_url, "https://example.com/one");
   const accountSystemRef = "account-system:github";
   const accountRef = `account:sha256:${"a".repeat(64)}`;
-  const accountBindingScopes = [{ profile_ref: "profile:1", account_system_ref: accountSystemRef, account_ref: accountRef }];
+  const accountRef2 = `account:sha256:${"b".repeat(64)}`;
+  const accountBindingScopes = [
+    { profile_ref: "profile:1", account_system_ref: accountSystemRef, account_ref: accountRef },
+    { profile_ref: "profile:1", account_system_ref: accountSystemRef, account_ref: accountRef2 }
+  ];
   await accessStore.setProfilePolicy({ idempotency_key: "account-bind-policy", profile_ref: "profile:1", allowed_operations: ["account.bind"], allowed_origins: ["https://example.com"] });
   const accountBindGrant = await accessStore.createGrant({ idempotency_key: "account-bind-grant", principal_id: principal.principal_id,
     profile_refs: ["profile:1"], allowed_operations: ["account.bind"], allowed_origins: ["https://example.com"],
@@ -1189,7 +1193,7 @@ try {
     operation: "account.bind", profile_ref: "profile:1", origin: "https://example.com", runtime_session_ref: "session:one",
     page_id: "page-id:one", page_ref: "page:one", document_generation: 1, observation_ref: "observation:trusted",
     account_system_ref: accountSystemRef, account_ref: accountRef,
-    task_scope: { operations: ["account.bind"], profile_refs: ["profile:1"], origins: ["https://example.com"], account_binding_scopes: accountBindingScopes } };
+    task_scope: { operations: ["account.bind"], profile_refs: ["profile:1"], origins: ["https://example.com"], account_binding_scopes: [accountBindingScopes[0]!] } };
   malformedAccountBindingResponse = true;
   const lostBindingResponse = await service.submit(credentialHash, accountBindRequest);
   malformedAccountBindingResponse = false;
@@ -1204,6 +1208,17 @@ try {
   assert.equal(observations, observedBeforeBindingQuery, "binding query never creates a fresh observation");
   assert.deepEqual(await service.submit(credentialHash, accountBindRequest), reconciledBinding, "the same key retains its recovered original result");
   await assert.rejects(service.submit(credentialHash, { ...accountBindRequest, account_ref: `account:sha256:${"b".repeat(64)}` }), /idempotency_conflict/);
+  const successfulBindingRequest = { ...accountBindRequest, idempotency_key: "account-bind-success", account_ref: accountRef2,
+    task_scope: { ...accountBindRequest.task_scope, account_binding_scopes: [accountBindingScopes[1]!] } };
+  const successfulBinding = await service.submit(credentialHash, successfulBindingRequest);
+  assert.equal(successfulBinding.status, "succeeded", JSON.stringify(successfulBinding));
+  assert.equal(successfulBinding.dispatch_state, "dispatched");
+  assert.equal((successfulBinding.result as { observation: { account: { account_ref: string } } }).observation.account.account_ref, accountRef2);
+  const observationsBeforeSuccessfulQuery = observations;
+  assert.deepEqual(await service.query(credentialHash, successfulBinding.run_id), successfulBinding);
+  assert.equal(observations, observationsBeforeSuccessfulQuery, "successful binding query must not create another observation");
+  assert.deepEqual(await service.submit(credentialHash, successfulBindingRequest), successfulBinding, "same-key success returns its persisted dispatch state and result");
+  assert.equal(accountBindingPosts, 2, "successful query and same-key retry never replay Harbor's mutation");
   for (const denied of [{ ...navigation, profile_ref: "profile:2" }, { ...navigation, origin: "https://denied.example", url: "https://denied.example/" }, { ...navigation, task_scope: { ...navigation.task_scope, operations: ["instance.read"] } }]) {
     await assert.rejects(service.submit(credentialHash, { ...denied, idempotency_key: "denied" }), /managed_access_denied/);
   }
