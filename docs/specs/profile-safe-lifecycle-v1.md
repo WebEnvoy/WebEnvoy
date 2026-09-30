@@ -8,7 +8,7 @@
 
 Agent 只经 Core managed-browser operation 调用 `webenvoy_operation`，用 `webenvoy_query` 查询原 Run。Core 是唯一 Grant、task scope、ExecutionPolicy、Run、quota 和公共结果 owner；Harbor 是唯一 Profile ref、local material、lifecycle、mutation receipt、repair 和 Provider start owner。CLI、API 与已安装 Plugin 复用此路径，不直接调用 Provider 或另建 lifecycle 状态。
 
-新增 Agent operation 为 `profile.copy_environment`、`profile.archive` 与 `profile.delete`。输入字段、operation exposure 和未知字段拒绝使用随正式 Core 包安装的 `managed-capability-definitions.json`；Harbor 内部 mutation request 见 [`profile-lifecycle-mutation-request.schema.json`](../../packages/schemas/schemas/profile-lifecycle-mutation-request.schema.json)。Harbor mutation result 保持 `webenvoy.harbor-identity-environment-mutation/v1`，原 key receipt 可经 Core Run 查询。
+新增 Agent operation 为 `profile.copy_environment`、`profile.archive` 与 `profile.delete`。输入字段、operation exposure 和未知字段拒绝使用随正式 Core 包安装的 `managed-capability-definitions.json`；Harbor 内部 mutation request 见 [`profile-lifecycle-mutation-request.schema.json`](../../packages/schemas/schemas/profile-lifecycle-mutation-request.schema.json)。Harbor mutation result 保持 `harbor-identity-environment-mutation/v1`，原 key receipt 可经 Core Run 查询。
 
 ## 安全环境复制
 

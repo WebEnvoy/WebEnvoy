@@ -71,6 +71,40 @@ class ScopeBoundaryFailure extends ManagedAccessError {
   constructor(readonly receipt: ObjectValue) { super("managed_browser_scope_boundary"); }
 }
 class CreationReceiptFailure extends ManagedAccessError {}
+const harborIdentityEnvironmentMutationSchema = "harbor-identity-environment-mutation/v1";
+const profileMutationOperations = new Set(["create", "copy_environment", "archive", "delete", "profile.metadata.update"]);
+function profileMutationReceipt(value: unknown, operation: string): ObjectValue {
+  const invalid = () => { throw new CreationReceiptFailure("managed_browser_profile_mutation_unknown"); };
+  if (!value || typeof value !== "object" || Array.isArray(value)) return invalid();
+  const receipt = value as ObjectValue;
+  if (Object.keys(receipt).some(key => !["schema_version", "operation", "status", "identity_environment_ref", "source_identity_environment_ref", "record", "provider_selection", "effects", "failure", "public_boundary"].includes(key)) ||
+      receipt.schema_version !== harborIdentityEnvironmentMutationSchema || receipt.operation !== operation ||
+      !["completed", "rejected", "repair_required"].includes(String(receipt.status)) ||
+      !(receipt.identity_environment_ref === null || typeof receipt.identity_environment_ref === "string" && receipt.identity_environment_ref.length > 0) ||
+      !(receipt.source_identity_environment_ref === null || typeof receipt.source_identity_environment_ref === "string" && receipt.source_identity_environment_ref.length > 0) ||
+      !(receipt.record === null || !!receipt.record && typeof receipt.record === "object" && !Array.isArray(receipt.record)) ||
+      !(receipt.provider_selection === null || !!receipt.provider_selection && typeof receipt.provider_selection === "object" && !Array.isArray(receipt.provider_selection)) ||
+      !receipt.effects || typeof receipt.effects !== "object" || Array.isArray(receipt.effects) ||
+      !receipt.public_boundary || typeof receipt.public_boundary !== "object" || Array.isArray(receipt.public_boundary)) return invalid();
+  const effects = receipt.effects as ObjectValue;
+  const boundary = receipt.public_boundary as ObjectValue;
+  if (!(["registered", "updated", "removed", "unchanged"].includes(String(effects.index)) &&
+      ["created", "copied", "excluded", "preserved", "deleted", "unchanged", "residual"].includes(String(effects.local_data)) &&
+      ["preserved_unverified", "excluded", "unchanged"].includes(String(effects.login_state))) ||
+      boundary.output !== "status_and_redacted_refs_only" || boundary.raw_material !== "not_exposed" ||
+      JSON.stringify(boundary.not_exposed) !== JSON.stringify(["cookie", "token", "password", "profile_storage", "local_path"])) return invalid();
+  let failure: ObjectValue | null = null;
+  if (receipt.failure !== null) {
+    if (!receipt.failure || typeof receipt.failure !== "object" || Array.isArray(receipt.failure)) return invalid();
+    failure = receipt.failure as ObjectValue;
+    if (typeof failure.code !== "string" || !failure.code.length || typeof failure.retryable !== "boolean" ||
+        !Array.isArray(failure.recovery_actions) || failure.recovery_actions.some(action => typeof action !== "string")) return invalid();
+  }
+  if (receipt.status === "completed" && failure !== null || receipt.status !== "completed" && failure === null) return invalid();
+  if (receipt.status === "rejected" && (receipt.record !== null || receipt.provider_selection !== null || receipt.source_identity_environment_ref !== null ||
+      effects.index !== "unchanged" || effects.local_data !== "unchanged" || effects.login_state !== "unchanged")) return invalid();
+  return receipt;
+}
 function isDeterministicWaitTimeout(receipt: ObjectValue | undefined): boolean {
   return receipt?.status === "unavailable" && receipt.dispatch_state === "dispatched" && receipt.failure_class === "wait_condition_timeout";
 }
@@ -540,13 +574,34 @@ export function createManagedBrowserService(options: {
   async function harbor(path: string, body?: ObjectValue, receiptKind?: "interaction" | "page" | "file", deadlineAt?: number): Promise<ObjectValue> {
     const remainingMs = deadlineAt === undefined ? 70_000 : Math.min(70_000, deadlineAt - Date.now());
     if (remainingMs <= 0) return fail("managed_task_timeout");
-    const result = await fetch(new URL(path, options.harborBaseUrl), { method: body === undefined ? "GET" : "POST",
-      headers: { authorization: `Bearer ${options.supervisorToken}`, "content-type": "application/json" },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(remainingMs) });
-    const value = object(await result.json());
+    const mutationOperation = path === "/runtime/identity-environment-mutations" && typeof body?.operation === "string" && profileMutationOperations.has(body.operation)
+      ? body.operation : undefined;
+    const url = new URL(path, options.harborBaseUrl);
+    const requestBody = body === undefined ? undefined : JSON.stringify(body);
+    let result: Response;
+    try {
+      result = await fetch(url, { method: body === undefined ? "GET" : "POST",
+        headers: { authorization: `Bearer ${options.supervisorToken}`, "content-type": "application/json" },
+        ...(requestBody === undefined ? {} : { body: requestBody }), signal: AbortSignal.timeout(remainingMs) });
+    } catch (error) {
+      if (mutationOperation) throw new CreationReceiptFailure("managed_browser_profile_mutation_unknown");
+      throw error;
+    }
+    let payload: unknown;
+    try { payload = await result.json(); }
+    catch (error) {
+      if (mutationOperation) throw new CreationReceiptFailure("managed_browser_profile_mutation_unknown");
+      throw error;
+    }
+    const value = mutationOperation ? profileMutationReceipt(payload, mutationOperation) : object(payload);
     if (receiptKind !== undefined) {
       if (["completed", "unavailable", "unknown_outcome"].includes(String(value.status)) && ["not_dispatched", "dispatched"].includes(String(value.dispatch_state))) return value;
       throw new Error(`managed_${receiptKind}_receipt_unavailable`);
+    }
+    if (mutationOperation) {
+      if (value.status === "rejected" || value.status === "repair_required") return value;
+      if (!result.ok) throw new CreationReceiptFailure("managed_browser_profile_mutation_unknown");
+      return value;
     }
     // Harbor uses 409 for a delete receipt that still needs local repair. Keep
     // the durable receipt available to the caller so it stays unknown until a
@@ -721,10 +776,12 @@ export function createManagedBrowserService(options: {
         if (template.provider_id !== null && input.provider_id !== undefined) return fail("managed_browser_template_provider_conflict");
         const created = await runtimeHarbor("/runtime/identity-environment-mutations", { operation: "create", idempotency_key: runId,
           identity_environment: { site: template.site, ...((template.provider_id ?? input.provider_id) === undefined ? {} : { requested_provider_id: template.provider_id ?? input.provider_id }), language: template.language, timezone: template.timezone } });
-        if (created.status !== "completed") return fail("managed_browser_creation_unknown");
+        if (created.status === "rejected") return fail(text(object(created.failure).code));
+        if (created.status !== "completed") throw new CreationReceiptFailure("managed_browser_profile_mutation_unknown");
         try {
           const profile = publicProfile(created.record);
           const providerSelection = publicProviderSelection(created.provider_selection);
+          if (created.identity_environment_ref !== profile.identity_environment_ref || created.source_identity_environment_ref !== null) throw new Error("profile_create_receipt_mismatch");
           await options.accessStore.recordCreatedProfile({ idempotency_key: runId, grant_id: input.grant_id, profile_ref: profile.profile_ref });
           return { profile, provider_selection: providerSelection, authorization_decision_ref: access.decision_ref };
         } catch (error) {
@@ -791,6 +848,9 @@ export function createManagedBrowserService(options: {
     const identity = encodeURIComponent(identityEnvironmentRef);
     if (input.operation === "profile.metadata.update") {
       await check();
+      const current = (await store.getRunRecord(runId))!;
+      await store.updateRunRecord(runId, { public_result_summary: { ...current.public_result_summary,
+        identity_environment_ref: identityEnvironmentRef } });
       const mutation = await runtimeHarbor("/runtime/identity-environment-mutations", {
         operation: "profile.metadata.update",
         idempotency_key: runId,
@@ -798,11 +858,21 @@ export function createManagedBrowserService(options: {
         ...(input.name === undefined ? {} : { name: input.name }),
         ...(input.tags === undefined ? {} : { tags: input.tags })
       });
-      if (mutation.status !== "completed") {
+      if (mutation.operation !== "profile.metadata.update" || mutation.identity_environment_ref !== identityEnvironmentRef || mutation.source_identity_environment_ref !== null) {
+        throw new CreationReceiptFailure("managed_browser_profile_mutation_unknown");
+      }
+      if (mutation.status === "rejected") {
         const failure = mutation.failure && typeof mutation.failure === "object" ? object(mutation.failure) : {};
         return fail(typeof failure.code === "string" ? failure.code : "managed_browser_runtime_refused");
       }
-      return { profile: publicProfile(mutation.record), authorization_decision_ref: access.decision_ref };
+      if (mutation.status !== "completed") throw new CreationReceiptFailure("managed_browser_profile_mutation_unknown");
+      try {
+        const updated = publicProfile(mutation.record);
+        if (updated.profile_ref !== input.profile_ref || updated.identity_environment_ref !== identityEnvironmentRef) throw new Error("profile_metadata_receipt_mismatch");
+        return { profile: updated, authorization_decision_ref: access.decision_ref };
+      } catch {
+        throw new CreationReceiptFailure("managed_browser_profile_mutation_unknown");
+      }
     }
     if (input.operation === "profile.archive" || input.operation === "profile.delete") {
       const current = (await store.getRunRecord(runId))!;
@@ -1443,11 +1513,26 @@ export function createManagedBrowserService(options: {
             status: "unknown_outcome", failure: { category: "write_outcome", code: "managed_browser_outcome_unknown", phase: "query", recovery_hint: "query_operation_without_replay" }
           });
           try {
-            const receipt = await harbor(`/runtime/identity-environment-mutations/${encodeURIComponent(runId)}`);
-            if (["completed", "rejected", "repair_required"].includes(String(receipt.status))) {
+            const expectedIdentityRef = text(current.public_result_summary?.identity_environment_ref);
+            const expectedProfileRef = text(current.public_result_summary?.profile_ref);
+            const receipt = profileMutationReceipt(await harbor(`/runtime/identity-environment-mutations/${encodeURIComponent(runId)}`), "profile.metadata.update");
+            if (receipt.identity_environment_ref !== expectedIdentityRef || receipt.source_identity_environment_ref !== null) {
+              throw new CreationReceiptFailure("managed_browser_profile_mutation_unknown");
+            }
+            if (receipt.status === "completed") {
+              let profile: ObjectValue;
+              try { profile = publicProfile(receipt.record); }
+              catch { throw new CreationReceiptFailure("managed_browser_profile_mutation_unknown"); }
+              if (profile.profile_ref !== expectedProfileRef || profile.identity_environment_ref !== expectedIdentityRef) {
+                throw new CreationReceiptFailure("managed_browser_profile_mutation_unknown");
+              }
               const result: ObjectValue = { receipt };
-              if (receipt.status === "completed" && receipt.record && typeof receipt.record === "object") result.profile = publicProfile(receipt.record);
+              result.profile = profile;
               await store.updateRunRecord(runId, { public_result_summary: { ...current.public_result_summary, reconciliation: "completed", result } });
+            } else if (receipt.status === "rejected") {
+              await store.updateRunRecord(runId, { public_result_summary: { ...current.public_result_summary, reconciliation: "completed", result: { receipt } } });
+            } else if (receipt.status === "repair_required") {
+              await store.updateRunRecord(runId, { public_result_summary: { ...current.public_result_summary, result: { receipt } } });
             }
           } catch { /* A missing receipt never proves the metadata write did not occur. */ }
           return response((await store.getRunRecord(runId))!);
@@ -1563,17 +1648,17 @@ export function createManagedBrowserService(options: {
           });
           // Only read Harbor's receipt for the original Run ID; never replay a lifecycle mutation.
           try {
-            const receipt = await harbor(`/runtime/identity-environment-mutations/${encodeURIComponent(runId)}`);
             const expectedOperation = profileOperation === "profile.create" ? "create"
               : profileOperation === "profile.copy_environment" ? "copy_environment"
                 : profileOperation === "profile.archive" ? "archive" : "delete";
-            if (receipt.operation !== expectedOperation) throw new Error("profile_mutation_receipt_mismatch");
+            const receipt = profileMutationReceipt(await harbor(`/runtime/identity-environment-mutations/${encodeURIComponent(runId)}`), expectedOperation);
             if (receipt.status === "completed") {
               if (creation) {
                 const profile = publicProfile(receipt.record);
                 let result: ObjectValue = { profile };
                 if (profileOperation === "profile.create") {
                   const providerSelection = publicProviderSelection(receipt.provider_selection);
+                  if (profile.identity_environment_ref !== receipt.identity_environment_ref || receipt.source_identity_environment_ref !== null) throw new Error("profile_create_receipt_mismatch");
                   result.provider_selection = providerSelection;
                   await options.accessStore.recordCreatedProfile({ idempotency_key: runId, grant_id: current.public_result_summary!.grant_id, profile_ref: profile.profile_ref });
                 } else {
@@ -1605,6 +1690,7 @@ export function createManagedBrowserService(options: {
               }
             } else if (receipt.status === "rejected") {
               const failure = object(receipt.failure);
+              if (!creation && receipt.identity_environment_ref !== current.public_result_summary?.identity_environment_ref) throw new Error("profile_mutation_receipt_mismatch");
               text(failure.code);
               await store.updateRunRecord(runId, { public_result_summary: { ...current.public_result_summary, reconciliation: "completed", result: { receipt } } });
             } else if (receipt.status === "repair_required") {
