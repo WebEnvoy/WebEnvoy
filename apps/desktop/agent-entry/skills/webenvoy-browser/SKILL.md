@@ -40,6 +40,14 @@ After a completed interaction, take a fresh snapshot before choosing another tar
 
 When a response is lost, reconnect and call `webenvoy_query` with the original idempotency_key (or known run_id). `not_dispatched` means the page action was refused before dispatch; `unknown_outcome` with `dispatched` may already have affected the page. Query appends the original Runtime receipt when available while retaining unknown history. Never change the key to replay an unknown click/input. A missing receipt is not proof of no effect.
 
+## Core-local BusinessTarget metadata
+
+Use `business_target.create`, `business_target.list`, `business_target.read`, `business_target.metadata.update` and `business_target.disable` only when the current Grant explicitly includes the operation and trusted owner issued its Account tuple scope. Profile visibility or a binding shown by `profile.read` does not add BusinessTarget authority. For a selected Profile, inspect `identity_ownership.history.bindings` and use only an exact Account tuple whose `ownership_status` is `unique`; Core still checks the Grant snapshot and current Harbor binding on each operation. A Profile-wide conflict may coexist with a unique binding for another Account tuple.
+
+`create` and `list` require `account_system_ref` and `account_ref`. `create` accepts a label and optional `declared_external_id`; its Core-generated `business_target_ref` identifies only local metadata, and `verification_state` remains `unverified`. Use `read`, `metadata.update` and `disable` with that opaque ref. Update can change only the label. Disable keeps the record and history. These operations do not create or modify resources on the website and do not verify that a declared external ID exists or belongs to the Account.
+
+On response loss or `unknown_outcome`, query the original Run/idempotency key. Do not retry with a new key. A rebind, conflict, unknown ownership, or non-runnable Profile requires trusted owner review and a newly issued matching Grant before continuing.
+
 Human takeover stops Agent input for that Instance. Wait for explicit owner `webenvoy instance handback` and then take a new snapshot of the same Instance before continuing; do not resume old input or reclaim human control. Another authorized Profile can continue independently. Revocation prevents later operations and survives reconnect; it does not undo earlier page effects.
 
 ## 固定站点任务

@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createFileManagedAccessStore, managedFileOperations, managedOperations, managedInteractionOperations, managedScopeConfirmationSchemaVersion } from "./managed-access.js";
+import { createFileManagedAccessStore, managedFileOperations, managedOperations, managedBusinessTargetOperations, managedInteractionOperations, managedScopeConfirmationSchemaVersion } from "./managed-access.js";
 import { createManagedBrowserService } from "./managed-browser.js";
 import { projectManagedProviderCatalogFacts } from "./managed-provider-facts.js";
 import { createFileRunRecordStore } from "./run-record-store.js";
@@ -93,7 +93,7 @@ const server = createServer((req, res) => { void (async () => {
   let value: unknown;
   if (req.url === "/runtime/managed-operation-catalog") value = {
     schema_version: "webenvoy.harbor-operation-catalog.v0", catalog_ref: "harbor://managed-operations", catalog_version: "1",
-    operations: [...managedOperations.filter(op => !(managedInteractionOperations as readonly string[]).includes(op) && !op.startsWith("provider.preference.")).map(operation_id => ({ operation_id, category: (managedFileOperations as readonly string[]).includes(operation_id) || operation_id === "environment.update" || operation_id === "recovery.request" || ["page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward"].includes(operation_id) ? "prepare" : ["profile.create", "profile.metadata.update", "account.bind"].includes(operation_id) ? "commit" : "read", target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: (managedFileOperations as readonly string[]).includes(operation_id) ? ["harbor://managed-profile", "harbor://controlled-page", "harbor://managed-file"] : ["harbor://managed-profile"] })),
+    operations: [...managedOperations.filter(op => !(managedInteractionOperations as readonly string[]).includes(op) && !(managedBusinessTargetOperations as readonly string[]).includes(op) && !op.startsWith("provider.preference.")).map(operation_id => ({ operation_id, category: (managedFileOperations as readonly string[]).includes(operation_id) || operation_id === "environment.update" || operation_id === "recovery.request" || ["page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward"].includes(operation_id) ? "prepare" : ["profile.create", "profile.metadata.update", "account.bind"].includes(operation_id) ? "commit" : "read", target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: (managedFileOperations as readonly string[]).includes(operation_id) ? ["harbor://managed-profile", "harbor://controlled-page", "harbor://managed-file"] : ["harbor://managed-profile"] })),
       ...["provider.preference.read", "provider.preference.set", "provider.preference.clear"].map(operation_id => ({ operation_id, category: operation_id === "provider.preference.read" ? "read" : "commit", target_scope: { target_types: ["provider_preference"] }, resource_requirement_refs: ["harbor://browser-provider-preference"] })),
       ...["controlled-page.observe", "controlled-page.interact"].map(operation_id => ({ operation_id, category: operation_id === "controlled-page.interact" ? "prepare" : "read", target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: ["harbor://managed-profile", "harbor://controlled-page"] }))]
   };
@@ -311,9 +311,10 @@ try {
   const principal = await accessStore.registerPrincipal({ idempotency_key: "register", display_name: "Fixture Agent", credential_hash: credentialHash });
   principalId = principal.principal_id;
   const connection = await accessStore.connect(credentialHash);
-  const grant = await accessStore.createGrant({ idempotency_key: "grant", principal_id: principal.principal_id, profile_refs: [], allowed_operations: [...managedOperations], allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 2,
+  const legacyOperations = managedOperations.filter(op => !(managedBusinessTargetOperations as readonly string[]).includes(op));
+  const grant = await accessStore.createGrant({ idempotency_key: "grant", principal_id: principal.principal_id, profile_refs: [], allowed_operations: legacyOperations, allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 2,
     creation_template: { template_ref: "template:example", provider_id: "camoufox", site: { site_id: "example", origin: "https://example.com", display_name: "Example" }, language: "en-US", timezone: "UTC", permission_ceiling: { allowed_operations: ["profile.list", "profile.read"], allowed_origins: ["https://example.com"] } } });
-  const request = { idempotency_key: "create-one", connection_id: connection.connection_id, grant_id: grant.grant_id, operation: "profile.create", template_ref: "template:example", task_scope: { operations: [...managedOperations], profile_refs: ["profile:1", "profile:2"], origins: ["https://example.com"] } };
+  const request = { idempotency_key: "create-one", connection_id: connection.connection_id, grant_id: grant.grant_id, operation: "profile.create", template_ref: "template:example", task_scope: { operations: legacyOperations, profile_refs: ["profile:1", "profile:2"], origins: ["https://example.com"] } };
   const first = await service.submit(credentialHash, request);
   assert.equal(first.ok, true, JSON.stringify(first));
   assert.deepEqual(await service.submit(credentialHash, request), first);
@@ -337,11 +338,14 @@ try {
   const readConflict = await service.submit(credentialHash, { ...request, idempotency_key: "read-conflict", operation: "profile.read", template_ref: undefined, profile_ref: "profile:1" });
   assert.equal(readConflict.ok, true, "identity conflict does not block public Profile reads");
   assert.equal((((readConflict.result as { profile: Record<string, unknown> }).profile.identity_ownership as Record<string, unknown>).ownership as Record<string, unknown>).status, "conflict");
+  assert.equal(((((readConflict.result as { profile: Record<string, unknown> }).profile.identity_ownership as Record<string, unknown>).history as Record<string, unknown>).bindings as Array<Record<string, unknown>>)[0]?.ownership_status, "unknown",
+    "legacy aggregate conflict remains readable but does not infer the individual binding status");
   const savedProjection = profiles[0]!.identity_ownership;
   const malformedOwnershipCases: Array<(projection: Record<string, unknown>) => void> = [
     projection => { (projection.current as Record<string, unknown>).account_ref = "account: bad"; },
     projection => { ((projection.history as Record<string, unknown>).bindings as Array<Record<string, unknown>>)[0]!.account_ref = "x".repeat(257); },
     projection => { ((projection.history as Record<string, unknown>).bindings as Array<Record<string, unknown>>)[0]!.account_ref = null; },
+    projection => { ((projection.history as Record<string, unknown>).bindings as Array<Record<string, unknown>>)[0]!.ownership_status = "ambiguous"; },
     projection => { (projection.history as Record<string, unknown>).declared = { status: "declared", account_system_ref: "account-system:example", account_ref: "account declared" }; },
     projection => { (projection.history as Record<string, unknown>).declared = { status: "declared", account_system_ref: null, account_ref: "account:legacy" }; },
     projection => { (projection.current as Record<string, unknown>).observed_at = null; }
@@ -392,6 +396,149 @@ try {
   assert.equal((reconciled.result as { profile: { profile_ref: string } }).profile.profile_ref, "profile:3");
   assert.equal(creates, 3, "receipt query must not replay creation");
   assert.equal((await accessStore.list()).grants.find(item => item.grant_id === recoveryGrant.grant_id)?.created_profile_refs.length, 1);
+
+  const accountSystemRef = "account-system:example";
+  const accountRefA = `account:sha256:${"a".repeat(64)}`;
+  const accountRefB = `account:sha256:${"b".repeat(64)}`;
+  const ownership = (accountRef: string, status: "unique" | "conflict" | "not_runnable" = "unique", additionalBindings: { account_system_ref?: string; account_ref: string; ownership_status: "unique" | "conflict" | "not_runnable" }[] = []) => ({
+    schema_version: "webenvoy.profile-identity-ownership/v1",
+    current: { status: "unknown", observed_at: null, account_system_ref: null, account_ref: null },
+    history: { bindings: [
+      { status: "bound", verification: "verified_at_binding", ownership_status: "unique", account_system_ref: accountSystemRef, account_ref: accountRef, bound_at: new Date().toISOString() },
+      ...additionalBindings.map(binding => ({ status: "bound", verification: "verified_at_binding", ...binding, account_system_ref: binding.account_system_ref ?? accountSystemRef, bound_at: new Date().toISOString() }))
+    ], declared: null },
+    ownership: { status }
+  });
+  const targetProfileRef = "profile:business-target";
+  const profileOne = { refs: { profile_ref: targetProfileRef }, identity_environment_ref: "identity:business-target", name: "Business target fixture", tags: [],
+    site: { origin: "https://example.com", display_name: "Example" }, status: { readiness: "ready" }, account_bindings: [],
+    environment_summary: { provider_id: "camoufox" }, identity_ownership: ownership(accountRefA, "conflict", [{ account_system_ref: "account-system:other", account_ref: accountRefB, ownership_status: "conflict" }]) };
+  profiles.push(profileOne);
+  async function issueBusinessTargetGrant(profileRef: string, suffix: string, selectedAccountRef = accountRefA) {
+    const expiresAt = new Date(Date.now() + 60_000).toISOString();
+    await accessStore.setProfilePolicy({ idempotency_key: `${suffix}-legacy-policy`, profile_ref: profileRef, allowed_operations: ["profile.read"], allowed_origins: [] });
+    const sourceGrant = await accessStore.createGrant({ idempotency_key: `${suffix}-source-grant`, principal_id: principal.principal_id,
+      profile_refs: [profileRef], allowed_operations: ["profile.read"], allowed_origins: [], expires_at: expiresAt, max_created_profiles: 0, creation_template: null });
+    await accessStore.confirmAgentOperationsV2({
+      idempotency_key: `${suffix}-confirm-v2`, source_grant_id: sourceGrant.grant_id, profile_ref: profileRef,
+      confirmation: { schema_version: managedScopeConfirmationSchemaVersion, confirmation_ref: `confirmation:${suffix}`, profile_ref: profileRef,
+        confirmed_at: new Date().toISOString(), confirmed_by: "owner", idempotency_key: `${suffix}-confirm-v2`, decision: "apply" },
+      new_grant: { principal_id: principal.principal_id, profile_refs: [profileRef], allowed_operations: ["profile.read"], allowed_origins: [],
+        expires_at: expiresAt, creation_template: null, max_created_profiles: 0 },
+      new_profile_policy: { profile_ref: profileRef, allowed_operations: ["profile.read"], allowed_origins: [] }
+    });
+    const state = await accessStore.list();
+    const currentPolicy = state.profile_policies.find(item => item.profile_ref === profileRef)!;
+    await accessStore.updateAgentOperationsV2ProfilePolicy({ idempotency_key: `${suffix}-enable-business-target-policy`, profile_ref: profileRef,
+      current_policy_digest: currentPolicy.policy_digest, allowed_operations: [...managedBusinessTargetOperations], allowed_origins: [], controlled_interaction_origins: [] });
+    const policyDigest = (await accessStore.list()).profile_policies.find(item => item.profile_ref === profileRef)!.policy_digest;
+    return accessStore.issueAgentOperationsV2Grant({
+      idempotency_key: `${suffix}-target-grant`, principal_id: principal.principal_id, profile_refs: [profileRef], policy_digest: policyDigest,
+      allowed_operations: [...managedBusinessTargetOperations], allowed_origins: [], expires_at: expiresAt,
+      account_scope_selections: [{ account_system_ref: accountSystemRef, account_ref: selectedAccountRef }]
+    }, service.resolveBusinessTargetAccountScopes);
+  }
+  // The unrelated profile:outside above deliberately has a malformed ownership projection.
+  // Selecting the valid Account A tuple must validate only its own raw Profile before projection.
+  assert.deepEqual(await service.resolveBusinessTargetAccountScopes(targetProfileRef, [{ account_system_ref: accountSystemRef, account_ref: accountRefA }]),
+    [{ profile_ref: targetProfileRef, account_system_ref: accountSystemRef, account_ref: accountRefA }]);
+  await assert.rejects(service.resolveBusinessTargetAccountScopes(targetProfileRef, [{ account_system_ref: "account-system:other", account_ref: accountRefB }]), /business_target_account_binding_conflict/);
+  const businessTargetGrant = await issueBusinessTargetGrant(targetProfileRef, "business-target-profile-one");
+  assert.deepEqual(businessTargetGrant.business_target_account_scopes, [{ profile_ref: targetProfileRef, account_system_ref: accountSystemRef, account_ref: accountRefA }]);
+  const targetScope = (operation: string, profileRef = targetProfileRef) => ({ operations: [operation], profile_refs: [profileRef], origins: [] });
+  const targetBase = { connection_id: connection.connection_id, grant_id: businessTargetGrant.grant_id, profile_ref: targetProfileRef };
+  const targetCreate = { idempotency_key: "business-target-create", ...targetBase, operation: "business_target.create", account_system_ref: accountSystemRef,
+    account_ref: accountRefA, label: "  Spring campaign  ", declared_external_id: "external-123", task_scope: targetScope("business_target.create") };
+  const createdTarget = await service.submit(credentialHash, targetCreate);
+  assert.equal(createdTarget.status, "succeeded", JSON.stringify(createdTarget));
+  const targetRecord = (createdTarget.result as { business_target: Record<string, unknown> }).business_target;
+  assert.equal(targetRecord.label, "Spring campaign");
+  assert.equal(targetRecord.declared_external_id, "external-123");
+  assert.equal(targetRecord.verification_state, "unverified");
+  assert.equal(targetRecord.created_by_profile_ref, targetProfileRef);
+  assert.match(String(targetRecord.business_target_ref), /^business-target:[0-9a-f-]{36}$/);
+  assert.deepEqual(await service.submit(credentialHash, targetCreate), createdTarget, "same-key target creation returns the original Core Run result");
+  await assert.rejects(service.submit(credentialHash, { ...targetCreate, label: "Changed" }), /idempotency_conflict/);
+  const targetList = await service.submit(credentialHash, { idempotency_key: "business-target-list", ...targetBase, operation: "business_target.list",
+    account_system_ref: accountSystemRef, account_ref: accountRefA, task_scope: targetScope("business_target.list") });
+  assert.equal((targetList.result as { business_targets: unknown[] }).business_targets.length, 1);
+  const targetRef = String(targetRecord.business_target_ref);
+  const targetRead = await service.submit(credentialHash, { idempotency_key: "business-target-read", ...targetBase, operation: "business_target.read",
+    business_target_ref: targetRef, task_scope: targetScope("business_target.read") });
+  assert.equal((targetRead.result as { business_target: { business_target_ref: string } }).business_target.business_target_ref, targetRef);
+  const businessTargetRestartedService = createManagedBrowserService({ accessStore, runRecordStore, authorizationDecisionStore, executionPolicyConfigStore,
+    harborBaseUrl: `http://127.0.0.1:${address.port}`, supervisorToken: "fixture-supervisor", recoveryService });
+  const restartedRead = await businessTargetRestartedService.submit(credentialHash, { idempotency_key: "business-target-read-after-restart", ...targetBase, operation: "business_target.read",
+    business_target_ref: targetRef, task_scope: targetScope("business_target.read") });
+  assert.equal((restartedRead.result as { business_target: { business_target_ref: string; label: string } }).business_target.label, "Spring campaign",
+    "a recreated Core service reads the same durable BusinessTarget record");
+  assert.deepEqual(await businessTargetRestartedService.query(credentialHash, targetRead.run_id), targetRead, "existing Run query returns the original BusinessTarget result after service recreation");
+  let interruptBusinessTargetCompletion = true;
+  const interruptedRunStore = Object.create(runRecordStore) as typeof runRecordStore;
+  const updateRunRecord = runRecordStore.updateRunRecord.bind(runRecordStore);
+  interruptedRunStore.updateRunRecord = async (runId, patch) => {
+    if (interruptBusinessTargetCompletion && patch.status === "succeeded") {
+      interruptBusinessTargetCompletion = false;
+      throw new Error("injected interruption after local BusinessTarget commit");
+    }
+    return updateRunRecord(runId, patch);
+  };
+  const interruptedService = createManagedBrowserService({ accessStore, runRecordStore: interruptedRunStore, authorizationDecisionStore, executionPolicyConfigStore,
+    harborBaseUrl: `http://127.0.0.1:${address.port}`, supervisorToken: "fixture-supervisor", recoveryService });
+  const interruptedCreate = await interruptedService.submit(credentialHash, { idempotency_key: "business-target-commit-result-lost", ...targetBase, operation: "business_target.create",
+    account_system_ref: accountSystemRef, account_ref: accountRefA, label: "Persisted after interruption", task_scope: targetScope("business_target.create") });
+  assert.equal(interruptedCreate.status, "unknown_outcome", "a lost Core result projection preserves the original unknown Run");
+  const reconciledBusinessTarget = await businessTargetRestartedService.query(credentialHash, interruptedCreate.run_id);
+  assert.equal(reconciledBusinessTarget.status, "unknown_outcome", "receipt reconciliation does not relabel the original unknown Run as success");
+  assert.equal(reconciledBusinessTarget.reconciliation, "completed");
+  assert.equal((reconciledBusinessTarget.result as { business_target: { label: string } }).business_target.label, "Persisted after interruption",
+    "query reads the atomic local receipt without replaying the creation");
+  const targetUpdate = await service.submit(credentialHash, { idempotency_key: "business-target-update", ...targetBase, operation: "business_target.metadata.update",
+    business_target_ref: targetRef, label: "Updated campaign", task_scope: targetScope("business_target.metadata.update") });
+  assert.equal((targetUpdate.result as { business_target: { label: string; declared_external_id: string } }).business_target.label, "Updated campaign");
+  assert.equal((targetUpdate.result as { business_target: { declared_external_id: string } }).business_target.declared_external_id, "external-123");
+  await assert.rejects(service.submit(credentialHash, { idempotency_key: "business-target-other-account", ...targetBase, operation: "business_target.list",
+    account_system_ref: accountSystemRef, account_ref: accountRefB, task_scope: targetScope("business_target.list") }), /managed_access_denied/);
+  const otherAccountProfile = { refs: { profile_ref: "profile:business-target-other-account" }, identity_environment_ref: "identity:business-target-other-account", name: "Other Account", tags: [],
+    site: { origin: "https://example.com", display_name: "Example" }, status: { readiness: "ready" }, account_bindings: [],
+    environment_summary: { provider_id: "camoufox" }, identity_ownership: ownership(accountRefB) };
+  profiles.push(otherAccountProfile);
+  const otherAccountGrant = await issueBusinessTargetGrant(otherAccountProfile.refs.profile_ref, "business-target-other-account", accountRefB);
+  const otherAccountScope = { connection_id: connection.connection_id, grant_id: otherAccountGrant.grant_id, profile_ref: otherAccountProfile.refs.profile_ref };
+  const otherAccountList = await service.submit(credentialHash, { idempotency_key: "business-target-list-isolated", ...otherAccountScope, operation: "business_target.list",
+    account_system_ref: accountSystemRef, account_ref: accountRefB, task_scope: targetScope("business_target.list", otherAccountProfile.refs.profile_ref) });
+  assert.deepEqual((otherAccountList.result as { business_targets: unknown[] }).business_targets, [], "another Account cannot enumerate a target record or infer its count");
+  const otherAccountRead = await service.submit(credentialHash, { idempotency_key: "business-target-read-isolated", ...otherAccountScope, operation: "business_target.read",
+    business_target_ref: targetRef, task_scope: targetScope("business_target.read", otherAccountProfile.refs.profile_ref) });
+  assert.equal(otherAccountRead.failure?.code, "business_target_unavailable", "another Account cannot resolve an opaque ref to the original target record");
+  profiles.splice(profiles.indexOf(otherAccountProfile), 1);
+  const disabledTarget = await service.submit(credentialHash, { idempotency_key: "business-target-disable", ...targetBase, operation: "business_target.disable",
+    business_target_ref: targetRef, task_scope: targetScope("business_target.disable") });
+  assert.equal((disabledTarget.result as { business_target: { status: string } }).business_target.status, "disabled");
+  profileOne.identity_ownership = ownership(accountRefB);
+  const reboundTarget = await service.submit(credentialHash, { idempotency_key: "business-target-rebound", ...targetBase, operation: "business_target.list",
+    account_system_ref: accountSystemRef, account_ref: accountRefA, task_scope: targetScope("business_target.list") });
+  assert.equal(reboundTarget.failure?.code, "business_target_account_binding_changed");
+  profileOne.identity_ownership = ownership(accountRefA, "not_runnable");
+  const nonRunnableTarget = await service.submit(credentialHash, { idempotency_key: "business-target-not-runnable", ...targetBase, operation: "business_target.read",
+    business_target_ref: targetRef, task_scope: targetScope("business_target.read") });
+  assert.equal(nonRunnableTarget.failure?.code, "business_target_account_not_runnable");
+  assert.equal((await accessStore.list()).grants.find(item => item.grant_id === grant.grant_id)?.business_target_account_scopes, undefined, "old Grants are never backfilled with Account scope");
+  const migratedProfile = { refs: { profile_ref: "profile:migrated" }, identity_environment_ref: "identity:migrated", name: "Migrated", tags: [],
+    site: { origin: "https://example.com", display_name: "Example" }, status: { readiness: "ready" }, account_bindings: [],
+    environment_summary: { provider_id: "camoufox" }, identity_ownership: ownership(accountRefA) };
+  profiles.push(migratedProfile);
+  const migratedGrant = await issueBusinessTargetGrant("profile:migrated", "business-target-profile-migrated");
+  const migratedRead = await service.submit(credentialHash, { idempotency_key: "business-target-migrated-read", connection_id: connection.connection_id,
+    grant_id: migratedGrant.grant_id, profile_ref: "profile:migrated", operation: "business_target.read", business_target_ref: targetRef,
+    task_scope: targetScope("business_target.read", "profile:migrated") });
+  const migratedRecord = (migratedRead.result as { business_target: Record<string, unknown> }).business_target;
+  assert.equal(migratedRecord.business_target_ref, targetRef);
+  assert.equal(migratedRecord.created_by_profile_ref, targetProfileRef, "same Account migration keeps original Profile only as provenance");
+  assert.equal(migratedRecord.status, "disabled", "disabled target history remains readable under a newly authorized Profile");
+  profiles.splice(profiles.indexOf(profileOne), 1);
+  profiles.splice(profiles.indexOf(migratedProfile), 1);
+
   const preferenceOperations = ["provider.preference.read", "provider.preference.set", "provider.preference.clear"] as const;
   const preferenceGrant = await accessStore.createGrant({ idempotency_key: "preference-grant", principal_id: principal.principal_id, profile_refs: [], allowed_operations: [...preferenceOperations], allowed_origins: [], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
   const preferenceRequest = { idempotency_key: "preference-read", connection_id: connection.connection_id, grant_id: preferenceGrant.grant_id, operation: "provider.preference.read" as const, task_scope: { operations: [...preferenceOperations], profile_refs: [], origins: [] } };

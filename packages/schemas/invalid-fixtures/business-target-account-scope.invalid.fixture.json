@@ -1,0 +1,18 @@
+{
+  "schema": "business-target-account-scope.schema.json",
+  "cases": [
+    {
+      "name": "snapshot requires a stable Account ref",
+      "instance": { "profile_ref": "profile:example", "account_system_ref": "account-system:example", "account_ref": "account:legacy" }
+    },
+    {
+      "name": "snapshot cannot contain owner assertion fields",
+      "instance": {
+        "profile_ref": "profile:example",
+        "account_system_ref": "account-system:example",
+        "account_ref": "account:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "verified": true
+      }
+    }
+  ]
+}

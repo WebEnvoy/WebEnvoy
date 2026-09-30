@@ -1,10 +1,10 @@
 # Grant Wire Contract V1
 
-状态：Accepted；版本：v1.6（v1 兼容系列）；owner：Core。产品归口：[Work Item #508](https://github.com/WebEnvoy/WebEnvoy/issues/508)、已安装恢复 [#505](https://github.com/WebEnvoy/WebEnvoy/issues/505)、Provider 默认 [#516](https://github.com/WebEnvoy/WebEnvoy/issues/516)、受管浏览器文件 [#523](https://github.com/WebEnvoy/WebEnvoy/issues/523)、站点 SKILL [#563](https://github.com/WebEnvoy/WebEnvoy/issues/563) 与 Profile 元数据 [#599](https://github.com/WebEnvoy/WebEnvoy/issues/599)。本合同冻结恢复 Grant、SKILL 资源范围、Provider preference/创建模板、browser-files 文件范围、managed-browser scope semantics、site-task Agent projection 和 Profile 元数据 operation 值的跨进程语义；既有 Principal、Connection、Profile Grant、撤销和交集规则仍由 Core owner API 维护。
+状态：Accepted；版本：v1.7（v1 兼容系列）；owner：Core。产品归口：[Work Item #508](https://github.com/WebEnvoy/WebEnvoy/issues/508)、已安装恢复 [#505](https://github.com/WebEnvoy/WebEnvoy/issues/505)、Provider 默认 [#516](https://github.com/WebEnvoy/WebEnvoy/issues/516)、受管浏览器文件 [#523](https://github.com/WebEnvoy/WebEnvoy/issues/523)、站点 SKILL [#563](https://github.com/WebEnvoy/WebEnvoy/issues/563)、Profile 元数据 [#599](https://github.com/WebEnvoy/WebEnvoy/issues/599) 与 BusinessTarget metadata [#602](https://github.com/WebEnvoy/WebEnvoy/issues/602)。本合同冻结恢复 Grant、SKILL 资源范围、Provider preference/创建模板、browser-files 文件范围、managed-browser scope semantics、site-task Agent projection、Profile metadata operation 和 Account tuple snapshots 的跨进程语义；既有 Principal、Connection、Profile Grant、撤销和交集规则仍由 Core owner API 维护。
 
 ## 版本与兼容规则
 
-v1.0 的 recovery 与 v1.1 的 `skill_scope` 语义保持不变。v1.2 新增 preference operation 值，并允许新创建模板把 `provider_id` 明确设为 null；v1.3 新增可选 `file_scope` 与 browser task `file_refs`；v1.4 新增可选 `scope_semantics`，并以本节的 owner v2 lifecycle 兼容修订补齐正式 API/CLI；v1.5 新增 site task 的 `task.submit`、`task.query`、`task.stop` operation；v1.6 新增 `profile.metadata.update` operation 值，不增加 Grant 字段。site task 的普通结构化参数由版本化 managed-task request 携带并按 Lode pinned input schema 校验，不增加第二个材料注册表或 Grant scope。上述扩展不改变既有网页 `profile_refs`、`allowed_origins`、`allowed_operations` 的交集含义。未携带 `scope_semantics` 的 Grant/Profile policy 解释为 `legacy_request_guard_v1`；首次 legacy→v2 仍只能沿用原 owner 确认路径，Agent/task 请求不能指定或升级语义。之后的续发、重签、替换和 v2 policy 调整只走本节的 owner API/CLI/App 入口。
+v1.0 的 recovery 与 v1.1 的 `skill_scope` 语义保持不变。v1.2 新增 preference operation 值，并允许新创建模板把 `provider_id` 明确设为 null；v1.3 新增可选 `file_scope` 与 browser task `file_refs`；v1.4 新增可选 `scope_semantics`，并以本节的 owner v2 lifecycle 兼容修订补齐正式 API/CLI；v1.5 新增 site task 的 `task.submit`、`task.query`、`task.stop` operation；v1.6 新增 `profile.metadata.update` operation 值，不增加 Grant 字段；v1.7 新增只由可信 owner 签发并经 Harbor 解析的 BusinessTarget Account tuple snapshots。site task 的普通结构化参数由版本化 managed-task request 携带并按 Lode pinned input schema 校验，不增加第二个材料注册表或 Grant scope。上述扩展不改变既有网页 `profile_refs`、`allowed_origins`、`allowed_operations` 的交集含义。未携带 `scope_semantics` 的 Grant/Profile policy 解释为 `legacy_request_guard_v1`；首次 legacy→v2 仍只能沿用原 owner 确认路径，Agent/task 请求不能指定或升级语义。之后的续发、重签、替换和 v2 policy 调整只走本节的 owner API/CLI/App 入口。
 
 ### Managed browser scope semantics
 
@@ -76,6 +76,16 @@ Browser task scope 在保留 `operations`、`profile_refs`、`origins` 的同时
 `profile.metadata.update` 是明确、逐项授予的 Profile 管理 operation，不由 `profile.read`、`profile.list`、`profile.create`、环境、浏览器或 SKILL 权限推出。请求只作用于 Grant 与 task scope 中的同一个 Profile，`origins` 必须为空；它不需要活动 Instance、Provider 或 Profile storage lock，也不修改网站身份、Account、环境或本地 Profile storage。`name`／`tags` 的字段限制、Harbor 单一规范化 owner、默认与复制规则，以及 Core Run／Harbor receipt/query/no-replay 语义由 [Plugin Runtime Exposure V1 §#599](plugin-runtime-exposure-v1.md#599-profile-display-metadata-management) 定义。
 
 v1.6 reader 必须继续读取不含 `profile.metadata.update` 的旧 Grant，且旧 Grant 不因此获得此权限；只有 `allowed_operations` 明确包含该值且 task scope 再次选择该 operation/Profile 时才能修改。v1.5 或更旧的严格 reader 不认识该新增 operation 值时必须拒绝含该值的 Grant，不能忽略后继续执行。
+
+## BusinessTarget Account scope V1.7
+
+The existing owner v2 Grant request accepts `account_scope_selections` only when its `allowed_operations` contains one or more of `business_target.create`, `business_target.list`, `business_target.read`, `business_target.metadata.update` and `business_target.disable`. Target-capable issuance must include 1–128 unique `(account_system_ref, account_ref)` selections; selections without a target operation and target operations without selections are invalid. The target Profile is the v2 request's one exact `profile_ref`.
+
+This field is owner-only. Core resolves each selection using Harbor's current durable Profile binding projection and stores the returned exact `(profile_ref, account_system_ref, account_ref)` snapshots on the newly issued Grant. Harbor must report each selected binding as `ownership_status: unique`; `conflict`, `unknown`, absent, malformed, archived/non-runnable or mismatched selection fails issuance. A caller cannot submit the persisted `business_target_account_scopes` field directly. Snapshots are attached only to a new Grant; existing Grants without snapshots remain without target permission after upgrade or read.
+
+At execution Core still requires the explicit operation in `allowed_operations`, the same operation and exact Profile in task scope, and an empty `task_scope.origins`. `create`/`list` additionally supply the exact Account refs, which must match a stored snapshot and a currently unique Harbor binding. `read`/`metadata.update`/`disable` supply only `business_target_ref`; Core resolves its Account tuple locally and requires that tuple in the current Profile snapshot and Harbor's current unique bindings. Profile-wide ownership conflict does not block another selected tuple whose per-binding status is unique. Binding change or loss invalidates the affected snapshot at runtime; regrant after trusted-owner review is required.
+
+The resulting persisted field is a Core-local Grant dimension in `webenvoy.managed-access.v2`. v1.7 readers may read historical state without the field but never infer or fill it. Strict readers that do not understand the new field/store version reject it instead of dropping target scope or widening access. BusinessTarget record fields and operation results are defined by [BusinessTarget Management V1](business-target-management-v1.md) and its schemas; this field does not add account-binding or external resource mutation.
 
 ## SKILL Grant 与 task scope
 
@@ -199,4 +209,4 @@ Core 持久化以下 v1 对象；字段未知、缺失、类型错误、额外�
 
 ## 非目标
 
-本合同不新增第二权限系统，不赋予 Agent owner backup/plan/apply，不把 SKILL scope 变成网页 origin 白名单，不修改 Network/Console/Provider-private schema，也不定义不存在的 fixture 或验收路径。Plugin 的 SKILL 投影、`webenvoy_task` site-task projection 和八个 SKILL operation 见 [Plugin Runtime Exposure V1](plugin-runtime-exposure-v1.md)。
+本合同不新增第二权限系统，不赋予 Agent owner backup/plan/apply，不把 SKILL scope 变成网页 origin 白名单，不修改 Network/Console/Provider-private schema，也不定义不存在的 fixture 或验收路径。Plugin 的 SKILL 投影、`webenvoy_task` site-task projection 和八个 SKILL operation 见 [Plugin Runtime Exposure V1](plugin-runtime-exposure-v1.md)。BusinessTarget tuple snapshots authorize only local Core metadata, not Account binding or external site operations.

@@ -6,7 +6,7 @@ export type ManagedAccessApiOptions = {
   supervisorToken?: string;
   managedAccessStore?: FileManagedAccessStore;
   managedBrowserService?: Pick<ReturnType<typeof createManagedBrowserService>, "submit" | "query"> &
-    Partial<Pick<ReturnType<typeof createManagedBrowserService>, "describe" | "getManagementPolicy" | "putManagementPolicy">>;
+    Partial<Pick<ReturnType<typeof createManagedBrowserService>, "describe" | "getManagementPolicy" | "putManagementPolicy" | "resolveBusinessTargetAccountScopes">>;
   managedSkillService?: Pick<ReturnType<typeof createFileSkillLibraryService>, "submit" | "query">;
   managedTaskService?: Pick<ReturnType<typeof createManagedTaskService>, "operate" | "workerStarted" | "broker" | "workerComplete" | "workerFailure">;
   managedAccountSystemService?: {
@@ -218,7 +218,9 @@ export async function handleManagedAccessApi(request: IncomingMessage, response:
         send(response, 201, { ok: true, grant: await store.createGrant(await body(request)) }); return true;
       }
       if (path === "/agent-access/v2/grants" && request.method === "POST") {
-        send(response, 201, { ok: true, grant: await store.issueAgentOperationsV2Grant(await body(request)) }); return true;
+        const input = await body(request);
+        const resolver = options.managedBrowserService?.resolveBusinessTargetAccountScopes;
+        send(response, 201, { ok: true, grant: await store.issueAgentOperationsV2Grant(input, resolver) }); return true;
       }
       if (path === "/agent-access/scope-confirmations" && request.method === "POST") {
         send(response, 201, { ok: true, ...await store.confirmAgentOperationsV2(await body(request)) }); return true;

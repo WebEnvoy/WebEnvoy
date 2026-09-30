@@ -183,6 +183,34 @@
           "status": "unique"
         }
       }
+    },
+    {
+      "name": "binding ownership status is a closed Harbor classification",
+      "instance": {
+        "schema_version": "webenvoy.profile-identity-ownership/v1",
+        "current": {
+          "status": "unknown",
+          "observed_at": null,
+          "account_system_ref": null,
+          "account_ref": null
+        },
+        "history": {
+          "bindings": [
+            {
+              "status": "bound",
+              "verification": "verified_at_binding",
+              "ownership_status": "ambiguous",
+              "account_system_ref": "account-system:example",
+              "account_ref": "account:legacy",
+              "bound_at": "2026-09-30T00:00:00.000Z"
+            }
+          ],
+          "declared": null
+        },
+        "ownership": {
+          "status": "unique"
+        }
+      }
     }
   ]
 }

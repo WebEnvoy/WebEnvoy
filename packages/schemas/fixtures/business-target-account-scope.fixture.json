@@ -1,0 +1,6 @@
+{
+  "$schema": "../schemas/business-target-account-scope.schema.json",
+  "profile_ref": "profile:example",
+  "account_system_ref": "account-system:example",
+  "account_ref": "account:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}

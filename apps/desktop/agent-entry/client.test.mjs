@@ -42,6 +42,7 @@ function firstJsonMessage(child, timeoutMs = 5000) {
   return new Promise((resolve, reject) => {
     let settled = false;
     let stderr = '';
+    const stdout = [];
     const finish = (error, value) => {
       if (settled) return;
       settled = true;
@@ -57,13 +58,17 @@ function firstJsonMessage(child, timeoutMs = 5000) {
     const onExit = (code, signal) => finish(new Error(`child_exited_before_response:${code ?? signal ?? 'unknown'}${stderr ? `:${stderr.trim()}` : ''}`));
     const onStderr = chunk => { stderr += chunk.toString('utf8'); };
     const onData = chunk => {
-      try { finish(undefined, JSON.parse(chunk.toString('utf8'))); } catch (error) { finish(error); }
+      stdout.push(chunk);
+      const bytes = Buffer.concat(stdout);
+      const newline = bytes.indexOf(0x0a);
+      if (newline < 0) return;
+      try { finish(undefined, JSON.parse(bytes.subarray(0, newline).toString('utf8'))); } catch (error) { finish(error); }
     };
     const timer = setTimeout(() => finish(new Error('child_response_timeout')), timeoutMs);
     child.once('error', onError);
     child.once('exit', onExit);
     child.stderr?.on('data', onStderr);
-    child.stdout.once('data', onData);
+    child.stdout.on('data', onData);
   });
 }
 

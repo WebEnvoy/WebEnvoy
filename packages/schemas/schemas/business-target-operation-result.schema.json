@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/core/business-target-operation-result.v1.schema.json",
+  "title": "WebEnvoy BusinessTarget operation result payload",
+  "description": "The result payload returned by Core BusinessTarget create/read/update/disable and list operations.",
+  "oneOf": [
+    { "type": "object", "additionalProperties": false, "required": ["business_target"], "properties": { "business_target": { "$ref": "https://schemas.webenvoy.dev/core/business-target.v1.schema.json" } } },
+    { "type": "object", "additionalProperties": false, "required": ["business_targets"], "properties": { "business_targets": { "type": "array", "items": { "$ref": "https://schemas.webenvoy.dev/core/business-target.v1.schema.json" } } } }
+  ],
+  "x-webenvoy": {
+    "owner": "Core Runtime Agent operation result",
+    "status": "accepted-v1",
+    "schema_version": "webenvoy.business-target-operation-result/v1",
+    "compatibility_boundary": "BusinessTarget result payload only; the enclosing operation uses the existing Core Run/result envelope, idempotency and query semantics.",
+    "source_adrs": ["docs/specs/business-target-management-v1.md", "docs/adr/0003-result-envelope-and-run-record.md"],
+    "field_owners": { "business_target": "Core BusinessTarget store", "business_targets": "Core BusinessTarget store" }
+  }
+}

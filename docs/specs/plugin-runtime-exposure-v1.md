@@ -35,6 +35,7 @@
 | Runtime/管理能力 | MCP 工具与 operation | 授权和结果归口 |
 | --- | --- | --- |
 | Profile 展示元数据 | `webenvoy_operation`：`profile.metadata.update` | 必须逐项授予同名 operation，并在 `task_scope` 限定一个获准 `profile_ref`、`origins: []`；`name`／`tags` 格式、Harbor 规范化与 receipt 对账见 [#599](#599-profile-display-metadata-management)。 |
+| BusinessTarget 本地 metadata | `webenvoy_operation`：`business_target.create`、`business_target.list`、`business_target.read`、`business_target.metadata.update`、`business_target.disable`；`webenvoy_query` 查询原 Run | 仅限 owner 在当前 v2 Grant 签发时由 Harbor 唯一 Account binding 解析出的 tuple snapshots；复用 Core Run/idempotency/query，不代表站点资源写入，详见 [BusinessTarget Management V1](business-target-management-v1.md) 与 [Grant Wire v1.7](grant-wire-contract-v1.md)。 |
 | Page list/open/activate/close and navigation | `webenvoy_operation`：`page.list`、`page.open`、`page.activate`、`page.close`、`page.navigate`、`page.reload`、`page.back`、`page.forward` | 同名 `allowed_operations`；同一 Instance 的 Page/document contract 与关系异常暂停由 [Page, Document and Navigation V1](page-navigation-runtime-contract-v1.md) 维护。 |
 | bounded Network metadata + Console/Page Error | `webenvoy_operation`：`instance.diagnostics` | 既有 `allowed_operations` 中的 `instance.diagnostics`；详见 [Network V1](network-runtime-contract-v1.md) 与 [Console V1](console-runtime-contract-v1.md)。 |
 | Profile environment facts / bounded configuration update | `webenvoy_operation`：`environment.read`、`environment.update` | 既有同名 `allowed_operations`；字段与失败语义由 [Profile Environment V1 §18](profile-environment-v1.md#18-首个正式环境生命周期合同499) 维护。 |
@@ -55,9 +56,17 @@ Core requires a current Grant with the explicit `profile.metadata.update` operat
 
 ### #492 Profile identity and ownership projection
 
-`profile.read` 与 `profile.list` 在各自现有 Profile 可见范围内附带 `identity_ownership`，形状见 [Profile Identity Ownership Schema](../../packages/schemas/schemas/profile-identity-ownership.schema.json)。`current` 只引用 Harbor 单一活动 Runtime Session 的最新可信观察；观察须不超过 30 秒、仍属当前控制代，并与当前 Page/document binding 完全匹配。没有新鲜且匹配的观察时为 `unknown`。`history.bindings` 记录 owner 已持久化绑定及 `verified_at_binding` 时间，`history.declared` 单独记录旧 `site.account_ref` 声明；两者都不代替当前观察。`ownership` 只从至少一条 durable account binding 得出，使用 Harbor 既有 `hasManagedBindingConflict` 规则；无持久绑定时为 `unknown`。冲突摘要只返回 `unique`、`conflict` 或 `unknown`，不返回其他 Profile 的 ref、名称或数量。冲突只影响依赖账户身份的操作，公开 Profile 读取继续可用；读取不创建绑定、不增加 Grant dimension，`account.bind` 仍是 owner-only。
+`profile.read` 与 `profile.list` 在各自现有 Profile 可见范围内附带 `identity_ownership`，形状见 [Profile Identity Ownership Schema](../../packages/schemas/schemas/profile-identity-ownership.schema.json)。`current` 只引用 Harbor 单一活动 Runtime Session 的最新可信观察；观察须不超过 30 秒、仍属当前控制代，并与当前 Page/document binding 完全匹配。没有新鲜且匹配的观察时为 `unknown`。`history.bindings` 记录 owner 已持久化绑定及 `verified_at_binding` 时间，`history.declared` 单独记录旧 `site.account_ref` 声明；两者都不代替当前观察。Profile-wide `ownership` 保留全局 `unique`、`conflict`、`unknown`、`not_runnable` 摘要；每条 durable binding 可带 `ownership_status` (`unique`、`conflict`、`unknown` 或 `not_runnable`)，供依赖身份的能力按精确 tuple 判定。较早 Harbor 投影缺少该字段时，Core 只在全局 `unique` 时兼容映射为 `unique`，在全局 `not_runnable` 时映射为 `not_runnable`，在其他可读状态映射为 `unknown`；Core 不从全局冲突推断某一 binding 冲突。Harbor 不返回其他 Profile 的 ref、名称或数量；冲突不影响公开 Profile 读取。读取不创建绑定、不增加 Grant dimension，`account.bind` 仍是 owner-only。
 
 Core 在映射前按已授权 Profile refs 过滤 Harbor records；profile.list 只投影当前 Grant 可见的行，profile.read 的 Profile ref 先由现有 Grant 检查。旧 Harbor 响应未附 identity projection 时 Core 返回 `current=unknown`、`ownership=unknown`，不把历史 binding 或声明推成当前身份。
+
+### #602 BusinessTarget metadata management
+
+`business_target.create/list/read/metadata.update/disable` use the existing `webenvoy_operation` and Run/query path. Each operation must be individually granted and included in `task_scope.operations`; the exact Profile must be present in both Grant and task scope and `task_scope.origins` must be empty. `create` and `list` name one selected `account_system_ref`/`account_ref`; other operations resolve the record's Account from its Core-local ref.
+
+At v2 Grant issuance, the trusted owner selects one or more exact Account tuples. Core resolves them through Harbor's selected Profile identity projection and accepts only `ownership_status: unique` bindings. The resolved `(profile_ref, account_system_ref, account_ref)` values are bound to the new Grant; the Agent cannot mint or expand this list. Every target operation checks those snapshots against the current Harbor bindings again. A Profile-wide `ownership.status: conflict` does not reject another selected tuple whose own status remains unique; unknown, conflict, changed or non-runnable selected tuples are refused. Older Grants are not upgraded and do not gain this scope implicitly.
+
+BusinessTarget records are Core-owned metadata keyed by the stable Account tuple, with Profile retained only as creation provenance. Results are `declared/unverified`; metadata never claims the referenced external site resource exists or grants browser, network or business write authority. List exposes only the selected Account's records. See [BusinessTarget Management V1](business-target-management-v1.md) for fields, persistence, and compatibility.
 
 ### #563 site-task execution projection
 

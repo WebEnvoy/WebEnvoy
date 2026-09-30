@@ -46,10 +46,10 @@ export type ProfileIdentityOwnership = {
   schema_version: typeof HARBOR_PROFILE_IDENTITY_OWNERSHIP_SCHEMA;
   current: { status: "verified" | "discovered" | "conflict" | "unknown"; observed_at: string | null; account_system_ref: string | null; account_ref: string | null };
   history: {
-    bindings: { status: "bound"; verification: "verified_at_binding"; account_system_ref: string; account_ref: string; bound_at: string }[];
+    bindings: { status: "bound"; verification: "verified_at_binding"; ownership_status: "unique" | "conflict" | "not_runnable"; account_system_ref: string; account_ref: string; bound_at: string }[];
     declared: { status: "declared"; account_system_ref: string; account_ref: string } | null;
   };
-  ownership: { status: "unique" | "conflict" | "unknown" };
+  ownership: { status: "unique" | "conflict" | "unknown" | "not_runnable" };
 };
 export const unknownManagedAccount = (): DiscoveredManagedAccount => ({ status: "unknown", account_system_ref: null, account_ref: null });
 export function managedUnavailable(failure_class: string): ManagedObservationUnavailable { return { status: "unavailable", failure_class, retryable: false }; }
@@ -106,8 +106,18 @@ export function effectiveManagedBindings(record: import("./identity-environment-
   const legacy = record.identity_environment.site_binding;
   return [...(record.account_bindings ?? []), ...(legacy.account_ref ? [{ account_system_ref: `account-system:${legacy.site_id}`, account_ref: legacy.account_ref }] : [])];
 }
-export function hasManagedBindingConflict(records: Iterable<import("./identity-environment-manager.js").StoredLocalIdentityEnvironmentRecord>, candidate: import("./identity-environment-manager.js").StoredLocalIdentityEnvironmentRecord): boolean {
+type ManagedBindingSelection = Pick<ManagedAccountBinding, "account_system_ref" | "account_ref">;
+export function hasManagedBindingConflict(records: Iterable<import("./identity-environment-manager.js").StoredLocalIdentityEnvironmentRecord>, candidate: import("./identity-environment-manager.js").StoredLocalIdentityEnvironmentRecord, selected?: ManagedBindingSelection): boolean {
   const bindings = effectiveManagedBindings(candidate);
+  if (selected !== undefined) {
+    if (bindings.some(binding => binding.account_system_ref === selected.account_system_ref && binding.account_ref !== selected.account_ref)) return true;
+    for (const record of records) {
+      if (record.identity_environment.identity_environment_ref === candidate.identity_environment.identity_environment_ref ||
+          (record as typeof record & { lifecycle_state?: string }).lifecycle_state === "archived") continue;
+      if (effectiveManagedBindings(record).some(other => other.account_system_ref === selected.account_system_ref && other.account_ref === selected.account_ref)) return true;
+    }
+    return false;
+  }
   if (bindings.some((binding, index) => bindings.slice(0, index).some(other => binding.account_system_ref === other.account_system_ref && binding.account_ref !== other.account_ref))) return true;
   for (const record of records) {
     if (record.identity_environment.identity_environment_ref === candidate.identity_environment.identity_environment_ref) continue;
@@ -128,13 +138,13 @@ export function profileIdentityOwnership(
     currentObservation.profile_ref === candidate.identity_environment.profile_ref &&
     identity?.status === "verified" && boundedManagedRef(identity.account_system_ref) && boundedManagedRef(identity.account_ref)) {
     const observedBinding: ManagedAccountBinding = {
-      account_system_ref: identity.account_system_ref,
-      account_ref: identity.account_ref,
+      account_system_ref: identity.account_system_ref!,
+      account_ref: identity.account_ref!,
       observation_ref: currentObservation.observation_ref,
       bound_at: currentObservation.observed_at
     };
     const withCurrent = { ...candidate, account_bindings: [...persistedBindings, observedBinding] };
-    const conflict = hasManagedBindingConflict(records, withCurrent);
+    const conflict = hasManagedBindingConflict(records, withCurrent, { account_system_ref: identity.account_system_ref!, account_ref: identity.account_ref! });
     const existingBinding = persistedBindings.find(binding => binding.account_system_ref === identity.account_system_ref);
     current.status = conflict ? "conflict" : existingBinding?.account_ref === identity.account_ref ? "verified" : "discovered";
     current.account_system_ref = identity.account_system_ref;
@@ -145,21 +155,26 @@ export function profileIdentityOwnership(
   const declared = boundedManagedRef(declaredAccountSystemRef) && boundedManagedRef(declaredAccountRef)
     ? { status: "declared" as const, account_system_ref: declaredAccountSystemRef, account_ref: declaredAccountRef }
     : null;
+  const lifecycleState = (candidate as typeof candidate & { lifecycle_state?: string }).lifecycle_state ?? "active";
+  const bindings = persistedBindings.map(binding => ({
+    status: "bound" as const,
+    verification: "verified_at_binding" as const,
+    ownership_status: lifecycleState === "archived" ? "not_runnable" as const :
+      hasManagedBindingConflict(records, candidate, binding) ? "conflict" as const : "unique" as const,
+    account_system_ref: binding.account_system_ref,
+    account_ref: binding.account_ref,
+    bound_at: binding.bound_at
+  }));
   return {
     schema_version: HARBOR_PROFILE_IDENTITY_OWNERSHIP_SCHEMA,
     current,
     history: {
-      bindings: persistedBindings.map(binding => ({
-        status: "bound" as const,
-        verification: "verified_at_binding" as const,
-        account_system_ref: binding.account_system_ref,
-        account_ref: binding.account_ref,
-        bound_at: binding.bound_at
-      })),
+      bindings,
       declared
     },
     ownership: {
-      status: persistedBindings.length === 0 ? "unknown" : hasManagedBindingConflict(records, candidate) ? "conflict" : "unique"
+      status: lifecycleState === "archived" ? "not_runnable" :
+        persistedBindings.length === 0 ? "unknown" : hasManagedBindingConflict(records, candidate) ? "conflict" : "unique"
     }
   };
 }

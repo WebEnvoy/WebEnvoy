@@ -12,7 +12,7 @@
     "history": { "$ref": "#/$defs/history" },
     "ownership": {
       "type": "object", "additionalProperties": false, "required": ["status"],
-      "properties": { "status": { "enum": ["unique", "conflict", "unknown"] } }
+      "properties": { "status": { "enum": ["unique", "conflict", "unknown", "not_runnable"] } }
     }
   },
   "$defs": {
@@ -37,6 +37,7 @@
       "properties": {
         "status": { "const": "bound" },
         "verification": { "const": "verified_at_binding" },
+        "ownership_status": { "enum": ["unique", "conflict", "not_runnable", "unknown"] },
         "account_system_ref": { "$ref": "#/$defs/ref" },
         "account_ref": { "$ref": "#/$defs/ref" },
         "bound_at": { "type": "string", "format": "date-time" }
@@ -60,15 +61,16 @@
     }
   },
   "oneOf": [
-    { "properties": { "ownership": { "properties": { "status": { "const": "unknown" } } }, "history": { "properties": { "bindings": { "maxItems": 0 } } } }, "required": ["ownership", "history"] },
-    { "properties": { "ownership": { "properties": { "status": { "enum": ["unique", "conflict"] } } }, "history": { "properties": { "bindings": { "minItems": 1 } } } }, "required": ["ownership", "history"] }
+    { "properties": { "ownership": { "properties": { "status": { "const": "unknown" } } } }, "required": ["ownership", "history"] },
+    { "properties": { "ownership": { "properties": { "status": { "enum": ["unique", "conflict"] } } }, "history": { "properties": { "bindings": { "minItems": 1 } } } }, "required": ["ownership", "history"] },
+    { "properties": { "ownership": { "properties": { "status": { "const": "not_runnable" } } } }, "required": ["ownership"] }
   ],
   "x-webenvoy": {
     "owner": "Harbor durable account binding owner; Core Agent profile projection",
     "status": "accepted-v1",
     "schema_version": "webenvoy.profile-identity-ownership/v1",
-    "compatibility_boundary": "Current identity is a fresh exact Harbor observation; history records binding-time verification and legacy declaration separately. Persistent ownership is unknown without a durable binding and never authorizes binding or account-dependent actions.",
+    "compatibility_boundary": "Current identity is a fresh exact Harbor observation; history records binding-time verification, an optional per-binding ownership conclusion, and legacy declaration separately. The Core compatibility projection may report a binding as unknown when older Harbor data lacks the tuple-specific conclusion. Persistent ownership is unknown without a durable binding and never authorizes binding or account-dependent actions.",
     "source_adrs": ["docs/adr/0012-runtime-capability-plane-and-plugin-first.md"],
-    "field_owners": { "current": "Harbor current Runtime Session observation", "history": "Harbor persisted account binding and legacy declaration", "ownership": "Harbor persisted account binding conflict predicate" }
+    "field_owners": { "current": "Harbor current Runtime Session observation", "history": "Harbor persisted account binding and legacy declaration", "history.bindings.ownership_status": "Harbor per-binding conclusion, with Core compatibility projection to unknown when older Harbor data lacks it", "ownership": "Harbor persisted account binding conflict predicate across the Profile" }
   }
 }
