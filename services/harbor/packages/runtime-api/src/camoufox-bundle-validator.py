@@ -138,8 +138,15 @@ def validate_environment_bundle(bundle: Any) -> dict[str, Any]:
 
     if "context_options" in bundle:
         context_options = bundle["context_options"]
-        if not isinstance(context_options, dict) or set(context_options) - {"viewport", "timezone_id"}:
+        if not isinstance(context_options, dict) or set(context_options) - {"viewport", "timezone_id", "locale"}:
             raise ValueError("Camoufox context options are unsupported or corrupt.")
+        locale = context_options.get("locale")
+        if locale is not None and (
+            not isinstance(locale, str)
+            or not 1 <= len(locale) <= 64
+            or not re.fullmatch(r"[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*", locale)
+        ):
+            raise ValueError("Camoufox context locale is corrupt.")
         viewport = context_options.get("viewport")
         if viewport is not None and (
             not isinstance(viewport, dict)

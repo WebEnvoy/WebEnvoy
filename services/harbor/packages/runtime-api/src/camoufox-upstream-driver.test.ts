@@ -95,6 +95,14 @@ sys.path.insert(0, os.path.dirname(sys.argv[1]))
 camoufox = types.ModuleType("camoufox")
 camoufox.__path__ = []
 camoufox.DefaultAddons = type("DefaultAddons", (), {"UBO": object()})
+locales = types.ModuleType("camoufox.locales")
+locale_calls = []
+def fake_handle_locales(locale, config):
+    locale_calls.append(locale)
+    language, region = locale.split("-", 1)
+    config.update({"locale:language": language.lower(), "locale:region": region.upper(), "locale:script": "Latn"})
+locales.handle_locales = fake_handle_locales
+sys.modules["camoufox.locales"] = locales
 utils = types.ModuleType("camoufox.utils")
 utils.launch_options = lambda **kwargs: {}
 env_calls = []
@@ -133,8 +141,13 @@ except ValueError:
 seen = []
 def fake_launch_options(**kwargs):
     seen.append(kwargs)
-    config = {"timezone": kwargs["config"].get("timezone", "UTC"), "fingerprint.seed": "stable-seed", "fonts": ["Inter"]}
-    return {"args": [], "env": {**utils.get_env_vars(config, "mac", path=executable_path), "PROVIDER_ENV": "stable"}, "executable_path": executable_path, "firefox_user_prefs": {}, "headless": bool(kwargs["headless"])}
+    config = {**kwargs["config"], "timezone": kwargs["config"].get("timezone", "UTC"), "fingerprint.seed": "stable-seed", "fonts": ["Inter"]}
+    if kwargs.get("locale"):
+        locales.handle_locales(kwargs["locale"], config)
+    result = {"args": [], "env": {**utils.get_env_vars(config, "mac", path=executable_path), "PROVIDER_ENV": "stable"}, "executable_path": executable_path, "firefox_user_prefs": {}, "headless": bool(kwargs["headless"])}
+    if kwargs.get("proxy") is not None:
+        result["proxy"] = kwargs["proxy"]
+    return result
 module.launch_options = fake_launch_options
 profile = __import__("tempfile").mkdtemp(prefix="harbor-camoufox-options-")
 executable_root = __import__("tempfile").mkdtemp(prefix="harbor-camoufox-executables-")
@@ -143,29 +156,48 @@ other_executable = os.path.join(executable_root, "other-camoufox")
 open(executable_path, "wb").close()
 open(other_executable, "wb").close()
 try:
-    options, bundle, replay, context_options = module.options_for({"headless": False, "browser_path": executable_path, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {"timezone": "UTC"}}, profile)
+    options, bundle, replay, context_options = module.options_for({"headless": False, "browser_path": executable_path, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {"timezone": "UTC", "language": "en-US", "viewport": {"width": 1280, "height": 720}, "proxy_server": "http://127.0.0.1:58202"}}, profile)
     assert replay is False
     assert seen[0]["exclude_addons"] == [module.DefaultAddons.UBO]
     assert seen[0]["config"]["timezone"] == "UTC"
     expected_config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(executable_path))), "Resources", "camoufox") if sys.platform == "darwin" else os.path.realpath(executable_path)
     assert seen[0]["executable_path"] == expected_config_path
     assert options["executable_path"] == os.path.realpath(executable_path)
-    assert context_options == {"timezone_id": "UTC"}
-    assert bundle["context_options"] == {"timezone_id": "UTC"}
-    assert module.decode_camoufox_config(options) == {"timezone": "UTC", "fingerprint.seed": "stable-seed", "fonts": ["Inter"]}
+    assert context_options == {"locale": "en-US", "timezone_id": "UTC", "viewport": {"width": 1280, "height": 720}}
+    assert bundle["context_options"] == context_options
+    assert options["proxy"] == {"server": "http://127.0.0.1:58202"}
+    assert "proxy" not in bundle["launch_options"]
+    assert "58202" not in open(module.bundle_path(profile), encoding="utf-8").read()
+    assert locale_calls == ["en-US"]
+    old_context_bundle = __import__("json").loads(__import__("json").dumps(bundle))
+    old_context_bundle["context_options"].pop("locale")
+    module.validate_environment_bundle(old_context_bundle)
+    bad_locale_bundle = __import__("json").loads(__import__("json").dumps(bundle))
+    bad_locale_bundle["context_options"]["locale"] = "en US"
+    try:
+        module.validate_environment_bundle(bad_locale_bundle)
+        raise AssertionError("invalid persisted locale was accepted")
+    except ValueError:
+        pass
+    assert module.decode_camoufox_config(options) == {"timezone": "UTC", "locale:language": "en", "locale:region": "US", "locale:script": "Latn", "fingerprint.seed": "stable-seed", "fonts": ["Inter"]}
     assert bundle["config"] == module.decode_camoufox_config(options)
     assert __import__("json").loads(options["env"]["CAMOU_CONFIG_1"])["timezone"] == "UTC"
     immutable = {key: bundle[key] for key in ("config_sha256", "identity_hash")}
     immutable_launch = {key: options[key] for key in ("args", "executable_path", "firefox_user_prefs", "headless")}
-    immutable_config = {key: value for key, value in bundle["config"].items() if key != "timezone"}
-    updated_options, updated_bundle, updated_replay, updated_context_options = module.options_for({"headless": False, "browser_path": executable_path, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {"timezone": "Europe/Paris"}}, profile)
+    immutable_config = {key: value for key, value in bundle["config"].items() if key not in module.DYNAMIC_ENVIRONMENT_CONFIG_KEYS}
+    updated_options, updated_bundle, updated_replay, updated_context_options = module.options_for({"headless": False, "browser_path": executable_path, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {"timezone": "Europe/Paris", "language": "en-GB", "viewport": {"width": 960, "height": 640}, "proxy_server": "http://127.0.0.1:58203"}}, profile)
     assert updated_replay is True
-    assert updated_context_options == {"timezone_id": "Europe/Paris"}
-    assert updated_bundle["context_options"] == {"timezone_id": "Europe/Paris"}
+    assert updated_context_options == {"locale": "en-GB", "timezone_id": "Europe/Paris", "viewport": {"width": 960, "height": 640}}
+    assert updated_bundle["context_options"] == updated_context_options
+    assert updated_options["proxy"] == {"server": "http://127.0.0.1:58203"}
+    assert "proxy" not in updated_bundle["launch_options"]
+    assert "58203" not in open(module.bundle_path(profile), encoding="utf-8").read()
     assert {key: updated_options[key] for key in ("args", "executable_path", "firefox_user_prefs", "headless")} == immutable_launch
     assert updated_bundle["config"] != bundle["config"]
-    assert {key: value for key, value in updated_bundle["config"].items() if key != "timezone"} == immutable_config
+    assert {key: value for key, value in updated_bundle["config"].items() if key not in module.DYNAMIC_ENVIRONMENT_CONFIG_KEYS} == immutable_config
     assert updated_bundle["config"]["timezone"] == "Europe/Paris"
+    assert {key: updated_bundle["config"][key] for key in ("locale:language", "locale:region", "locale:script")} == {"locale:language": "en", "locale:region": "GB", "locale:script": "Latn"}
+    assert locale_calls == ["en-US", "en-GB"]
     assert updated_bundle["config_sha256"] != immutable["config_sha256"]
     assert updated_bundle["identity_hash"] == immutable["identity_hash"]
     assert updated_options["env"]["PROVIDER_ENV"] == options["env"]["PROVIDER_ENV"]
@@ -210,10 +242,17 @@ try:
     assert initial_environment["bundle_hash"] == bundle["identity_hash"]
     assert restarted_environment["bundle_hash"] == updated_bundle["identity_hash"] == initial_environment["bundle_hash"]
     bundle_mtime = os.stat(module.bundle_path(profile)).st_mtime_ns
-    _, same_bundle, same_replay, _ = module.options_for({"headless": False, "browser_path": executable_path, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {"timezone": "Europe/Paris"}}, profile)
+    _, same_bundle, same_replay, _ = module.options_for({"headless": False, "browser_path": executable_path, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {"timezone": "Europe/Paris", "language": "en-GB", "viewport": {"width": 960, "height": 640}, "proxy_server": "http://127.0.0.1:58203"}}, profile)
     assert same_replay is True
-    assert same_bundle["context_options"] == {"timezone_id": "Europe/Paris"}
+    assert same_bundle["context_options"] == {"locale": "en-GB", "timezone_id": "Europe/Paris", "viewport": {"width": 960, "height": 640}}
+    assert locale_calls == ["en-US", "en-GB"]
     assert os.stat(module.bundle_path(profile)).st_mtime_ns == bundle_mtime
+    cleared_options, cleared_bundle, cleared_replay, cleared_context_options = module.options_for({"headless": False, "browser_path": executable_path, "source": {"source": "official_release", "source_sha256": module.SOURCE_SHA256_PIN, "camoufox_version": module.CAMOUFOX_VERSION_PIN, "browser_version": module.BROWSER_VERSION_PIN, "playwright_version": module.PLAYWRIGHT_VERSION_PIN}, "environment": {"timezone": "Europe/Paris", "language": "en-GB", "viewport": {"width": 960, "height": 640}, "proxy_server": None}}, profile)
+    assert cleared_replay is True
+    assert "proxy" not in cleared_options
+    assert "proxy" not in cleared_bundle["launch_options"]
+    assert "58203" not in open(module.bundle_path(profile), encoding="utf-8").read()
+    assert cleared_context_options == {"locale": "en-GB", "timezone_id": "Europe/Paris", "viewport": {"width": 960, "height": 640}}
     legacy_profile = __import__("tempfile").mkdtemp(prefix="harbor-camoufox-legacy-options-")
     try:
         legacy_bundle = dict(bundle)
@@ -234,7 +273,7 @@ try:
         raise AssertionError("invalid timezone was accepted")
     except ValueError:
         pass
-    assert module.load_bundle(profile)["context_options"] == {"timezone_id": "Europe/Paris"}
+    assert module.load_bundle(profile)["context_options"] == {"locale": "en-GB", "timezone_id": "Europe/Paris", "viewport": {"width": 960, "height": 640}}
     assert module.viewer_entry(False) == {"availability": "available", "access_mode": "interactive", "transport": "local_window", "input_capabilities": ["keyboard_mouse"]}
     assert module.viewer_entry(True)["availability"] == "unsupported"
 finally:

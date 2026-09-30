@@ -12,7 +12,7 @@
 
 本文不承诺不可检测、不封号，也不要求开启 Provider 的所有可选“隐身”功能。
 
-> **2026-09-14 当前 Provider 事实**：#519／PR #522 的官方固定 Camoufox／Playwright 路径已形成受管环境入口，但按 `limited` 使用：仅接受 owner 核验的 Camoufox `0.5.6`、browser `152.0.4-beta.30`、Playwright `1.60.0`、`properties.json` 和三份来源 hash，Driver 通过公开 `launch_options`/persistent context 消费完整启动材料并精确复用。popup 首请求若无法在派发前建立可信 Page 归属，局部拒绝且不重放；#523 文件 slice 的安装/真实消费者证据不扩写为整个环境连续性或完整 V1。旧私有 launch binding、patched/native artifact 和对应 live 记录仅作历史/恢复事实，不恢复旧 launchability。本规格的公共环境事实和既有 wire 核心字段保持原义。
+> **当前 Provider 事实**：#519／PR #522 的官方固定 Camoufox／Playwright 路径已形成受管环境入口，但按 `limited` 使用：仅接受 owner 核验的 Camoufox `0.5.6`、browser `152.0.4-beta.30`、Playwright `1.60.0`、`properties.json` 和三份来源 hash，Driver 通过公开 `launch_options`/persistent context 消费完整身份材料并重放 owner 当前的 locale/timezone/viewport；proxy 只作 transient launch option，不进入私有 bundle。popup 首请求若无法在派发前建立可信 Page 归属，局部拒绝且不重放；#523 文件 slice 的安装/真实消费者证据不扩写为整个环境连续性或完整 V1。旧私有 launch binding、patched/native artifact 和对应 live 记录仅作历史/恢复事实，不恢复旧 launchability。本规格的公共环境事实和既有 wire 核心字段保持原义。
 
 ## 1. 核心原则
 
@@ -341,20 +341,11 @@ Camoufox 是 #499 的第一验证 Provider；#519／PR #522 已按声明范围�
 | Playwright Python | `1.60.0`; source SHA-256 `39b5420ba6145045b69ced4c5c47d4d9fe5bddfc8ff816c518913afcb25ec7a5` |
 | Browser properties | `properties.json` SHA-256 `10d5cfb6c8eb3824485734362a3920e07b36c3801770fffcc14a3546e56f81f4` |
 
-固定 public Driver 只调用供应方 `launch_options`、`sync_playwright`、
-`launch_persistent_context` 和 Page API。第一次在空的受管 Profile 生成后，
-必须保存完整的 `launch_options` JSON（含 `args`、`env`、
-`executable_path`、`firefox_user_prefs`、`headless`）以及受管
-`context_options`；后续启动直接精确 replay 这两个对象，不只保存几个
-config 字段、不随机补身份、不改写上游 app/site-packages/Driver bundle。
-非空 Profile 缺少完整 bundle 时 fail closed；旧 bundle 仍可按 recovery
-规则校验，但不授予当前启动资格。
-
-`configured`、`effective`、`pending` 的公共状态继续由 §18 表达：活动
-Instance 不热改，timezone/language/viewport 的 owner 更新进入 pending，
-安全停止并按同 Profile 重启后才成为 effective；实际 Page readback 与
-bundle/Provider 摘要另列 observed/support。上述静态来源与固定材料是
-validation facts；installed/live/Plugin 证据必须继续按实际消费者和范围单独回读，不能仅由材料存在推导。
+固定 public Driver 使用完整 owner `launch_options` 与 `context_options` 保持
+身份材料；重放仅更新 bounded timezone／locale／viewport，并将当前 proxy 作为
+transient launch field，bundle 不保存 URL。私有字段、旧 bundle 兼容与 rollback
+规则见 [Camoufox Environment Continuity V1.3](camoufox-environment-continuity-v1.md)。
+`configured`／`effective`／`pending` 与 Page readback 继续按 §18 表达。
 
 ### 11.1.1 官方 Chrome 安装配对与严格持久 reader（#528）
 
