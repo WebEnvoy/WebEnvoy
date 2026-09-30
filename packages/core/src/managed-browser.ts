@@ -1634,7 +1634,7 @@ export function createManagedBrowserService(options: {
         });
       }
       const profileOperation = String(run.public_result_summary?.operation);
-      if (["running", "admitted", "unknown_outcome", "failed"].includes(run.status) &&
+      if (["running", "admitted", "unknown_outcome"].includes(run.status) &&
           ["profile.create", "profile.copy_environment", "profile.archive", "profile.delete"].includes(profileOperation) &&
           run.public_result_summary?.reconciliation !== "completed") {
         await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -1642,7 +1642,7 @@ export function createManagedBrowserService(options: {
         const lockRef = creation ? text(run.public_result_summary!.grant_id) : text(run.public_result_summary!.profile_ref);
         return withFileOwnershipLock(join(directory, `${digest(lockRef)}.lock`), 5000, async () => {
           const current = (await store.getRunRecord(runId))!;
-          if (current.status === "succeeded" || current.public_result_summary?.reconciliation === "completed") return response(current);
+          if (current.status === "succeeded" || current.status === "failed" || current.public_result_summary?.reconciliation === "completed") return response(current);
           if (current.status === "running" || current.status === "admitted") await completeRunWithFailure(store, runId, {
             status: "unknown_outcome", failure: { category: "write_outcome", code: "managed_browser_outcome_unknown", phase: "query", recovery_hint: "query_operation_without_replay" }
           });

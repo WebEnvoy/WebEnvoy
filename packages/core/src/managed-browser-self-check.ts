@@ -25,6 +25,9 @@ let malformedCopyReply = false;
 let malformedUnrelatedProfile = false;
 let archives = 0;
 let malformedArchiveReply = false;
+let rejectArchiveAsActive = false;
+let archiveReceiptReads = 0;
+const activeArchiveReceiptKeys = new Set<string>();
 let deletes = 0;
 let dropDeleteResponse = false;
 let repairDelete = false;
@@ -177,7 +180,11 @@ const server = createServer((req, res) => { void (async () => {
     } else if (input.operation === "archive") {
       archives++;
       const record = profiles.find(item => item.identity_environment_ref === input.identity_environment_ref);
-      if (!record) value = mutationReceipt({ operation: input.operation, status: "rejected", identity_environment_ref: input.identity_environment_ref,
+      if (rejectArchiveAsActive && record) {
+        value = mutationReceipt({ operation: input.operation, status: "rejected", identity_environment_ref: null,
+          failure: { code: "active_session", retryable: false, recovery_actions: [] } });
+        activeArchiveReceiptKeys.add(input.idempotency_key);
+      } else if (!record) value = mutationReceipt({ operation: input.operation, status: "rejected", identity_environment_ref: input.identity_environment_ref,
         failure: { code: "identity_environment_missing", retryable: true, recovery_actions: ["refresh_identity_list"] } });
       else {
         record.lifecycle_state = "archived";
@@ -255,7 +262,20 @@ const server = createServer((req, res) => { void (async () => {
     if (malformedCreateReply) { res.setHeader("content-type", "application/json"); res.end("[]"); return; }
     if (dropResponse) { req.socket.destroy(); return; }
     }
-  } else if (req.url?.startsWith("/runtime/identity-environment-mutations/")) value = receipts.get(decodeURIComponent(req.url.split("/").at(-1)!)) ?? environmentReceipts.get(decodeURIComponent(req.url.split("/").at(-1)!));
+  } else if (req.url?.startsWith("/runtime/identity-environment-mutations/")) {
+    const receiptKey = decodeURIComponent(req.url.split("/").at(-1)!);
+    if (req.method === "GET" && activeArchiveReceiptKeys.has(receiptKey)) {
+      archiveReceiptReads++;
+      // Model Harbor's non-2xx lookup for a rejected active-session archive.
+      res.statusCode = 404;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ failure: { code: "managed_browser_runtime_refused" } }));
+      return;
+    }
+    const receipt = receipts.get(receiptKey) ?? environmentReceipts.get(receiptKey);
+    if (req.method === "GET" && receipt && typeof receipt === "object" && (receipt as { operation?: unknown }).operation === "archive") archiveReceiptReads++;
+    value = receipt;
+  }
   else if (req.url === "/runtime/identity-environments") {
     identityEnvironmentReads++;
     await afterProfileList?.();
@@ -598,6 +618,38 @@ try {
   assert.equal((queriedArchive.result as { profile: { lifecycle_state: string; account_bindings: unknown[] } }).profile.lifecycle_state, "archived");
   assert.deepEqual((queriedArchive.result as { profile: { account_bindings: unknown[] } }).profile.account_bindings, [retainedBinding]);
   assert.equal(archives, 1);
+  const activeArchiveProfileRef = "profile:active-archive";
+  const activeArchiveIdentityRef = "identity:active-archive";
+  profiles.push({ schema_version: "harbor-local-identity-environment-store/v1", lifecycle_state: "active",
+    identity_environment_ref: activeArchiveIdentityRef, refs: { profile_ref: activeArchiveProfileRef }, name: "Active archive fixture", tags: [],
+    site: { site_id: "example", origin: "https://example.com", display_name: "Example" }, status: { readiness: "ready" }, account_bindings: [],
+    environment_summary: { provider_id: "camoufox", language: "en-US", timezone: "UTC" } });
+  await accessStore.setProfilePolicy({ idempotency_key: "active-archive-policy", profile_ref: activeArchiveProfileRef,
+    allowed_operations: ["profile.archive"], allowed_origins: [] });
+  const activeArchiveGrant = await accessStore.createGrant({ idempotency_key: "active-archive-grant", principal_id: principal.principal_id,
+    profile_refs: [activeArchiveProfileRef], allowed_operations: ["profile.archive"], allowed_origins: [],
+    expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
+  const rejectedArchiveRequest = { ...archiveRequest, idempotency_key: "archive-active-session", grant_id: activeArchiveGrant.grant_id,
+    profile_ref: activeArchiveProfileRef,
+    task_scope: { operations: ["profile.archive"], profile_refs: [activeArchiveProfileRef], origins: [] } } as const;
+  rejectArchiveAsActive = true;
+  const rejectedArchive = await service.submit(credentialHash, rejectedArchiveRequest);
+  rejectArchiveAsActive = false;
+  assert.equal(rejectedArchive.status, "failed");
+  assert.equal(rejectedArchive.failure?.code, "active_session");
+  const archivePostCount = archives;
+  const receiptReadCount = archiveReceiptReads;
+  const sameKeyArchive = await service.submit(credentialHash, rejectedArchiveRequest);
+  assert.equal(sameKeyArchive.status, "failed");
+  assert.equal(sameKeyArchive.failure?.code, "active_session", "the same idempotency key returns the original final rejection");
+  const rejectedArchiveQuery = await service.query(credentialHash, rejectedArchive.run_id);
+  const repeatedRejectedArchiveQuery = await service.query(credentialHash, rejectedArchive.run_id);
+  for (const queried of [rejectedArchiveQuery, repeatedRejectedArchiveQuery]) {
+    assert.equal(queried.status, "failed");
+    assert.equal(queried.failure?.code, "active_session", "a final Harbor rejection must remain unchanged by query");
+  }
+  assert.equal(archives, archivePostCount, "query must never replay the original archive mutation");
+  assert.equal(archiveReceiptReads, receiptReadCount, "a final failure does not need receipt lookup; non-2xx cannot rewrite it");
   const startArchived = await service.submit(credentialHash, { ...archiveRequest, idempotency_key: "start-archived", operation: "instance.start",
     origin: "https://example.com", task_scope: { operations: ["instance.start"], profile_refs: [copySourceProfileRef], origins: ["https://example.com"] } });
   assert.equal(startArchived.failure?.code, "managed_browser_profile_archived");
