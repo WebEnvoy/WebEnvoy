@@ -79,6 +79,7 @@ const profileImportReceipts = new Map<string, Record<string, unknown>>();
 let profileManagementSessionsOpened = 0, profileManagementSessionsStopped = 0, profileImportWrites = 0;
 let profileManagementSessionRef: string | null = null, pendingProfileImport = false;
 let revokedProfileSourceRef: string | null = null;
+let delayedProfileSourceLookup: { sourceRef: string; started: () => void; wait: Promise<void> } | null = null;
 const profileImportEvents: string[] = [];
 let providerCatalogReads = 0;
 let profileMigrationFactReads = 0;
@@ -291,6 +292,12 @@ const server = createServer((req, res) => { void (async () => {
   else if (req.url?.startsWith("/runtime/profile-sources/")) {
     const sourceRef = decodeURIComponent(req.url.split("/").at(-1)!);
     if (!/^profile-source:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(sourceRef)) { res.writeHead(404); res.end("{}"); return; }
+    if (delayedProfileSourceLookup?.sourceRef === sourceRef) {
+      const delayed = delayedProfileSourceLookup;
+      delayed.started();
+      await delayed.wait;
+      delayedProfileSourceLookup = null;
+    }
     value = { source: { schema_version: "harbor-profile-source/v1", source_ref: sourceRef, provider_id: "camoufox", source_format: "camoufox.firefox-places.v86",
       bookmark_count: 1, registered_at: new Date().toISOString(), expires_at: new Date(Date.now() + 60_000).toISOString(),
       revoked_at: sourceRef === revokedProfileSourceRef ? new Date().toISOString() : null } };
@@ -1252,6 +1259,30 @@ try {
   assert.equal(creates, createsBeforeFailedImport, "known source failure creates no target");
   assert.equal(profileManagementSessionsOpened, sessionsBeforeFailedImport, "known source failure opens no initialization session");
   assert.equal(profileImportWrites, writesBeforeFailedImport, "known source failure dispatches no Harbor import");
+
+  const concurrentRevokeSourceRef = `profile-source:${randomUUID()}`;
+  const concurrentRevokeGrant = await accessStore.createGrant({ idempotency_key: "profile-import-concurrent-revoke-grant", principal_id: principal.principal_id,
+    profile_refs: [], profile_source_refs: [concurrentRevokeSourceRef], allowed_operations: ["profile.import"], allowed_origins: ["https://example.com"],
+    expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 1, creation_template: grant.creation_template });
+  const concurrentRevokeRequest = { ...importRequest, idempotency_key: "profile-import-concurrent-revoke", grant_id: concurrentRevokeGrant.grant_id,
+    profile_source_ref: concurrentRevokeSourceRef, task_scope: { ...importRequest.task_scope, profile_source_refs: [concurrentRevokeSourceRef] } };
+  let sourceLookupStarted!: () => void, releaseSourceLookup!: () => void;
+  const sourceLookupStartedPromise = new Promise<void>(resolve => { sourceLookupStarted = resolve; });
+  const sourceLookupGate = new Promise<void>(resolve => { releaseSourceLookup = resolve; });
+  delayedProfileSourceLookup = { sourceRef: concurrentRevokeSourceRef, started: sourceLookupStarted, wait: sourceLookupGate };
+  const createsBeforeConcurrentRevoke = creates, sessionsBeforeConcurrentRevoke = profileManagementSessionsOpened, writesBeforeConcurrentRevoke = profileImportWrites;
+  const inFlightImport = service.submit(credentialHash, concurrentRevokeRequest);
+  await sourceLookupStartedPromise;
+  await accessStore.revokeGrant({ idempotency_key: "profile-import-revoke-during-source-query", grant_id: concurrentRevokeGrant.grant_id });
+  releaseSourceLookup();
+  const revokedDuringSourceQuery = await inFlightImport;
+  assert.equal(revokedDuringSourceQuery.status, "failed", JSON.stringify(revokedDuringSourceQuery));
+  assert.equal(revokedDuringSourceQuery.failure?.code, "managed_access_grant_unavailable");
+  assert.equal(creates, createsBeforeConcurrentRevoke, "a Grant revoked during Harbor source lookup does not dispatch target creation");
+  assert.equal(profileManagementSessionsOpened, sessionsBeforeConcurrentRevoke, "a revoked import does not initialize a target");
+  assert.equal(profileImportWrites, writesBeforeConcurrentRevoke, "a revoked import does not dispatch the data import");
+  assert.deepEqual((await accessStore.list()).grants.find(item => item.grant_id === concurrentRevokeGrant.grant_id)?.created_profile_refs, [],
+    "a Grant revoked during source lookup does not consume a Profile creation quota slot");
 
   const revokedImportGrant = await accessStore.createGrant({ idempotency_key: "profile-import-revoked-grant", principal_id: principal.principal_id,
     profile_refs: [], profile_source_refs: [profileSourceRef], allowed_operations: ["profile.import"], allowed_origins: ["https://example.com"],

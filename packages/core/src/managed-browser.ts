@@ -867,6 +867,8 @@ export function createManagedBrowserService(options: {
         return fail("managed_browser_profile_source_unavailable");
       }
       const createKey = `${runId}:target-create`;
+      await check();
+      await ensureTaskActive();
       const created = await runtimeHarbor("/runtime/identity-environment-mutations", { operation: "create", idempotency_key: createKey,
         identity_environment: { site: template.site, ...(template.provider_id === null ? {} : { requested_provider_id: template.provider_id }), language: template.language, timezone: template.timezone } });
       if (created.status === "rejected") return fail(text(object(created.failure).code));
