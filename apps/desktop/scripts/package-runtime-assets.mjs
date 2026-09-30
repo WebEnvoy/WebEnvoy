@@ -273,7 +273,8 @@ const managedRecoveryService = harborRuntimeUrl
 const managedBrowserService = harborRuntimeUrl
   ? createManagedBrowserService({ accessStore: managedAccessStore, runRecordStore, authorizationDecisionStore, executionPolicyConfigStore,
       harborBaseUrl: harborRuntimeUrl, supervisorToken: process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN ?? "",
-      ...(managedRecoveryService === undefined ? {} : { recoveryService: managedRecoveryService }) })
+      ...(managedRecoveryService === undefined ? {} : { recoveryService: managedRecoveryService }),
+      ...(managedAccountSystemService === undefined ? {} : { accountSystemService: managedAccountSystemService }) })
   : undefined;
 const workerOwnerUid = Number(process.env.WEBENVOY_SITE_WORKER_OWNER_UID);
 const workerAgentUid = Number(process.env.WEBENVOY_SITE_WORKER_AGENT_UID);
