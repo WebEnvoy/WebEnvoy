@@ -68,7 +68,7 @@ Owner：Core／Harbor Runtime／安装入口共同实现，CLI 合同由本规�
 - setup、access list|register|grant|grant-v2|policy-v2|revoke|operation、files import|inspect|export|revoke|delete、recovery inspect|backup|plan|apply|status、start、diagnose、stop、uninstall、instance 和 agent。
 - 正式 setup 以 owner 的 --data-dir 和可选 --agent-uid 记录安装身份、Agent endpoint 与 OS boundary，只输出不含 secret 的公开 bootstrap；独立 Agent UID 再以 agent setup 创建自己的 client 文件、host MCP 配置、SKILL 和 installation receipt。两阶段均保持 data／host 目录为 0700、client 文件为 0600；owner setup 不写 Agent host 文件。
 - owner 路径通过本地 Runtime service 的 owner control channel；Agent MCP 读取 host 中的 webenvoy-client.json，通过独立 client credential 进入 /agent-connections 和 managed operation 路径。0600 和目录分开不构成同 UID 进程隔离；目标合同要求 Agent route 按 credential、Principal、Grant 与角色执行，且不经 Agent plane 暴露 owner／supervisor secret。
-- access grant、grant-v2、policy-v2 的输入文件有明确允许字段；files 与 recovery 已有 owner-only 路由；Agent 工具不能执行 owner grant、backup、plan、apply。
+- access grant、grant-v2、policy-v2 的输入文件有明确允许字段并透传准确 AccountSystem／binding 授权选择；files 与 recovery 已有 owner-only 路由；Agent 工具不能执行 owner grant、backup、plan、apply。
 - Core 的 managed-access receipt 以 `idempotency_key` 的 hash 和请求 hash 去重；当前 CLI 的 `access register` 会在省略 key 时随机生成 owner-local key，`recovery inspect` 也会在省略 key 时生成 owner-local key。owner files 的 `/owner/files/import` 可记录可选 `operation_ref`，但现有 `importFile` 只保存该关联值，不以它去重；`export`、`revoke` 和 `delete` 也没有 caller key。
 - Agent MCP 已有 webenvoy_status、webenvoy_skill、webenvoy_connect、webenvoy_describe、webenvoy_operation、webenvoy_query、webenvoy_recovery、webenvoy_skills，并将 browser operation 映射到 /managed-browser/operations。
 - 正式 hostConfig() 使用独立 Runtime launcher；Electron 与 ELECTRON_RUN_AS_NODE 只属于历史兼容材料。当前 setup 输出的 next 是 Agent UID setup 后由 owner CLI register／grant，不要求打开 App。
@@ -233,7 +233,7 @@ setup 的 Provider 参数保持现有实现的命名和校验，不另建 Provid
     webenvoy access revoke --data-dir DIR --kind principals|connections|grants --id ID --idempotency-key KEY
     webenvoy access operation --data-dir DIR --operation-ref REF
 
-grant JSON 只允许以下字段：idempotency_key、principal_id、profile_refs、allowed_operations、allowed_origins、expires_at、creation_template、max_created_profiles、skill_scope、file_scope；其中 `idempotency_key` 是必填的 caller key。grant-v2 另外使用已有 v2 字段：source_grant_id、source_grant_digest、policy_digest、replaces_grant_id、replaces_grant_digest，以及同一 scope／expiry 字段，`idempotency_key` 同样必填。policy-v2 只允许 idempotency_key、profile_ref、current_policy_digest、allowed_operations、allowed_origins、controlled_interaction_origins，`idempotency_key` 必填。缺 key 或空 key 是本地 usage error；额外字段必须在发送前拒绝。
+grant JSON 只允许以下字段：idempotency_key、principal_id、profile_refs、allowed_operations、allowed_origins、expires_at、creation_template、max_created_profiles、skill_scope、file_scope、account_system_scope、account_binding_scopes；其中 `idempotency_key` 是必填的 caller key。grant-v2 另外使用已有 v2 字段：source_grant_id、source_grant_digest、policy_digest、replaces_grant_id、replaces_grant_digest，以及同一 scope／expiry 字段，`idempotency_key` 同样必填。`account_system_scope.template_refs` 是获准导入的完整模板引用；`account_binding_scopes` 是 `{profile_ref,account_system_ref,account_ref}` 精确 tuple 列表。字段即使透传成功，也由 Core 按 owner policy 和 Grant 合同校验；省略 scope 不授予相应 Agent operation。policy-v2 只允许 idempotency_key、profile_ref、current_policy_digest、allowed_operations、allowed_origins、controlled_interaction_origins，`idempotency_key` 必填。缺 key 或空 key 是本地 usage error；额外字段必须在发送前拒绝。
 
 以下恢复命令沿用现有 [installed profile recovery](installed-profile-recovery-v1.md) owner 合同：
 
@@ -268,7 +268,7 @@ caller key 是调用方在提交前生成并保存的稳定 `idempotency_key`。
 
 #### 5.3.2 owner Account binding
 
-Account/Profile binding 是单独的可信 owner 决定。AccountSystem 模板和 Agent 不能声明或推断登录身份；Core 只把 owner 提供的已观察 refs 转交 Harbor，Harbor 对当前 holder 复核原 observation 并执行 fresh observation 后持久化。该入口不增加 Agent Grant 权限，`account.bind` 仍为 `not_exposed`。
+Account/Profile binding 是单独授权的决定。Agent `account.bind` 要求 owner 明确在 Grant 的 `account_binding_scopes` 中加入精确 `{profile_ref,account_system_ref,account_ref}` tuple，并在 task scope 指定相同 tuple、Profile 与 origin；实际绑定仍要用当前 Runtime Session/Page observation 并经 Harbor 验证。AccountSystem 模板和 Agent 不能声明或推断登录身份。下列 owner `account bind` 命令保留可信用户入口；它由 owner 确认并从已观察的现场派生 holder，与 Agent operation 共用 Harbor 现场校验但各自走对应 Core 授权入口。
 
     webenvoy account bindings --data-dir DIR --identity-environment-ref REF
     webenvoy account bind --data-dir DIR --profile-ref PROFILE --identity-environment-ref REF --runtime-session-ref SESSION --observation-ref OBSERVATION --account-system-ref ACCOUNT_SYSTEM --account-ref ACCOUNT --idempotency-key KEY --confirm
@@ -404,12 +404,14 @@ agent operation、已安装 Plugin webenvoy_operation 和直接 API consumer 使
 | 类型 | operation |
 | --- | --- |
 | Profile | profile.create、profile.copy_environment、profile.archive、profile.delete、profile.list、profile.read、profile.metadata.update |
+| AccountSystem | account_system.import_template（Core local definition；`webenvoy_operation`） |
+| Account binding | account.bind（精确 owner Grant tuple 与 task scope；Harbor fresh observation／ControlLease validation） |
 | Provider preference | provider.preference.read、provider.preference.set、provider.preference.clear |
 | Instance／environment | instance.start、instance.observe、instance.diagnostics、environment.read、environment.update、instance.navigate、instance.read、instance.snapshot、instance.click、instance.input、instance.press、instance.scroll、instance.wait、instance.handoff、instance.stop |
 | Page | page.list、page.open、page.activate、page.close、page.navigate、page.reload、page.back、page.forward |
 | File | file.upload、file.download |
 
-account.bind 可以存在于 Core capability definition，但当前未暴露给 Agent；CLI 不得自行暴露。recovery.* 与 skill.* 通过各自 managed operation projection 处理。
+CLI 按已安装 `managed-capability-definitions.json` 投影这些正式 operation，不自建名单。`account_system.import_template` 通过标准 managed operation／Core Run 执行；`account.bind` 通过标准 managed operation／Run 查询原 Harbor receipt，要求精确 owner Grant tuple 和 task scope。可信 owner `account bind` 命令是另一入口。recovery.* 与 skill.* 通过各自 managed operation projection 处理。
 
 ### 6.2 映射表
 

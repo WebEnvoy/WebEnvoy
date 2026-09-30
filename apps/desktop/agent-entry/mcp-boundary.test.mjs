@@ -104,6 +104,8 @@ test('MCP AccountSystem tool sends only the fixed read projection request', asyn
           ? { ok: true, connection: { connection_id: 'connection:account-test', principal_id: 'principal:account-test' } }
           : request.url === '/managed-account-systems/operations'
             ? { ok: true, result: projection }
+            : request.url === '/managed-browser/operations'
+              ? { ok: true, run_id: 'managed-import', status: 'succeeded', result: projection }
             : { ok: false, error: { code: 'not_found' } };
       response.setHeader('content-type', 'application/json');
       response.end(JSON.stringify(result));
@@ -140,6 +142,32 @@ test('MCP AccountSystem tool sends only the fixed read projection request', asyn
       schema_version: 'webenvoy.account-system-agent-operation/v1', operation: 'account_system.read',
       connection_id: 'connection:account-test', grant_id: 'grant:account', template_ref: 'lode://account-system/github@1.0.0'
     });
+    const imported = await call(5, 'tools/call', { name: 'webenvoy_operation', arguments: {
+      idempotency_key: 'account-import-001', grant_id: 'grant:account-import', operation: 'account_system.import_template',
+      task_scope: { operations: ['account_system.import_template'], template_refs: ['lode://account-system/github@1.0.0'] },
+      template_ref: 'lode://account-system/github@1.0.0'
+    } });
+    assert.equal(imported.result.isError, undefined);
+    const submitted = received.find(item => item.path === '/managed-browser/operations');
+    assert.deepEqual(submitted.body, {
+      idempotency_key: 'account-import-001', grant_id: 'grant:account-import', operation: 'account_system.import_template',
+      task_scope: { operations: ['account_system.import_template'], template_refs: ['lode://account-system/github@1.0.0'] },
+      template_ref: 'lode://account-system/github@1.0.0', connection_id: 'connection:account-test'
+    });
+    const bindingScope = { profile_ref: 'profile:github', account_system_ref: 'account-system:github', account_ref: `account:sha256:${'a'.repeat(64)}` };
+    const bound = await call(6, 'tools/call', { name: 'webenvoy_operation', arguments: {
+      idempotency_key: 'account-bind-001', grant_id: 'grant:account-bind', operation: 'account.bind',
+      task_scope: { operations: ['account.bind'], profile_refs: ['profile:github'], origins: ['https://github.com'], account_binding_scopes: [bindingScope] },
+      profile_ref: 'profile:github', origin: 'https://github.com', runtime_session_ref: 'session:github',
+      page_id: 'page:github', page_ref: 'page-ref:github', document_generation: 1,
+      observation_ref: 'observation:github', account_system_ref: bindingScope.account_system_ref, account_ref: bindingScope.account_ref
+    } });
+    assert.equal(bound.result.isError, undefined);
+    const binding = received.filter(item => item.path === '/managed-browser/operations').at(-1);
+    assert.deepEqual(binding.body.task_scope, {
+      operations: ['account.bind'], profile_refs: ['profile:github'], origins: ['https://github.com'], account_binding_scopes: [bindingScope]
+    });
+    assert.equal(binding.body.operation, 'account.bind');
   } finally {
     child.kill('SIGTERM');
     await new Promise(resolve => server.close(resolve));

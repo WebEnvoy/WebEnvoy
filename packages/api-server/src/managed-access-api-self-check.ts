@@ -221,12 +221,28 @@ async function assertManagedAccountSystemRoute(): Promise<void> {
   });
   const unscopedGrant = await access.createGrant({
     idempotency_key: "grant-without-template-scope", principal_id: principal.principal_id, profile_refs: [],
+    allowed_operations: ["account_system.import_template"], allowed_origins: [], expires_at: new Date(Date.now() + 60_000).toISOString(),
+    creation_template: null, max_created_profiles: 0
+  });
+  const unscopedReadGrant = await access.createGrant({
+    idempotency_key: "grant-without-read-skill-scope", principal_id: principal.principal_id, profile_refs: [],
     allowed_operations: ["skill.inspect"], allowed_origins: [], expires_at: new Date(Date.now() + 60_000).toISOString(),
     creation_template: null, max_created_profiles: 0
   });
+  const importGrant = await access.createGrant({
+    idempotency_key: "grant-with-template-import-scope", principal_id: principal.principal_id, profile_refs: [],
+    allowed_operations: ["account_system.import_template"], allowed_origins: [], expires_at: new Date(Date.now() + 60_000).toISOString(),
+    creation_template: null, max_created_profiles: 0, account_system_scope: { template_refs: [templateRef] }
+  });
+  const accountSystemService = createManagedAccountSystemReadService({ managedAccessStore: access, accountSystemDefinitionService: definitions });
+  const runRecordStore = createFileRunRecordStore({ directory: join(directory, "runs") });
   const server = createApiServer({
     supervisorToken: ownerToken, managedAccessStore: access,
-    managedAccountSystemService: createManagedAccountSystemReadService({ managedAccessStore: access, accountSystemDefinitionService: definitions })
+    managedAccountSystemService: accountSystemService,
+    managedBrowserService: createManagedBrowserService({ accessStore: access, runRecordStore,
+      authorizationDecisionStore: createFileAuthorizationDecisionStore({ directory: join(directory, "authorization") }),
+      executionPolicyConfigStore: createFileExecutionPolicyConfigStore({ directory: join(directory, "policy") }),
+      harborBaseUrl: "http://127.0.0.1:1", supervisorToken: ownerToken, accountSystemService })
   });
   const port = await listen(server);
   const call = async (grantId: string) => {
@@ -234,6 +250,14 @@ async function assertManagedAccountSystemRoute(): Promise<void> {
       method: "POST", headers: { authorization: `Bearer ${agentToken}`, "content-type": "application/json" },
       body: JSON.stringify({ schema_version: "webenvoy.account-system-agent-operation/v1", operation: "account_system.read",
         connection_id: connection.connection_id, grant_id: grantId, template_ref: templateRef })
+    });
+    return { status: response.status, body: await response.json() as Record<string, any> };
+  };
+  const operation = async (grantId: string, idempotencyKey: string, requestedTemplateRef = templateRef) => {
+    const response = await fetch(`http://127.0.0.1:${port}/managed-browser/operations`, {
+      method: "POST", headers: { authorization: `Bearer ${agentToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ idempotency_key: idempotencyKey, connection_id: connection.connection_id, grant_id: grantId,
+        operation: "account_system.import_template", task_scope: { operations: ["account_system.import_template"], template_refs: [requestedTemplateRef] }, template_ref: requestedTemplateRef })
     });
     return { status: response.status, body: await response.json() as Record<string, any> };
   };
@@ -246,7 +270,42 @@ async function assertManagedAccountSystemRoute(): Promise<void> {
     assert.equal(read.body.result.identity_state, "unknown");
     assert.equal(read.body.result.evaluation_state, "not_evaluated");
     assert.equal(Object.keys(read.body.result).some(key => /cookie|credential|identity_method|email/i.test(key)), false);
-    const unscoped = await call(unscopedGrant.grant_id);
+    const importedAgain = await operation(importGrant.grant_id, "agent-import-template");
+    assert.equal(importedAgain.status, 200, JSON.stringify(importedAgain.body));
+    assert.equal(importedAgain.body.status, "succeeded");
+    assert.equal(importedAgain.body.result.local_definition_ref, imported.local_definition_ref);
+    assert.equal(importedAgain.body.result.local_revision_ref, imported.revision_ref);
+    assert.equal(importedAgain.body.result.template_ref, templateRef);
+    const retry = await operation(importGrant.grant_id, "agent-import-template");
+    assert.deepEqual(retry.body, importedAgain.body, "same import key returns the one persisted result without another import");
+    const query = await fetch(`http://127.0.0.1:${port}/managed-browser/operations/${importedAgain.body.run_id}`, {
+      headers: { authorization: `Bearer ${agentToken}` }
+    });
+    const queried = await query.json() as Record<string, any>;
+    assert.equal(queried.status, "succeeded");
+    assert.equal(queried.result.local_revision_ref, imported.revision_ref);
+    const changedRequest = await operation(importGrant.grant_id, "agent-import-template", "lode://account-system/github@1.0.1");
+    assert.equal(changedRequest.status, 409);
+    assert.equal(changedRequest.body.error.code, "managed_browser_idempotency_conflict");
+    const denied = await operation(unscopedGrant.grant_id, "unscoped-template-import");
+    assert.equal(denied.status, 403);
+    assert.equal(denied.body.error.code, "managed_access_denied");
+    const describe = await fetch(`http://127.0.0.1:${port}/managed-browser/capabilities/describe`, {
+      method: "POST", headers: { authorization: `Bearer ${agentToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ operation: "account_system.import_template", connection_id: connection.connection_id,
+        context: { grant_id: importGrant.grant_id, task_scope: { operations: ["account_system.import_template"], template_refs: [templateRef] } }, arguments: { template_ref: templateRef } })
+    });
+    const described = await describe.json() as Record<string, any>;
+    assert.equal(described.authorization.state, "allowed");
+    assert.equal(described.provider.state, "not_evaluated", "Core AccountSystem metadata description must not call Harbor");
+    const unscopedDescription = await fetch(`http://127.0.0.1:${port}/managed-browser/capabilities/describe`, {
+      method: "POST", headers: { authorization: `Bearer ${agentToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ operation: "account_system.import_template", connection_id: connection.connection_id,
+        context: { grant_id: unscopedGrant.grant_id, task_scope: { operations: ["account_system.import_template"], template_refs: [templateRef] } }, arguments: { template_ref: templateRef } })
+    });
+    const unscopedDescribed = await unscopedDescription.json() as Record<string, any>;
+    assert.equal(unscopedDescribed.authorization.state, "denied");
+    const unscoped = await call(unscopedReadGrant.grant_id);
     assert.equal(unscoped.status, 403);
     assert.equal(unscoped.body.error.code, "managed_access_denied");
     await definitions.disable({ local_definition_ref: String(imported.local_definition_ref), expected_record_version: Number(imported.record_version) });

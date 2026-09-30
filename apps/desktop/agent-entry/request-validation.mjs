@@ -56,7 +56,24 @@ function assertField(value, schema, code) {
   }
 }
 
-function assertTaskScope(scope, fileScope, code) {
+function assertTaskScope(scope, definition, code) {
+  if (definition?.id === 'account_system.import_template') {
+    assertExactObject(scope, ['operations', 'template_refs'], code);
+    for (const key of ['operations', 'template_refs']) if (!Array.isArray(scope[key]) || scope[key].some(value => typeof value !== 'string')) throw new Error(code);
+    if (scope.operations.length !== 1 || scope.operations[0] !== definition.id || scope.template_refs.length !== 1 || scope.template_refs.some(value => !/^lode:\/\/account-system\/[a-z0-9][a-z0-9._-]*@[0-9]+\.[0-9]+\.[0-9]+$/.test(value))) throw new Error(code);
+    return;
+  }
+  if (definition?.id === 'account.bind') {
+    assertExactObject(scope, ['operations', 'profile_refs', 'origins', 'account_binding_scopes'], code);
+    for (const key of ['operations', 'profile_refs', 'origins']) if (!Array.isArray(scope[key]) || scope[key].some(value => typeof value !== 'string')) throw new Error(code);
+    if (scope.operations.length !== 1 || scope.operations[0] !== definition.id || !Array.isArray(scope.account_binding_scopes) || !scope.account_binding_scopes.length) throw new Error(code);
+    for (const tuple of scope.account_binding_scopes) {
+      assertExactObject(tuple, ['profile_ref', 'account_system_ref', 'account_ref'], code);
+      if (typeof tuple.profile_ref !== 'string' || !/^account-system:[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(tuple.account_system_ref) || !/^account:sha256:[a-f0-9]{64}$/.test(tuple.account_ref)) throw new Error(code);
+    }
+    return;
+  }
+  const fileScope = definition?.file_scope;
   const keys = ['operations', 'profile_refs', 'origins', ...(fileScope ? ['file_refs'] : [])];
   assertExactObject(scope, keys, code);
   for (const key of ['operations', 'profile_refs', 'origins']) if (!Array.isArray(scope[key]) || scope[key].some(value => typeof value !== 'string')) throw new Error(code);
@@ -260,8 +277,16 @@ export function validateOperationRequest(value, definitions) {
   if (Object.keys(value).some(key => !allowedTop.includes(key)) || typeof value.idempotency_key !== 'string' || !value.idempotency_key.length || value.idempotency_key.length > 512 || typeof value.grant_id !== 'string' || !value.grant_id.length || typeof value.operation !== 'string') throw new Error(code);
   const definition = exposed.find(item => item.id === value.operation);
   if (!definition) throw new Error(code);
-  assertTaskScope(value.task_scope, definition.file_scope, code);
+  assertTaskScope(value.task_scope, definition, code);
   if (!value.task_scope.operations.includes(definition.id)) throw new Error(code);
+  if (definition.id === 'account_system.import_template' && value.task_scope.template_refs[0] !== value.template_ref) throw new Error(code);
+  if (definition.id === 'account.bind') {
+    const tuple = value.task_scope.account_binding_scopes[0];
+    if (value.task_scope.profile_refs.length !== 1 || value.task_scope.profile_refs[0] !== value.profile_ref ||
+      value.task_scope.origins.length !== 1 || value.task_scope.origins[0] !== value.origin ||
+      value.task_scope.account_binding_scopes.length !== 1 || tuple.profile_ref !== value.profile_ref ||
+      tuple.account_system_ref !== value.account_system_ref || tuple.account_ref !== value.account_ref) throw new Error(code);
+  }
   if (definition.file_scope === 'upload' && !/^attachment:runtime\/[0-9a-f-]{36}$/.test(value.task_scope.file_refs[0])) throw new Error(code);
   for (const [key, field] of Object.entries(fields)) if (Object.hasOwn(value, key)) assertField(value[key], field, code);
   if (Object.keys(value).some(key => fields[key] && !definition.allowed.includes(key))) throw new Error(code);
@@ -291,10 +316,12 @@ export function validateDescribeRequest(value, definitions) {
   assertString(value.operation, code);
   if (!(new RegExp(definitions.operation_pattern).test(value.operation))) throw new Error(code);
   if (value.context !== undefined) {
-    const context = assertExactObject(value.context, ['grant_id', 'profile_ref', 'task_scope'], code);
+    const definition = definitions.operations.find(item => item.id === value.operation);
+    const core = definition?.context === 'core';
+    const context = assertExactObject(value.context, ['grant_id', 'task_scope', ...(core ? [] : ['profile_ref'])], code);
     assertString(context.grant_id, code);
-    assertString(context.profile_ref, code);
-    assertTaskScope(context.task_scope, definitions.operations.find(item => item.id === value.operation)?.file_scope, code);
+    if (!core) assertString(context.profile_ref, code);
+    assertTaskScope(context.task_scope, definition, code);
   }
   if (value.arguments !== undefined) {
     const draft = assertObject(value.arguments, code);

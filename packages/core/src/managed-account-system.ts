@@ -96,9 +96,16 @@ function projectLocalDefinition(value: unknown, requestedTemplateRef: string): M
 /** Agent-facing, read-only AccountSystem projection guarded by an existing skill.inspect Grant. */
 export function createManagedAccountSystemReadService(options: {
   managedAccessStore: Pick<FileManagedAccessStore, "checkAccess">;
-  accountSystemDefinitionService: Pick<FileAccountSystemDefinitionStore, "resolveTemplate">;
+  accountSystemDefinitionService: Pick<FileAccountSystemDefinitionStore, "resolveTemplate"> & Partial<Pick<FileAccountSystemDefinitionStore, "importTemplate">>;
 }) {
   return {
+    async importTemplate(templateRefValue: string): Promise<ManagedAccountSystemAgentProjection> {
+      const template_ref = string(templateRefValue);
+      if (!/^lode:\/\/account-system\/[a-z0-9][a-z0-9._-]*@[0-9]+\.[0-9]+\.[0-9]+$/.test(template_ref)) return fail("managed_account_system_invalid_input");
+      const importer = options.accountSystemDefinitionService.importTemplate;
+      if (!importer) return fail("account_system_definition_unavailable");
+      return projectLocalDefinition(await importer({ template_ref }), template_ref);
+    },
     async read(credentialHash: string, value: unknown): Promise<ManagedAccountSystemAgentProjection> {
       const request = parseRequest(value);
       await options.managedAccessStore.checkAccess(credentialHash, {

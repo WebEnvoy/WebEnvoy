@@ -112,7 +112,7 @@ assert.deepEqual(harborCalls.map(call => [call.method, call.path]), [
 ]);
 assert.equal(harborCalls[0]?.authorization, "Bearer harbor-supervisor-token-0123456789abcdef");
 assert.deepEqual(harborCalls[1]?.body, {
-  observation_ref: observationRef, account_system_ref: accountSystemRef, account_ref: accountRef,
+  observation_ref: observationRef, runtime_session_ref: runtimeSessionRef, account_system_ref: accountSystemRef, account_ref: accountRef,
   idempotency_key: "bind-github-once-001", holder_ref: "run:harbor-derived"
 });
 

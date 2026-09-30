@@ -8,6 +8,8 @@ const fixtureSession = "session:fixture";
 const fixturePage = "page:fixture";
 const fixturePageRef = "page-ref:fixture";
 const fixtureObservation = "observation:fixture";
+const fixtureAccountSystem = "account-system:github";
+const fixtureAccount = `account:sha256:${"a".repeat(64)}`;
 const fixtureTarget = "target:fixture";
 const fixtureFile = "attachment:runtime/11111111-1111-4111-8111-111111111111";
 
@@ -21,7 +23,9 @@ function fixtureField(field: string, operation: string): unknown {
   if (field === "name") return "Research";
   if (field === "tags") return ["github", "team"];
   if (field === "origin") return fixtureOrigin;
-  if (field === "template_ref") return "template:fixture";
+  if (field === "template_ref") return operation === "account_system.import_template" ? "lode://account-system/github@1.0.0" : "template:fixture";
+  if (field === "account_system_ref") return fixtureAccountSystem;
+  if (field === "account_ref") return fixtureAccount;
   if (field === "confirmation") return "delete_local_data";
   if (field === "url") return "https://example.com/next";
   if (field === "runtime_session_ref") return fixtureSession;
@@ -44,6 +48,9 @@ function fixtureField(field: string, operation: string): unknown {
 }
 
 function fixtureTaskScope(definition: (typeof managedCapabilityDefinitions.operations)[number]): Record<string, unknown> {
+  if (definition.id === "account_system.import_template") return { operations: [definition.id], template_refs: ["lode://account-system/github@1.0.0"] };
+  if (definition.id === "account.bind") return { operations: [definition.id], profile_refs: [fixtureProfile], origins: [fixtureOrigin],
+    account_binding_scopes: [{ profile_ref: fixtureProfile, account_system_ref: fixtureAccountSystem, account_ref: fixtureAccount }] };
   const scope: Record<string, unknown> = {
     operations: [definition.id],
     profile_refs: definition.context === "profile" ? [fixtureProfile] : [],
@@ -81,7 +88,7 @@ const observation = {
   runtime_session_ref: "session:fixture"
 };
 
-assert.equal(managedCapabilityDefinitions.operations.length, 41);
+assert.equal(managedCapabilityDefinitions.operations.length, 42);
 assert.match(managedCapabilityDefinition("profile.read")?.summary ?? "", /current identity, binding history and Harbor ownership/);
 assert.match(managedCapabilityDefinition("profile.list")?.summary ?? "", /conflicting or unknown identity does not block the read/);
 assert.deepEqual(managedCapabilityInputFields("instance.observe"), [
@@ -178,7 +185,7 @@ assert.throws(() => parseManagedBrowserRequest({ ...pageOpen, url: "https://othe
 assert.throws(() => parseManagedBrowserRequest({ ...observation, operation: "instance.navigate" }), /managed_browser_invalid_input/);
 assert.equal(managedCapabilityDefinition("page.open")?.required.includes("url"), false);
 assert.equal(managedCapabilityDefinition("page.open")?.allowed.includes("page_id"), false);
-assert.equal(managedCapabilityDefinition("account.bind")?.exposure, "not_exposed");
+assert.equal(managedCapabilityDefinition("account.bind")?.exposure, "exposed");
 
 for (const definition of managedCapabilityDefinitions.operations.filter(item => item.exposure === "exposed")) {
   const fixture = parserFixture(definition);

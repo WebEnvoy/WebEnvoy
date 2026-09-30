@@ -15,6 +15,7 @@ import { evaluateExecutionPolicy } from "./execution-policy.js";
 import { completeRunWithFailure, completeRunWithResult } from "./result-envelope.js";
 import { ProfileRecoveryCoreError, type ManagedRecoveryService } from "./profile-recovery.js";
 import { projectManagedProviderCatalogFacts, projectManagedProviderPreference, providerFactsMatchPreference } from "./managed-provider-facts.js";
+import type { ManagedAccountSystemReadService } from "./managed-account-system.js";
 import {
   managedCapabilityDefinition,
   managedCapabilityDefinitions,
@@ -32,7 +33,7 @@ type ObjectValue = Record<string, unknown>;
 type EnvironmentConfiguration = { timezone?: string; language?: string; viewport?: string };
 type Request = ManagedAccessRequest & { idempotency_key: string; url?: string; name?: string; tags?: string[]; label?: string; confirmation?: "delete_local_data"; runtime_session_ref?: string; observation_ref?: string; account_system_ref?: string; account_ref?: string; business_target_ref?: string; declared_external_id?: string;
   page_id?: string; page_ref?: string; document_generation?: number; cursor?: string; limit?: number; target_ref?: string; file_ref?: string; text?: string; key?: string; delta_y?: number; wait_for?: "page_changed" | "text" | "enabled"; timeout_ms?: number; configuration?: EnvironmentConfiguration; backup_ref?: string; operation_ref?: string; provider_id?: "cloakbrowser" | "chrome_official" | "camoufox" };
-type DescribeContext = { grant_id: string; profile_ref: string; task_scope: ManagedAccessRequest["task_scope"] };
+type DescribeContext = { grant_id: string; profile_ref?: string; task_scope: ObjectValue };
 type DescribeInput = { operation: string; connection_id: string; context?: DescribeContext; arguments?: ObjectValue };
 type DiscoveryDimensionState = "supported" | "limited" | "unsupported" | "unknown" | "not_applicable" | "not_evaluated";
 type DiscoveryAvailabilityState = "no_known_blocker" | "blocked" | "unknown" | "not_evaluated";
@@ -110,6 +111,10 @@ function isDeterministicWaitTimeout(receipt: ObjectValue | undefined): boolean {
 }
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const fail = (code: string): never => { throw new ManagedAccessError(code); };
+const accountBindingNoWriteFailureCodes = new Set([
+  "invalid_request", "identity_environment_missing", "account_observation_required", "account_observation_changed",
+  "account_binding_conflict", "idempotency_conflict"
+]);
 const harborCapabilityDescriptionSchemaVersion = "harbor-capability-description/v1";
 const harborProviderStates = new Set(["supported", "limited", "unsupported", "unknown", "not_applicable", "not_evaluated"]);
 const harborAvailabilityStates = new Set(["no_known_blocker", "blocked", "unknown", "not_evaluated"]);
@@ -233,7 +238,7 @@ function parse(value: unknown): Request {
   } else if (Object.keys(input).some(key => input[key] !== undefined && !managedCapabilityInputFields(undefined).includes(key))) return fail("managed_browser_invalid_input");
   if (input.configuration !== undefined && !isEnvironment(String(input.operation))) return fail("managed_browser_invalid_input");
   if (input.provider_id !== undefined && !["cloakbrowser", "chrome_official", "camoufox"].includes(String(input.provider_id))) return fail("managed_browser_invalid_input");
-  for (const key of ["url", "runtime_session_ref", "observation_ref", "account_system_ref", "account_ref", "business_target_ref", "declared_external_id", "page_id", "page_ref", "cursor", "target_ref", "file_ref"]) if (input[key] !== undefined) text(input[key]);
+  for (const key of ["template_ref", "url", "runtime_session_ref", "observation_ref", "account_system_ref", "account_ref", "business_target_ref", "declared_external_id", "page_id", "page_ref", "cursor", "target_ref", "file_ref"]) if (input[key] !== undefined) text(input[key]);
   if (input.document_generation !== undefined && (typeof input.document_generation !== "number" || !Number.isSafeInteger(input.document_generation) || input.document_generation < 1)) return fail("managed_browser_invalid_input");
   if (input.limit !== undefined && (!Number.isSafeInteger(input.limit) || Number(input.limit) < 1 || Number(input.limit) > 128)) return fail("managed_browser_invalid_input");
   if (input.url !== undefined) {
@@ -313,7 +318,7 @@ function parse(value: unknown): Request {
     if (input.tags !== undefined) {
       if (!Array.isArray(input.tags) || input.tags.length > 16 || input.tags.some(tag => typeof tag !== "string" || !tag.trim() || tag.length > 512 || /[\u0000-\u001f\u007f]/.test(tag))) return fail("managed_browser_invalid_input");
     }
-  } else if (input.provider_id !== undefined || !["instance.navigate", "instance.read", "instance.observe"].includes(String(input.operation)) && (["page_id", "page_ref", "document_generation", "cursor", "limit", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms"].some(key => input[key] !== undefined)) ||
+  } else if (input.provider_id !== undefined || !["instance.navigate", "instance.read", "instance.observe", "account.bind"].includes(String(input.operation)) && (["page_id", "page_ref", "document_generation", "cursor", "limit", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms"].some(key => input[key] !== undefined)) ||
     (!(["account.bind", "business_target.create", "business_target.list"] as string[]).includes(String(input.operation)) && ["observation_ref", "account_system_ref", "account_ref"].some(key => input[key] !== undefined))) return fail("managed_browser_invalid_input");
   if (isBusinessTargetOperation(String(input.operation))) {
     const createOrList = ["business_target.create", "business_target.list"].includes(String(input.operation));
@@ -340,7 +345,7 @@ function accessRequest(input: Request): ManagedAccessRequest {
   const { idempotency_key: _key, url: _url, name: _name, tags: _tags, label: _label, declared_external_id: _externalId, runtime_session_ref: _session, observation_ref: _observation, account_system_ref: _system, account_ref: _account, page_id: _pageId, page_ref: _page, document_generation: _generation, cursor: _cursor, limit: _limit, target_ref: _target, file_ref: _file, text: _text, key: _press, delta_y: _scroll, wait_for: _wait, timeout_ms: _timeout, configuration: _configuration, backup_ref: _backup, operation_ref: _operation, provider_id: _provider, ...rest } = input;
   const access = rest as ManagedAccessRequest;
   if (managedFileOperations.includes(input.operation as typeof managedFileOperations[number])) access.file_refs = _file === undefined ? [] : [_file];
-  if (isBusinessTargetOperation(input.operation)) {
+  if (input.operation === "account.bind" || isBusinessTargetOperation(input.operation)) {
     if (_system !== undefined) access.account_system_ref = _system;
     if (_account !== undefined) access.account_ref = _account;
   }
@@ -356,6 +361,16 @@ function publicOrigin(value: unknown): boolean {
 function describeStrings(value: unknown): value is string[] {
   return Array.isArray(value) && value.length <= 1024 && value.every(item => typeof item === "string" && item.length > 0 && item.length <= 512 && item.trim() === item && !/[\u0000-\u001f\u007f]/.test(item)) && new Set(value).size === value.length;
 }
+function describeAccountBindingScopes(value: unknown): { profile_ref: string; account_system_ref: string; account_ref: string }[] {
+  if (!Array.isArray(value) || value.length !== 1) return fail("managed_browser_invalid_input");
+  return value.map(item => {
+    const scope = object(item);
+    if (Object.keys(scope).length !== 3 || !["profile_ref", "account_system_ref", "account_ref"].every(key => typeof scope[key] === "string") ||
+        !/^account-system:[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(String(scope.account_system_ref)) ||
+        !/^account:sha256:[a-f0-9]{64}$/.test(String(scope.account_ref))) return fail("managed_browser_invalid_input");
+    return { profile_ref: text(scope.profile_ref), account_system_ref: text(scope.account_system_ref), account_ref: text(scope.account_ref) };
+  });
+}
 function parseDescribe(value: unknown): DescribeInput {
   const input = object(value);
   if (Object.keys(input).some(key => !["operation", "connection_id", "context", "arguments"].includes(key)) || typeof input.operation !== "string" || !discoveryOperationPattern.test(input.operation) || typeof input.connection_id !== "string") return fail("managed_browser_invalid_input");
@@ -363,19 +378,29 @@ function parseDescribe(value: unknown): DescribeInput {
   let context: DescribeContext | undefined;
   if (input.context !== undefined) {
     const raw = object(input.context);
-    if (Object.keys(raw).some(key => !["grant_id", "profile_ref", "task_scope"].includes(key)) || typeof raw.grant_id !== "string" || typeof raw.profile_ref !== "string") return fail("managed_browser_invalid_input");
+    const coreContext = definition?.context === "core";
+    if (Object.keys(raw).some(key => !["grant_id", "profile_ref", "task_scope"].includes(key)) || typeof raw.grant_id !== "string" || (!coreContext && typeof raw.profile_ref !== "string") || (coreContext && raw.profile_ref !== undefined)) return fail("managed_browser_invalid_input");
     const scope = object(raw.task_scope);
-    const allowFileRefs = definition?.file_scope !== undefined;
-    if (Object.keys(scope).some(key => !["operations", "profile_refs", "origins", ...(allowFileRefs ? ["file_refs"] : [])].includes(key)) ||
-      !describeStrings(scope.operations) || !describeStrings(scope.profile_refs) || !describeStrings(scope.origins) || scope.origins.some(origin => !publicOrigin(origin)) ||
-      allowFileRefs && scope.file_refs !== undefined && !describeStrings(scope.file_refs)) return fail("managed_browser_invalid_input");
-    const fileRefs = scope.file_refs as string[] | undefined;
-    context = { grant_id: text(raw.grant_id), profile_ref: text(raw.profile_ref), task_scope: {
-      operations: scope.operations as ManagedAccessRequest["task_scope"]["operations"],
-      profile_refs: scope.profile_refs as string[],
-      origins: scope.origins as string[],
-      ...(fileRefs === undefined ? {} : { file_refs: fileRefs })
-    } };
+    if (coreContext) {
+      if (Object.keys(scope).some(key => !["operations", "template_refs"].includes(key)) || !describeStrings(scope.operations) || !describeStrings(scope.template_refs) ||
+          scope.template_refs.some(ref => !/^lode:\/\/account-system\/[a-z0-9][a-z0-9._-]*@[0-9]+\.[0-9]+\.[0-9]+$/.test(ref))) return fail("managed_browser_invalid_input");
+      context = { grant_id: text(raw.grant_id), task_scope: { operations: scope.operations, template_refs: scope.template_refs } };
+    } else {
+      const allowFileRefs = definition?.file_scope !== undefined;
+      const allowAccountBindingScopes = definition?.id === "account.bind";
+      if (Object.keys(scope).some(key => !["operations", "profile_refs", "origins", ...(allowFileRefs ? ["file_refs"] : []), ...(allowAccountBindingScopes ? ["account_binding_scopes"] : [])].includes(key)) ||
+        !describeStrings(scope.operations) || !describeStrings(scope.profile_refs) || !describeStrings(scope.origins) || scope.origins.some(origin => !publicOrigin(origin)) ||
+        allowFileRefs && scope.file_refs !== undefined && !describeStrings(scope.file_refs) ||
+        allowAccountBindingScopes && scope.account_binding_scopes === undefined) return fail("managed_browser_invalid_input");
+      const fileRefs = scope.file_refs as string[] | undefined;
+      context = { grant_id: text(raw.grant_id), profile_ref: text(raw.profile_ref), task_scope: {
+        operations: scope.operations as ManagedAccessRequest["task_scope"]["operations"],
+        profile_refs: scope.profile_refs as string[],
+        origins: scope.origins as string[],
+        ...(fileRefs === undefined ? {} : { file_refs: fileRefs }),
+        ...(allowAccountBindingScopes ? { account_binding_scopes: describeAccountBindingScopes(scope.account_binding_scopes) } : {})
+      } };
+    }
   }
   let args: ObjectValue | undefined;
   if (input.arguments !== undefined) {
@@ -394,7 +419,7 @@ function describeInputAssessment(input: DescribeInput, context: DescribeContext 
   if (!definition) return { state: "invalid", missing, invalid: [{ path: "/operation", code: "operation_not_defined" }] };
   if (context === undefined) missing.push("/context/grant_id", "/context/task_scope");
   if (definition.context === "profile" && context === undefined) missing.push("/context/profile_ref");
-  const draft = { ...input.arguments, operation: input.operation, ...(context === undefined ? {} : { grant_id: context.grant_id, profile_ref: context.profile_ref, task_scope: context.task_scope }) } as ObjectValue;
+  const draft = { ...input.arguments, operation: input.operation, ...(context === undefined ? {} : { grant_id: context.grant_id, ...(context.profile_ref === undefined ? {} : { profile_ref: context.profile_ref }), task_scope: context.task_scope }) } as ObjectValue;
   const pathFor = (field: string) => field.startsWith("task_scope.")
     ? `/context/${field.replace(".", "/")}`
     : context === undefined && field === "profile_ref" ? "/context/profile_ref" : `/arguments/${field}`;
@@ -563,10 +588,30 @@ function response(run: RunRecord) {
     ...(run.failure === undefined ? {} : { failure: { code: run.failure.code } }) };
 }
 
+function publicAccountBindingObservation(value: unknown): ObjectValue {
+  const observation = object(value);
+  const page = object(observation.page);
+  const account = object(observation.account);
+  if (observation.status !== "completed" || account.status !== "verified" ||
+      !Number.isSafeInteger(observation.control_generation) || Number(observation.control_generation) < 0 ||
+      !Number.isSafeInteger(page.document_generation) || Number(page.document_generation) < 1) return fail("managed_browser_runtime_invalid");
+  return {
+    status: "completed",
+    observation_ref: text(observation.observation_ref),
+    observed_at: text(observation.observed_at),
+    runtime_session_ref: text(observation.runtime_session_ref),
+    profile_ref: text(observation.profile_ref),
+    control_generation: Number(observation.control_generation),
+    page: { page_id: text(page.page_id), page_ref: text(page.page_ref), document_generation: Number(page.document_generation) },
+    account: { status: "verified", account_system_ref: text(account.account_system_ref), account_ref: text(account.account_ref) }
+  };
+}
+
 export function createManagedBrowserService(options: {
   accessStore: FileManagedAccessStore; runRecordStore: FileRunRecordStore;
   authorizationDecisionStore: FileAuthorizationDecisionStore; executionPolicyConfigStore: FileExecutionPolicyConfigStore;
   harborBaseUrl: string; supervisorToken: string; recoveryService?: ManagedRecoveryService;
+  accountSystemService?: Pick<ManagedAccountSystemReadService, "importTemplate">;
 }) {
   const store = options.runRecordStore;
   const directory = join(store.directory, "managed-operation-locks");
@@ -1055,14 +1100,16 @@ export function createManagedBrowserService(options: {
     }
     if (input.operation === "account.bind") {
       await check();
+      const currentRun = (await store.getRunRecord(runId))!;
+      await store.updateRunRecord(runId, { public_result_summary: { ...currentRun.public_result_summary, dispatch_state: "dispatched" } });
       const bound = await runtimeHarbor(`/runtime/identity-environments/${identity}/account-bindings`, {
         observation_ref: text(input.observation_ref), account_system_ref: text(input.account_system_ref), account_ref: text(input.account_ref),
-        idempotency_key: runId, holder_ref: holder });
-      return { profile: publicProfile(bound), observation };
+        idempotency_key: runId, holder_ref: holder, runtime_session_ref: text(leaseSession.runtime_session_ref), page_id: input.page_id!, page_ref: input.page_ref!, document_generation: input.document_generation! });
+      return { profile: publicProfile(bound), observation: publicAccountBindingObservation(bound.observation) };
     }
     return { session: publicSession(session), observation };
   }
-  async function readProfileVisibility(credentialHash: string, connectionId: string, context: DescribeContext) {
+  async function readProfileVisibility(credentialHash: string, connectionId: string, context: { grant_id: string; profile_ref: string; task_scope: ManagedAccessRequest["task_scope"] }) {
     if (!context.task_scope.profile_refs.includes(context.profile_ref)) return fail("discovery_context_unavailable");
     const candidates = ["profile.read", "profile.list"].filter(operation => context.task_scope.operations.includes(operation as ManagedAccessRequest["operation"]));
     for (const operation of candidates) {
@@ -1262,9 +1309,44 @@ export function createManagedBrowserService(options: {
     }
     if (definition?.context === "unsupported") return fail("discovery_context_not_supported");
     const context = input.context;
-    const visible = await readProfileVisibility(credentialHash, connection.connection.connection_id, context);
-    const visibilitySnapshot = accessFingerprint(visible);
-    if (definition?.context !== "profile") {
+    if (definition?.context === "core") {
+      let authorized = false;
+      let authorizationCode = "scope_denied";
+      const coreRequest = (): ManagedAccessRequest => ({
+        connection_id: connection.connection.connection_id,
+        grant_id: context.grant_id,
+        operation: input.operation as ManagedAccessRequest["operation"],
+        ...(typeof input.arguments?.template_ref === "string" ? { template_ref: input.arguments.template_ref } : {}),
+        task_scope: context.task_scope as unknown as ManagedAccessRequest["task_scope"]
+      });
+      if ((result.inputs as ObjectValue).state === "complete") {
+        try {
+          await options.accessStore.checkAccess(credentialHash, coreRequest());
+          authorized = true;
+        } catch (error) {
+          const code = error instanceof ManagedAccessError ? error.code : "managed_access_unavailable";
+          if (["managed_access_authentication_required", "managed_access_connection_unavailable", "managed_access_grant_unavailable"].includes(code)) throw error;
+          authorizationCode = describeAuthorizationError(code).reason_codes[0] ?? "scope_denied";
+        }
+      }
+      if (authorized) {
+        try {
+          const finalConnection = await options.accessStore.checkConnection(credentialHash, connection.connection.connection_id);
+          await options.accessStore.checkAccess(credentialHash, coreRequest());
+          if (finalConnection.principal.principal_id !== connection.principal.principal_id || finalConnection.connection.connection_id !== connection.connection.connection_id) throw new Error("context_changed");
+        } catch (error) {
+          if (error instanceof ManagedAccessError && ["managed_access_authentication_required", "managed_access_connection_unavailable", "managed_access_grant_unavailable"].includes(error.code)) throw error;
+          authorized = false;
+          authorizationCode = "facts_changed";
+        }
+      }
+      result.provider = { state: "not_evaluated", provider_id: null, reason_codes: [], limitations: [], facts_at: null };
+      result.authorization = authorized ? { state: "allowed", reason_codes: [] } : { state: "denied", reason_codes: [authorizationCode] };
+      result.availability = authorized ? { state: "no_known_blocker", reason_codes: [], facts_at: null } : { state: "blocked", reason_codes: [authorizationCode], facts_at: null };
+      if (!authorized) result.next_steps = [discoveryNextStep("owner_authorize", input.operation)];
+      return finish();
+    }
+    if (definition?.context !== "profile" || context.profile_ref === undefined) {
       result.provider = { state: "not_evaluated", provider_id: null, reason_codes: [], limitations: [], facts_at: null };
       result.authorization = { state: "not_evaluated", reason_codes: [] };
       result.availability = { state: "not_evaluated", reason_codes: [], facts_at: null };
@@ -1272,6 +1354,7 @@ export function createManagedBrowserService(options: {
       else if (state === "out_of_scope") result.next_steps = [discoveryNextStep("use_existing_tool", null)];
       return finish();
     }
+    const profileContext = { ...context, profile_ref: context.profile_ref, task_scope: context.task_scope as unknown as ManagedAccessRequest["task_scope"] };
     const target = { idempotency_key: "describe", connection_id: connection.connection.connection_id, operation: input.operation,
       grant_id: context.grant_id, profile_ref: context.profile_ref, task_scope: context.task_scope, ...(input.arguments ?? {}) } as Request;
     if (isBusinessTargetOperation(input.operation)) {
@@ -1280,7 +1363,36 @@ export function createManagedBrowserService(options: {
     let targetAccess: Awaited<ReturnType<FileManagedAccessStore["checkAccess"]>> | undefined;
     let targetAuthorizationAssessed = false;
     let targetAuthorizationState: "allowed" | "denied" | "unknown" | undefined;
-    if (!assessment.invalid.some(item => item.path.includes("file_ref")) && !assessment.missing.some(path => path.includes("file_refs"))) {
+    const bindingDescription = input.operation === "account.bind";
+    if (bindingDescription && assessment.state !== "complete") {
+      result.provider = { state: "not_evaluated", provider_id: null, reason_codes: [], limitations: [], facts_at: null };
+      result.authorization = { state: "not_evaluated", reason_codes: [] };
+      result.availability = { state: "not_evaluated", reason_codes: [], facts_at: null };
+      result.next_steps = [discoveryNextStep("fill_inputs", input.operation, [...assessment.missing, ...assessment.invalid.map(issue => issue.path)])];
+      return finish();
+    }
+    let visible: Awaited<ReturnType<FileManagedAccessStore["checkAccess"]>>;
+    if (bindingDescription) {
+      targetAuthorizationAssessed = true;
+      try {
+        targetAccess = await options.accessStore.checkAccess(credentialHash, accessRequest(target));
+        targetAuthorizationState = "allowed";
+        result.authorization = { state: "allowed", reason_codes: [] };
+      } catch (error) {
+        const code = error instanceof ManagedAccessError ? error.code : "managed_access_unavailable";
+        if (["managed_access_authentication_required", "managed_access_connection_unavailable", "managed_access_grant_unavailable"].includes(code)) throw error;
+        const authorization = describeAuthorizationError(code);
+        result.authorization = authorization;
+        result.availability = { state: "blocked", reason_codes: authorization.reason_codes, facts_at: null };
+        result.next_steps = [discoveryNextStep("owner_authorize", input.operation)];
+        return finish();
+      }
+      visible = targetAccess;
+    } else {
+      visible = await readProfileVisibility(credentialHash, connection.connection.connection_id, profileContext);
+    }
+    const visibilitySnapshot = accessFingerprint(visible);
+    if (!targetAuthorizationAssessed && !assessment.invalid.some(item => item.path.includes("file_ref")) && !assessment.missing.some(path => path.includes("file_refs"))) {
       targetAuthorizationAssessed = true;
       try {
         targetAccess = await options.accessStore.checkAccess(credentialHash, accessRequest(target));
@@ -1337,7 +1449,9 @@ export function createManagedBrowserService(options: {
     let finalAuthorizedOrigins = authorizedOrigins;
     try {
       const finalConnection = await options.accessStore.checkConnection(credentialHash, connection.connection.connection_id);
-      const finalVisible = await readProfileVisibility(credentialHash, finalConnection.connection.connection_id, context);
+      const finalVisible = bindingDescription
+        ? await options.accessStore.checkAccess(credentialHash, accessRequest(target))
+        : await readProfileVisibility(credentialHash, finalConnection.connection.connection_id, profileContext);
       if (finalConnection.principal.principal_id !== connection.principal.principal_id ||
           finalConnection.connection.connection_id !== connection.connection.connection_id ||
           accessFingerprint(finalVisible) !== visibilitySnapshot) factsChanged = true;
@@ -1432,6 +1546,36 @@ export function createManagedBrowserService(options: {
       const runId = `managed-${digest(`${principal.principal_id}:${input.idempotency_key}`)}`;
       const requestHash = digest(JSON.stringify(input));
       await mkdir(directory, { recursive: true, mode: 0o700 });
+      if (input.operation === "account_system.import_template") {
+        const accountSystemService = options.accountSystemService;
+        if (!accountSystemService) return fail("managed_account_system_unavailable");
+        return withFileOwnershipLock(join(directory, `${digest(`${input.grant_id}:account-system-import`)}.lock`), 5000, async () => {
+          const previous = await store.getRunRecord(runId);
+          if (previous) {
+            if (previous.public_result_summary?.request_hash !== requestHash) return fail("managed_browser_idempotency_conflict");
+            return response(previous);
+          }
+          await options.accessStore.checkAccess(credentialHash, accessRequest(input));
+          const summary = { principal_id: principal.principal_id, grant_id: input.grant_id, operation: input.operation,
+            template_ref: input.template_ref, request_hash: requestHash };
+          await store.createRunRecord({ run_id: runId, task_intent_ref: `managed-intent:${runId}`, capability_ref: "core:account-system", status: "admitted",
+            admission: { decision: "accepted", action_risk: "write" }, public_result_summary: summary });
+          await store.updateRunRecord(runId, { status: "running" });
+          try {
+            await options.accessStore.checkAccess(credentialHash, accessRequest(input));
+            const result = await accountSystemService.importTemplate(input.template_ref!);
+            await options.accessStore.checkAccess(credentialHash, accessRequest(input));
+            await store.updateRunRecord(runId, { evidence_refs: [result.local_revision_ref] });
+            await completeRunWithResult(store, runId, { result_ref: `managed-result:${runId}`, result_kind: "account_system_import", data: result,
+              evidence_refs: [result.local_revision_ref], persisted_public_summary: { ...summary, result } });
+          } catch (error) {
+            const known = error instanceof ManagedAccessError && error.code !== "account_system_definition_unavailable";
+            await completeRunWithFailure(store, runId, { status: known ? "failed" : "unknown_outcome",
+              failure: { category: "runtime_execution", code: error instanceof ManagedAccessError ? error.code : "managed_browser_outcome_unknown", phase: "execution", recovery_hint: "query_operation_without_replay" } });
+          }
+          return response((await store.getRunRecord(runId))!);
+        });
+      }
       const grantScopedCreation = input.operation === "profile.create" || input.operation === "profile.copy_environment";
       return withFileOwnershipLock(join(directory, `${digest(grantScopedCreation || isProviderPreference(input.operation) ? input.grant_id : input.profile_ref ?? runId)}.lock`), 5000, async () => {
         const previous = await store.getRunRecord(runId);
@@ -1441,10 +1585,10 @@ export function createManagedBrowserService(options: {
         }
         await options.accessStore.checkAccess(credentialHash, accessRequest(input));
         const summary = { principal_id: principal.principal_id, grant_id: input.grant_id, operation: input.operation, request_hash: requestHash,
-          ...(input.operation === "profile.metadata.update" || input.operation === "profile.copy_environment" || input.operation === "profile.archive" || input.operation === "profile.delete" || isBusinessTargetOperation(input.operation) || isInteraction(input.operation) || isEnvironment(input.operation) || isPageMutation(input.operation) || managedFileOperations.includes(input.operation as typeof managedFileOperations[number]) ? {
-            ...(isInteraction(input.operation) || isPageMutation(input.operation) || managedFileOperations.includes(input.operation as typeof managedFileOperations[number]) ? { runtime_session_ref: input.runtime_session_ref } : {}),
+          ...(input.operation === "account.bind" || input.operation === "profile.metadata.update" || input.operation === "profile.copy_environment" || input.operation === "profile.archive" || input.operation === "profile.delete" || isBusinessTargetOperation(input.operation) || isInteraction(input.operation) || isEnvironment(input.operation) || isPageMutation(input.operation) || managedFileOperations.includes(input.operation as typeof managedFileOperations[number]) ? {
+            ...(input.operation === "account.bind" || isInteraction(input.operation) || isPageMutation(input.operation) || managedFileOperations.includes(input.operation as typeof managedFileOperations[number]) ? { runtime_session_ref: input.runtime_session_ref } : {}),
             profile_ref: input.profile_ref, origin: input.origin,
-            ...(isInteraction(input.operation) || isPageMutation(input.operation) || managedFileOperations.includes(input.operation as typeof managedFileOperations[number]) ? { dispatch_state: "not_dispatched" } : {}),
+            ...(input.operation === "account.bind" || isInteraction(input.operation) || isPageMutation(input.operation) || managedFileOperations.includes(input.operation as typeof managedFileOperations[number]) ? { dispatch_state: "not_dispatched" } : {}),
             ...(input.file_ref === undefined ? {} : { file_ref: input.file_ref })
           } : {}) };
         await store.createRunRecord({ run_id: runId, task_intent_ref: `managed-intent:${runId}`, capability_ref: "harbor:managed-browser", status: "admitted",
@@ -1456,10 +1600,11 @@ export function createManagedBrowserService(options: {
         } catch (error) {
           const current = (await store.getRunRecord(runId))!;
           const receipt = error instanceof InteractionFailure || error instanceof PageFailure || error instanceof FileFailure || error instanceof ScopeBoundaryFailure ? error.receipt : undefined;
-          const dispatchAware = isInteraction(input.operation) || isPageMutation(input.operation) || managedFileOperations.includes(input.operation as typeof managedFileOperations[number]);
+          const dispatchAware = input.operation === "account.bind" || isInteraction(input.operation) || isPageMutation(input.operation) || managedFileOperations.includes(input.operation as typeof managedFileOperations[number]);
           const notDispatched = dispatchAware && (receipt?.dispatch_state ?? current.public_result_summary?.dispatch_state) === "not_dispatched";
           const known = dispatchAware
             ? notDispatched ||
+              (input.operation === "account.bind" && error instanceof ManagedAccessError && accountBindingNoWriteFailureCodes.has(error.code)) ||
               (error instanceof InteractionFailure && isDeterministicWaitTimeout(receipt))
             : error instanceof ManagedAccessError && error.code !== "managed_browser_creation_unknown" && !(error instanceof CreationReceiptFailure);
           const knownFailure = known || error instanceof ScopeBoundaryFailure;
@@ -1467,8 +1612,11 @@ export function createManagedBrowserService(options: {
             ...current.public_result_summary, dispatch_state: notDispatched ? "not_dispatched" : "dispatched", ...(receipt ? { result: receipt } : {})
           } });
           if (!dispatchAware && receipt) await store.updateRunRecord(runId, { public_result_summary: { ...current.public_result_summary, result: receipt } });
+          const failureCode = input.operation === "account.bind" && dispatchAware && !notDispatched && !known
+            ? "managed_browser_outcome_unknown"
+            : error instanceof ManagedAccessError ? error.code : knownFailure ? "managed_browser_runtime_unavailable" : "managed_browser_outcome_unknown";
           await completeRunWithFailure(store, runId, { status: knownFailure ? "failed" : "unknown_outcome",
-            failure: { category: "runtime_execution", code: error instanceof ManagedAccessError ? error.code : knownFailure ? "managed_browser_runtime_unavailable" : "managed_browser_outcome_unknown", phase: "execution", recovery_hint: "query_operation_without_replay" } });
+            failure: { category: "runtime_execution", code: failureCode, phase: "execution", recovery_hint: "query_operation_without_replay" } });
         }
         return response((await store.getRunRecord(runId))!);
       });
@@ -1535,6 +1683,25 @@ export function createManagedBrowserService(options: {
               await store.updateRunRecord(runId, { public_result_summary: { ...current.public_result_summary, result: { receipt } } });
             }
           } catch { /* A missing receipt never proves the metadata write did not occur. */ }
+          return response((await store.getRunRecord(runId))!);
+        });
+      }
+      if (["running", "admitted", "unknown_outcome"].includes(run.status) && run.public_result_summary?.operation === "account.bind" && !run.public_result_summary?.reconciliation) {
+        await mkdir(directory, { recursive: true, mode: 0o700 });
+        return withFileOwnershipLock(join(directory, `${digest(text(run.public_result_summary!.profile_ref))}.lock`), 5000, async () => {
+          const current = (await store.getRunRecord(runId))!;
+          if (current.public_result_summary?.reconciliation === "completed") return response(current);
+          if (["running", "admitted"].includes(current.status)) await completeRunWithFailure(store, runId, {
+            status: "unknown_outcome", failure: { category: "write_outcome", code: "managed_browser_outcome_unknown", phase: "query", recovery_hint: "query_operation_without_replay" }
+          });
+          try {
+            const receipt = await harbor(`/runtime/account-binding-operations/${encodeURIComponent(runId)}`);
+            if (receipt.status === "completed" && receipt.result && typeof receipt.result === "object") {
+              const original = object(receipt.result);
+              const result = { profile: publicProfile(original), observation: publicAccountBindingObservation(original.observation) };
+              await store.updateRunRecord(runId, { public_result_summary: { ...current.public_result_summary, reconciliation: "completed", result } });
+            }
+          } catch { /* A missing or legacy receipt never proves the binding did not occur. */ }
           return response((await store.getRunRecord(runId))!);
         });
       }
