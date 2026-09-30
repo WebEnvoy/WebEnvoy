@@ -873,20 +873,49 @@ export function createManagedBrowserService(options: {
         } });
         await options.accessStore.recordCreatedProfile({ idempotency_key: runId, grant_id: input.grant_id, profile_ref: profile.profile_ref });
         if (input.operation === "profile.import") {
-          const open = await runtimeHarbor("/runtime/identity-environment-sessions", { identity_environment_ref: profile.identity_environment_ref,
-            operation_scope: "profile_management", url: `${template.site.origin}/`, reuse_existing: false, control_owner: "core_task", holder_ref: holder,
-            headless: true, timeout_ms: 60_000, scope_semantics: access.scope_semantics });
-          const sessionRef = text(open.runtime_session_ref);
+          const reauthorizeCreatedTarget = async () => {
+            await ensureTaskActive();
+            try {
+              return await options.accessStore.checkAccess(hash, { ...accessRequest(input), profile_ref: profile.profile_ref,
+                created_profile_ref: profile.profile_ref, creation_reservation_ref: runId });
+            } catch (error) {
+              const current = (await store.getRunRecord(runId))!;
+              const summary = current.public_result_summary ?? {};
+              const currentResult = summary.result && typeof summary.result === "object" ? object(summary.result) : {};
+              await store.updateRunRecord(runId, { public_result_summary: { ...summary, phase: "target_created",
+                result: { ...currentResult, profile, provider_selection: providerSelection, import_status: "not_dispatched" } } });
+              throw error;
+            }
+          };
+          await reauthorizeCreatedTarget();
+          let sessionRef: string;
+          try {
+            const opened = await runtimeHarbor("/runtime/identity-environment-sessions", { identity_environment_ref: profile.identity_environment_ref,
+              operation_scope: "profile_management", url: `${template.site.origin}/`, reuse_existing: false, control_owner: "core_task", holder_ref: holder,
+              headless: true, timeout_ms: 60_000, scope_semantics: access.scope_semantics });
+            sessionRef = text(opened.runtime_session_ref);
+          } catch {
+            throw new CreationReceiptFailure("managed_browser_import_initialization_unknown");
+          }
+          try {
+            await runtimeHarbor(`/runtime/sessions/${encodeURIComponent(sessionRef!)}/stop`, { control_owner: "core_task", holder_ref: holder });
+            const stopped = await runtimeHarbor(`/runtime/identity-environments/${encodeURIComponent(text(profile.identity_environment_ref))}/session`);
+            if (stopped.runtime_session !== null) throw new Error("initialization_session_not_stopped");
+          } catch {
+            throw new CreationReceiptFailure("managed_browser_import_shutdown_unknown");
+          }
+          await reauthorizeCreatedTarget();
           try {
             const imported = await runtimeHarbor("/runtime/profile-imports", { idempotency_key: runId, source_ref: input.profile_source_ref!, target_profile_ref: profile.profile_ref });
             const receipt = object(imported.receipt);
             if (receipt.schema_version !== "harbor-profile-import-receipt/v1" || receipt.idempotency_key !== runId ||
               receipt.source_ref !== input.profile_source_ref || receipt.target_profile_ref !== profile.profile_ref ||
-              receipt.target_identity_environment_ref !== profile.identity_environment_ref) throw new CreationReceiptFailure("managed_browser_import_receipt_mismatch");
+              receipt.target_identity_environment_ref !== profile.identity_environment_ref || receipt.status !== "completed" ||
+              !receipt.report || typeof receipt.report !== "object") throw new CreationReceiptFailure("managed_browser_import_receipt_mismatch");
             return { profile, provider_selection: providerSelection, import_report: receipt.report, import_status: "completed", authorization_decision_ref: access.decision_ref };
-          } finally {
-            try { await runtimeHarbor(`/runtime/sessions/${encodeURIComponent(sessionRef)}/stop`, { control_owner: "core_task", holder_ref: holder }); }
-            catch { throw new CreationReceiptFailure("managed_browser_import_shutdown_unknown"); }
+          } catch (error) {
+            if (error instanceof CreationReceiptFailure) throw error;
+            throw new CreationReceiptFailure("managed_browser_import_outcome_unknown");
           }
         }
         return { profile, provider_selection: providerSelection, authorization_decision_ref: access.decision_ref };
@@ -1947,7 +1976,8 @@ export function createManagedBrowserService(options: {
             const receipt = object(harborReceipt.receipt);
             if (receipt.schema_version !== "harbor-profile-import-receipt/v1" || receipt.idempotency_key !== runId ||
               receipt.source_ref !== current.public_result_summary?.profile_source_ref || receipt.target_profile_ref !== profile.profile_ref ||
-              receipt.target_identity_environment_ref !== profile.identity_environment_ref || !receipt.report || typeof receipt.report !== "object") throw new Error("receipt_mismatch");
+              receipt.target_identity_environment_ref !== profile.identity_environment_ref || receipt.status !== "completed" ||
+              !receipt.report || typeof receipt.report !== "object") throw new Error("receipt_mismatch");
             const active = await harbor(`/runtime/identity-environments/${encodeURIComponent(text(profile.identity_environment_ref))}/session`);
             if (active.runtime_session !== null) return response((await store.getRunRecord(runId))!);
             const result = { profile, provider_selection: providerSelection, import_report: receipt.report, import_status: "completed" };

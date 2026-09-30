@@ -59,6 +59,7 @@ export type ManagedAccessRequest = {
   connection_id: string; grant_id: string; operation: ManagedOperation;
   profile_ref?: string; origin?: string; template_ref?: string; target_provider_id?: string; profile_source_ref?: string; confirmation?: "delete_local_data"; skill_ref?: string; source_ref?: string; revision_ref?: string; file_refs?: string[];
   account_system_ref?: string; account_ref?: string; business_target_ref?: string; task_scope: ManagedTaskScope;
+  created_profile_ref?: string; creation_reservation_ref?: string;
 };
 export type ManagedAccess = {
   principal: ManagedPrincipal; connection: ManagedConnection; grant: ManagedGrant;
@@ -596,7 +597,7 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       })));
     },
     async checkAccess(credentialHash: unknown, value: unknown): Promise<ManagedAccess> {
-      const input = object(value, ["connection_id", "grant_id", "operation", "task_scope"], ["profile_ref", "origin", "template_ref", "target_provider_id", "profile_source_ref", "confirmation", "skill_ref", "source_ref", "revision_ref", "file_refs", "account_system_ref", "account_ref", "business_target_ref"]);
+      const input = object(value, ["connection_id", "grant_id", "operation", "task_scope"], ["profile_ref", "origin", "template_ref", "target_provider_id", "profile_source_ref", "confirmation", "skill_ref", "source_ref", "revision_ref", "file_refs", "account_system_ref", "account_ref", "business_target_ref", "created_profile_ref", "creation_reservation_ref"]);
       const connectionId = string(input.connection_id), grantId = string(input.grant_id), op = operation(input.operation);
       const profileRef = input.profile_ref === undefined ? undefined : string(input.profile_ref);
       const targetOrigin = input.origin === undefined ? undefined : origin(input.origin);
@@ -609,6 +610,10 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       const skillRef = input.skill_ref === undefined ? undefined : string(input.skill_ref);
       const sourceRef = input.source_ref === undefined ? undefined : string(input.source_ref);
       const profileSourceRef = input.profile_source_ref === undefined ? undefined : string(input.profile_source_ref);
+      const createdProfileRef = input.created_profile_ref === undefined ? undefined : string(input.created_profile_ref);
+      const creationReservationRef = input.creation_reservation_ref === undefined ? undefined : string(input.creation_reservation_ref);
+      if ((createdProfileRef === undefined) !== (creationReservationRef === undefined) ||
+          createdProfileRef !== undefined && (op !== "profile.import" || createdProfileRef !== profileRef)) return fail("managed_access_invalid_input");
       if (profileSourceRef !== undefined && profileSourceRefs([profileSourceRef]).length !== 1) return fail("managed_access_invalid_input");
       const revisionRef = input.revision_ref === undefined ? undefined : string(input.revision_ref);
       const requestedFileRefs = input.file_refs === undefined ? undefined : fileRefs(input.file_refs);
@@ -711,13 +716,19 @@ export function createFileManagedAccessStore(options: { directory: string; clock
         return result;
       }
       if (op === "profile.create" || op === "profile.import") {
-        if (profileRef || !grant.creation_template || templateRef !== grant.creation_template.template_ref || grant.created_profile_refs.length >= grant.max_created_profiles) return fail("managed_access_creation_denied");
+        const isReservedImportContinuation = op === "profile.import" && createdProfileRef !== undefined && creationReservationRef !== undefined &&
+          grant.created_profile_refs.includes(createdProfileRef) && grant.profile_refs.includes(createdProfileRef) &&
+          state.profile_policies.some(item => item.profile_ref === createdProfileRef) &&
+          state.receipts.some(item => item.key_hash === hash(creationReservationRef) && item.result && typeof item.result === "object" &&
+            !Array.isArray(item.result) && (item.result as Record<string, unknown>).profile_ref === createdProfileRef);
+        if ((profileRef !== undefined && !isReservedImportContinuation) || !grant.creation_template || templateRef !== grant.creation_template.template_ref ||
+            (!isReservedImportContinuation && grant.created_profile_refs.length >= grant.max_created_profiles)) return fail("managed_access_creation_denied");
         const creationOrigin = grant.creation_template.site.origin;
         if ((targetOrigin !== undefined && targetOrigin !== creationOrigin) || !grant.allowed_origins.includes(creationOrigin) || !task.origins.includes(creationOrigin)) return fail("managed_access_denied");
         if (op === "profile.import") {
           const authorizedSources = grant.profile_source_refs ?? [];
           if (!profileSourceRef || task.profile_refs.length !== 0 || task.profile_source_refs?.length !== 1 || task.profile_source_refs[0] !== profileSourceRef || !authorizedSources.includes(profileSourceRef)) return fail("managed_access_denied");
-        } else if (profileSourceRef !== undefined || task.profile_source_refs?.length) return fail("managed_access_invalid_input");
+        } else if (profileSourceRef !== undefined || task.profile_source_refs?.length || createdProfileRef !== undefined || creationReservationRef !== undefined) return fail("managed_access_invalid_input");
         return { ...result, creation_template: grant.creation_template };
       }
       if (op === "profile.migrate.request") {

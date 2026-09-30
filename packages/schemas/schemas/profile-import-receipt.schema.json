@@ -5,14 +5,15 @@
   "description": "Durable, read-only reconciliation result for an owner-registered source imported into a new managed Profile.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "idempotency_key", "request_hash", "source_ref", "target_profile_ref", "target_identity_environment_ref", "report"],
+  "required": ["schema_version", "idempotency_key", "request_hash", "source_ref", "target_profile_ref", "target_identity_environment_ref", "status"],
   "properties": {
     "schema_version": { "const": "harbor-profile-import-receipt/v1" },
     "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 200 },
     "request_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-    "source_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "source_ref": { "type": "string", "pattern": "^profile-source:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$" },
     "target_profile_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
     "target_identity_environment_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "status": { "enum": ["possibly_dispatched", "completed"] },
     "report": {
       "type": "object",
       "additionalProperties": false,
@@ -41,6 +42,10 @@
       }
     }
   },
+  "allOf": [
+    { "if": { "properties": { "status": { "const": "possibly_dispatched" } } }, "then": { "not": { "required": ["report"] } } },
+    { "if": { "properties": { "status": { "const": "completed" } } }, "then": { "required": ["report"] } }
+  ],
   "$defs": {
     "counts": {
       "type": "object",
@@ -56,7 +61,7 @@
     "owner": "Harbor Profile import receipt",
     "status": "candidate-v1",
     "schema_version": "harbor-profile-import-receipt/v1",
-    "compatibility_boundary": "Read-only receipt for the bounded Camoufox Places v86 public-bookmark import. It identifies the original opaque source and newly managed target; it carries no source path, browser data, credentials, or authorization. Missing receipts never prove an import was not dispatched.",
+    "compatibility_boundary": "Durable original-dispatch receipt for the bounded Camoufox Places v86 public-bookmark import. A possibly_dispatched receipt remains unknown and is never replayed; completed carries its report. It identifies the original opaque source and newly managed target; it carries no source path, browser data, credentials, or authorization.",
     "source_adrs": ["docs/specs/profile-transfer-v1.md", "docs/adr/0012-runtime-capability-plane-and-plugin-first.md"],
     "field_owners": { "source_ref": "Harbor owner source registry", "target_profile_ref": "Harbor Profile", "target_identity_environment_ref": "Harbor Identity Environment", "report": "Harbor bookmark importer" }
   }

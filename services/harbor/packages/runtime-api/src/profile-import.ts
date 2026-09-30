@@ -1,18 +1,26 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import {
+  chmodSync,
+  closeSync,
+  constants,
+  fstatSync,
   lstatSync,
+  mkdtempSync,
+  openSync,
   readFileSync,
+  rmSync,
+  writeFileSync,
   realpathSync
 } from "node:fs";
-import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import {
   acquireExternalProfileReadLock,
-  profileDirectoryHasExternalLock
+  profileDirectoryHasExternalLock,
+  type ExternalProfileReadLock
 } from "./profile-storage.js";
 import { secureIdentityEnvironmentStoreFile, writeSecureJsonFile } from "./identity-environment-store.js";
-import { opaqueRef } from "./refs.js";
 
 export const HARBOR_PROFILE_SOURCE_SCHEMA = "harbor-profile-source/v1";
 export const HARBOR_PROFILE_IMPORT_REPORT_SCHEMA = "harbor-profile-import-report/v1";
@@ -35,7 +43,8 @@ export type ProfileSourceFailureCode =
   | "profile_source_unsupported"
   | "profile_source_expired"
   | "profile_source_revoked"
-  | "profile_source_persistence_failed";
+  | "profile_source_persistence_failed"
+  | "profile_import_outcome_unknown";
 
 export class ProfileSourceError extends Error {
   constructor(readonly code: ProfileSourceFailureCode) {
@@ -72,7 +81,8 @@ export interface ProfileImportReceipt {
   source_ref: string;
   target_profile_ref: string;
   target_identity_environment_ref: string;
-  report: ProfileImportReport;
+  status: "possibly_dispatched" | "completed";
+  report?: ProfileImportReport;
 }
 
 interface StoredProfileImportReceipt extends ProfileImportReceipt { key_hash: string }
@@ -137,7 +147,7 @@ export class ProfileSourceRegistry {
     const now = Date.now();
     const source: StoredProfileSource = {
       schema_version: HARBOR_PROFILE_SOURCE_SCHEMA,
-      source_ref: opaqueRef("profile-source"),
+      source_ref: `profile-source:${randomUUID()}`,
       provider_id: "camoufox",
       source_format: PROFILE_SOURCE_FORMAT,
       bookmark_count: snapshot.bookmarkCount,
@@ -165,18 +175,38 @@ export class ProfileSourceRegistry {
 
   getImport(idempotencyKey: string): ProfileImportReceipt | undefined {
     const receipt = this.imports.get(createHash("sha256").update(idempotencyKey).digest("hex"));
-    if (!receipt) return undefined;
-    const { key_hash: _keyHash, ...publicReceipt } = receipt;
-    return publicReceipt;
+    return receipt ? publicImportReceipt(receipt) : undefined;
   }
 
-  saveImport(receipt: ProfileImportReceipt): void {
+  beginImport(receipt: Omit<ProfileImportReceipt, "status" | "report">): ProfileImportReceipt {
     const keyHash = createHash("sha256").update(receipt.idempotency_key).digest("hex");
     const previous = this.imports.get(keyHash);
     if (previous) {
-      if (previous.request_hash !== receipt.request_hash) throw new ProfileSourceError("profile_source_invalid");
-      return;
+      if (previous.request_hash !== receipt.request_hash || previous.source_ref !== receipt.source_ref ||
+          previous.target_profile_ref !== receipt.target_profile_ref || previous.target_identity_environment_ref !== receipt.target_identity_environment_ref) {
+        throw new ProfileSourceError("profile_source_invalid");
+      }
+      if (previous.status === "completed") return publicImportReceipt(previous);
+      throw new ProfileSourceError("profile_import_outcome_unknown");
     }
+    const intent: StoredProfileImportReceipt = { ...receipt, status: "possibly_dispatched", key_hash: keyHash };
+    const next = new Map(this.imports).set(keyHash, intent);
+    this.persist(this.sources, next);
+    replaceMap(this.imports, next);
+    return publicImportReceipt(intent);
+  }
+
+  saveImport(receipt: ProfileImportReceipt): void {
+    if (receipt.status !== "completed" || !receipt.report) throw new ProfileSourceError("profile_source_invalid");
+    const keyHash = createHash("sha256").update(receipt.idempotency_key).digest("hex");
+    const previous = this.imports.get(keyHash);
+    if (previous) {
+      if (previous.request_hash !== receipt.request_hash || previous.source_ref !== receipt.source_ref ||
+          previous.target_profile_ref !== receipt.target_profile_ref || previous.target_identity_environment_ref !== receipt.target_identity_environment_ref) {
+        throw new ProfileSourceError("profile_source_invalid");
+      }
+      if (previous.status === "completed") return;
+    } else throw new ProfileSourceError("profile_source_persistence_failed");
     const next = new Map(this.imports).set(keyHash, { ...receipt, key_hash: keyHash });
     this.persist(this.sources, next);
     replaceMap(this.imports, next);
@@ -199,6 +229,30 @@ export class ProfileSourceRegistry {
     if (snapshot.fingerprint !== source.fingerprint) throw new ProfileSourceError("profile_source_changed");
     return { bookmarks: snapshot.bookmarks, fingerprint: snapshot.fingerprint };
   }
+
+  openImportSnapshot(sourceRef: string): { bookmarks: ImportedBookmarkNode[]; fingerprint: string; assertUnchanged: () => void; release: () => void } {
+    const source = this.requireUsable(sourceRef);
+    const lock = acquireExternalProfileReadLock(source.canonical_path);
+    if (!lock) throw new ProfileSourceError("profile_source_locked");
+    try {
+      const snapshot = readSourceSnapshot(source.canonical_path, source.fingerprint, true, lock);
+      return {
+        bookmarks: snapshot.bookmarks,
+        fingerprint: snapshot.fingerprint,
+        assertUnchanged: () => {
+          this.requireUsable(sourceRef);
+          const currentPath = safePlacesPath(source.canonical_path);
+          if (!lock.stillValid() || sourceFingerprint(currentPath) !== snapshot.fingerprint) throw new ProfileSourceError("profile_source_changed");
+        },
+        release: lock.release
+      };
+    } catch (error) {
+      lock.release();
+      throw error;
+    }
+  }
+
+  assertImportSourceUsable(sourceRef: string): void { this.requireUsable(sourceRef); }
 
   assertUnchanged(sourceRef: string, fingerprint: string): void {
     const source = this.requireUsable(sourceRef);
@@ -246,19 +300,26 @@ export class ProfileSourceRegistry {
 }
 
 /** Read only public bookmarks from a stopped, version-matched Camoufox Profile. */
-export function readSourceSnapshot(profileDir: string, expectedFingerprint: string | null, verifyLock = true): {
+export function readSourceSnapshot(profileDir: string, expectedFingerprint: string | null, verifyLock = true, heldLock?: ExternalProfileReadLock): {
   bookmarks: ImportedBookmarkNode[];
   bookmarkCount: number;
   fingerprint: string;
 } {
-  const lock = verifyLock ? acquireExternalProfileReadLock(profileDir) : null;
+  const ownsLock = !heldLock;
+  const lock = heldLock ?? (verifyLock ? acquireExternalProfileReadLock(profileDir) : null);
   if (verifyLock && !lock) throw new ProfileSourceError("profile_source_locked");
   if (!verifyLock && profileDirectoryHasExternalLock(profileDir, false)) throw new ProfileSourceError("profile_source_locked");
+  let snapshotRoot: string | undefined;
+  let db: DatabaseSync | undefined;
   try {
     const placesPath = safePlacesPath(profileDir);
     const fingerprintBefore = sourceFingerprint(placesPath);
     if (expectedFingerprint !== null && fingerprintBefore !== expectedFingerprint) throw new ProfileSourceError("profile_source_changed");
-    const db = new DatabaseSync(placesPath, { readOnly: true });
+    snapshotRoot = mkdtempSync(join(tmpdir(), "webenvoy-profile-source-snapshot-"));
+    chmodSync(snapshotRoot, 0o700);
+    const snapshotPlacesPath = join(snapshotRoot, "places.sqlite");
+    copyPlacesSnapshot(placesPath, snapshotPlacesPath);
+    db = new DatabaseSync(snapshotPlacesPath);
     let bookmarks: ImportedBookmarkNode[];
     let bookmarkCount: number;
     try {
@@ -280,9 +341,9 @@ export function readSourceSnapshot(profileDir: string, expectedFingerprint: stri
       try { db.exec("ROLLBACK"); } catch { /* The connection may already be closed. */ }
       if (error instanceof ProfileSourceError) throw error;
       throw new ProfileSourceError("profile_source_unsupported");
-    } finally {
-      db.close();
     }
+    db.close();
+    db = undefined;
     const fingerprintAfter = sourceFingerprint(placesPath);
     if (fingerprintAfter !== fingerprintBefore || lock && !lock.stillValid() || !lock && profileDirectoryHasExternalLock(profileDir, false)) {
       throw new ProfileSourceError("profile_source_changed");
@@ -292,7 +353,9 @@ export function readSourceSnapshot(profileDir: string, expectedFingerprint: stri
     if (error instanceof ProfileSourceError) throw error;
     throw new ProfileSourceError("profile_source_unsupported");
   } finally {
-    lock?.release();
+    try { db?.close(); } catch { /* Preserve the snapshot failure. */ }
+    if (snapshotRoot) rmSync(snapshotRoot, { recursive: true, force: true });
+    if (ownsLock) lock?.release();
   }
 }
 
@@ -446,13 +509,13 @@ function safePlacesPath(profileDir: string): string {
   const compatibilityPath = join(profileDir, "compatibility.ini");
   try {
     const rootEntry = lstatSync(profileDir);
-    const compatibilityEntry = lstatSync(compatibilityPath);
-    if (!rootEntry.isDirectory() || rootEntry.isSymbolicLink() || !compatibilityEntry.isFile() || compatibilityEntry.isSymbolicLink()) throw new Error("unsafe");
-    const version = /^LastVersion=(.+)$/m.exec(readFileSync(compatibilityPath, "utf8"))?.[1]?.split("_")[0];
+    if (!rootEntry.isDirectory() || rootEntry.isSymbolicLink()) throw new Error("unsafe");
+    const compatibility = readBoundedRegularFile(compatibilityPath, 64 * 1024);
+    const version = compatibility && /^LastVersion=(.+)$/m.exec(compatibility.toString("utf8"))?.[1]?.split("_")[0];
     if (version !== PROFILE_SOURCE_BROWSER_VERSION) throw new ProfileSourceError("profile_source_unsupported");
     const placesPath = join(profileDir, "places.sqlite");
-    const placesEntry = lstatSync(placesPath);
-    if (!placesEntry.isFile() || placesEntry.isSymbolicLink() || placesEntry.size <= 0 || placesEntry.size > MAX_PROFILE_SOURCE_PLACES_BYTES) throw new Error("unsafe");
+    const places = readBoundedRegularFile(placesPath, MAX_PROFILE_SOURCE_PLACES_BYTES);
+    if (!places?.length) throw new Error("unsafe");
     return placesPath;
   } catch (error) {
     if (error instanceof ProfileSourceError) throw error;
@@ -462,18 +525,52 @@ function safePlacesPath(profileDir: string): string {
 
 function sourceFingerprint(placesPath: string): string {
   const hash = createHash("sha256");
-  for (const name of ["places.sqlite", "places.sqlite-wal"]) {
-    const path = name === "places.sqlite" ? placesPath : `${placesPath}-wal`;
-    try {
-      const entry = lstatSync(path);
-      if (!entry.isFile() || entry.isSymbolicLink() || entry.size > MAX_PROFILE_SOURCE_PLACES_BYTES) throw new Error("unsafe");
-      hash.update(name).update("\0").update(readFileSync(path));
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException)?.code === "ENOENT") hash.update(name).update("\0missing");
-      else throw error;
-    }
+  for (const [name, path, limit] of [
+    ["compatibility.ini", join(dirname(placesPath), "compatibility.ini"), 64 * 1024],
+    ["places.sqlite", placesPath, MAX_PROFILE_SOURCE_PLACES_BYTES],
+    ["places.sqlite-wal", `${placesPath}-wal`, MAX_PROFILE_SOURCE_PLACES_BYTES]
+  ] as const) {
+    const data = readBoundedRegularFile(path, limit);
+    hash.update(name).update("\0").update(data ?? Buffer.from("missing"));
   }
   return hash.digest("hex");
+}
+
+function copyPlacesSnapshot(sourcePlacesPath: string, targetPlacesPath: string): void {
+  let totalBytes = 0;
+  for (const [name, path] of [["places.sqlite", sourcePlacesPath], ["places.sqlite-wal", `${sourcePlacesPath}-wal`]] as const) {
+    const data = readBoundedRegularFile(path, MAX_PROFILE_SOURCE_PLACES_BYTES);
+    if (!data) {
+      if (name === "places.sqlite") throw new ProfileSourceError("profile_source_invalid");
+      continue;
+    }
+    totalBytes += data.byteLength;
+    if (totalBytes > MAX_PROFILE_SOURCE_PLACES_BYTES) throw new ProfileSourceError("profile_source_unsupported");
+    writeFileSync(name === "places.sqlite" ? targetPlacesPath : `${targetPlacesPath}-wal`, data, { flag: "wx", mode: 0o600 });
+  }
+}
+
+function readBoundedRegularFile(path: string, maxBytes: number): Buffer | undefined {
+  let fd: number | undefined;
+  try {
+    fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    const before = fstatSync(fd);
+    if (!before.isFile() || before.size > maxBytes) throw new ProfileSourceError("profile_source_invalid");
+    const data = readFileSync(fd);
+    const after = fstatSync(fd);
+    const current = lstatSync(path);
+    if (!current.isFile() || current.isSymbolicLink() || before.dev !== after.dev || before.ino !== after.ino ||
+        before.dev !== current.dev || before.ino !== current.ino || data.byteLength !== after.size || after.size > maxBytes) {
+      throw new ProfileSourceError("profile_source_changed");
+    }
+    return data;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return undefined;
+    if (error instanceof ProfileSourceError) throw error;
+    throw new ProfileSourceError("profile_source_invalid");
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
 }
 
 function columns(db: DatabaseSync, table: "moz_places" | "moz_bookmarks"): Set<string> {
@@ -501,10 +598,16 @@ function publicSource(source: StoredProfileSource): ProfileSourcePublicRecord {
   return publicRecord;
 }
 
+function publicImportReceipt(receipt: StoredProfileImportReceipt): ProfileImportReceipt {
+  const { key_hash: _keyHash, ...publicReceipt } = receipt;
+  return publicReceipt;
+}
+
 function isStoredProfileSource(value: unknown): value is StoredProfileSource {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const item = value as Record<string, unknown>;
   return item.schema_version === HARBOR_PROFILE_SOURCE_SCHEMA && typeof item.source_ref === "string" &&
+    /^profile-source:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(item.source_ref) &&
     item.provider_id === "camoufox" && item.source_format === PROFILE_SOURCE_FORMAT &&
     Number.isInteger(item.bookmark_count) && typeof item.registered_at === "string" && typeof item.expires_at === "string" &&
     (item.revoked_at === null || typeof item.revoked_at === "string") && typeof item.canonical_path === "string" &&
@@ -517,8 +620,9 @@ function isStoredProfileImportReceipt(value: unknown): value is StoredProfileImp
   return item.schema_version === "harbor-profile-import-receipt/v1" && typeof item.idempotency_key === "string" &&
     typeof item.request_hash === "string" && /^[0-9a-f]{64}$/.test(item.request_hash) && typeof item.key_hash === "string" &&
     /^[0-9a-f]{64}$/.test(item.key_hash) && typeof item.source_ref === "string" && typeof item.target_profile_ref === "string" &&
-    typeof item.target_identity_environment_ref === "string" && Boolean(item.report) &&
-    typeof item.report === "object" && (item.report as Record<string, unknown>).schema_version === HARBOR_PROFILE_IMPORT_REPORT_SCHEMA;
+    typeof item.target_identity_environment_ref === "string" &&
+    (item.status === "possibly_dispatched" && item.report === undefined || item.status === "completed" && Boolean(item.report) &&
+      typeof item.report === "object" && (item.report as Record<string, unknown>).schema_version === HARBOR_PROFILE_IMPORT_REPORT_SCHEMA);
 }
 
 function replaceMap<K, V>(target: Map<K, V>, source: Map<K, V>): void {

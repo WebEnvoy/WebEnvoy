@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -77,6 +77,8 @@ let browserPreference: string | null = null, preferenceMutations = 0, dropPrefer
 const preferenceReceipts = new Map<string, unknown>();
 const profileImportReceipts = new Map<string, Record<string, unknown>>();
 let profileManagementSessionsOpened = 0, profileManagementSessionsStopped = 0, profileImportWrites = 0;
+let profileManagementSessionRef: string | null = null, pendingProfileImport = false;
+const profileImportEvents: string[] = [];
 let providerCatalogReads = 0;
 let profileMigrationFactReads = 0;
 const providerCatalog = {
@@ -263,6 +265,7 @@ const server = createServer((req, res) => { void (async () => {
       provider_selection: omitProviderSelection ? null : { schema_version: "harbor-provider-selection/v1", source: input.identity_environment.requested_provider_id ? "explicit_request" : "user_default", selected_provider_id: selectedProvider },
       effects: { index: "registered", local_data: "created", login_state: "unchanged" } });
     receipts.set(input.idempotency_key, value);
+    if (input.idempotency_key.endsWith(":target-create")) profileImportEvents.push("target_create");
     await afterCreate?.();
     if (malformedCreateReply) { res.setHeader("content-type", "application/json"); res.end("[]"); return; }
     if (dropResponse) { req.socket.destroy(); return; }
@@ -283,19 +286,26 @@ const server = createServer((req, res) => { void (async () => {
   }
   else if (req.url?.startsWith("/runtime/profile-sources/")) {
     const sourceRef = decodeURIComponent(req.url.split("/").at(-1)!);
-    if (sourceRef !== "profile-source:11111111-1111-4111-8111-111111111111") { res.writeHead(404); res.end("{}"); return; }
+    if (!/^profile-source:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(sourceRef)) { res.writeHead(404); res.end("{}"); return; }
     value = { source: { schema_version: "harbor-profile-source/v1", source_ref: sourceRef, provider_id: "camoufox", source_format: "camoufox.firefox-places.v86", bookmark_count: 1 } };
   } else if (req.url === "/runtime/profile-imports" && req.method === "POST") {
     let body = ""; for await (const chunk of req) body += chunk;
     const input = JSON.parse(body) as { idempotency_key: string; source_ref: string; target_profile_ref: string };
+    assert.equal(profileManagementSessionRef, null, "Harbor import must run only after the profile-management session has stopped");
+    profileImportEvents.push("import");
     profileImportWrites++;
     const profile = profiles.find(item => (item.refs as Record<string, unknown>).profile_ref === input.target_profile_ref)!;
-    const receipt = { schema_version: "harbor-profile-import-receipt/v1", idempotency_key: input.idempotency_key, source_ref: input.source_ref,
+    const receipt = pendingProfileImport
+      ? { schema_version: "harbor-profile-import-receipt/v1", idempotency_key: input.idempotency_key, source_ref: input.source_ref,
+          target_profile_ref: input.target_profile_ref, target_identity_environment_ref: profile.identity_environment_ref, status: "possibly_dispatched" }
+      : { schema_version: "harbor-profile-import-receipt/v1", idempotency_key: input.idempotency_key, source_ref: input.source_ref,
       target_profile_ref: input.target_profile_ref, target_identity_environment_ref: profile.identity_environment_ref,
+      status: "completed",
       report: { schema_version: "harbor-profile-import-report/v1", status: "completed", imported: { bookmarks: 1, folders: 1 },
         skipped: { bookmarks: 0, folders: 0, separators: 0, unsafe_urls: 0 }, repair_status: "not_attempted", requires_login: true,
         exclusions: ["history", "cookies", "logins", "extensions", "provider_configuration", "account_binding", "runtime_runs"] } };
     profileImportReceipts.set(input.idempotency_key, receipt);
+    pendingProfileImport = false;
     value = { receipt };
   } else if (req.url?.startsWith("/runtime/profile-imports/")) {
     const key = decodeURIComponent(req.url.split("/").at(-1)!);
@@ -304,9 +314,14 @@ const server = createServer((req, res) => { void (async () => {
     value = { receipt };
   } else if (req.url === "/runtime/identity-environment-sessions" && req.method === "POST") {
     profileManagementSessionsOpened++;
-    value = { runtime_session_ref: `session:profile-management-${profileManagementSessionsOpened}` };
+    profileManagementSessionRef = `session:profile-management-${profileManagementSessionsOpened}`;
+    profileImportEvents.push("session_open");
+    value = { runtime_session_ref: profileManagementSessionRef };
   } else if (req.url?.startsWith("/runtime/sessions/") && req.url.endsWith("/stop") && req.method === "POST") {
     profileManagementSessionsStopped++;
+    assert.equal(decodeURIComponent(req.url.split("/").at(-2)!), profileManagementSessionRef);
+    profileManagementSessionRef = null;
+    profileImportEvents.push("session_stop");
     value = { status: "stopped" };
   } else if (req.url?.startsWith("/runtime/profile-migrations/")) {
     const parts = req.url.split("/").slice(-2).map(decodeURIComponent);
@@ -323,7 +338,10 @@ const server = createServer((req, res) => { void (async () => {
       source: { profile_ref: profileRef, provider_id: sourceProviderId, ...versions(sourceProviderId) },
       target: { provider_id: targetProviderId, ...versions(targetProviderId), availability: targetProvider.availability.state,
         unavailable_reason: targetProvider.availability.unavailable_reason, role: targetProvider.role } };
-  } else if (req.url?.startsWith("/runtime/identity-environments/") && req.url.endsWith("/session") && req.url !== "/runtime/identity-environments/identity%3A1/session") value = { runtime_session: null };
+  } else if (req.url?.startsWith("/runtime/identity-environments/") && req.url.endsWith("/session") && req.url !== "/runtime/identity-environments/identity%3A1/session") {
+    if (profileManagementSessionsStopped === profileManagementSessionsOpened && profileManagementSessionsOpened > 0) profileImportEvents.push("session_confirm");
+    value = { runtime_session: null };
+  }
   else if (req.url === "/runtime/identity-environments") {
     identityEnvironmentReads++;
     await afterProfileList?.();
@@ -1136,7 +1154,7 @@ try {
     [`profile:${createCountBeforeMalformedReply + 1}`]);
   await assert.rejects(service.submit(credentialHash, { ...malformedCreateRequest, idempotency_key: "create-after-malformed-reconciliation" }), /managed_access_creation_denied/);
   assert.equal(creates, createCountBeforeMalformedReply + 1, "receipt reconciliation consumes the only quota slot without replay");
-  const profileSourceRef = "profile-source:11111111-1111-4111-8111-111111111111";
+  const profileSourceRef = `profile-source:${randomUUID()}`;
   const importGrant = await accessStore.createGrant({ idempotency_key: "profile-import-grant", principal_id: principal.principal_id,
     profile_refs: [], profile_source_refs: [profileSourceRef], allowed_operations: ["profile.import"], allowed_origins: ["https://example.com"],
     expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 2, creation_template: grant.creation_template });
@@ -1168,6 +1186,7 @@ try {
   const successImportGrant = await accessStore.createGrant({ idempotency_key: "profile-import-success-grant", principal_id: principal.principal_id,
     profile_refs: [], profile_source_refs: [profileSourceRef], allowed_operations: ["profile.import"], allowed_origins: ["https://example.com"],
     expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 1, creation_template: grant.creation_template });
+  const importEventsBeforeSuccess = profileImportEvents.length;
   const completedImport = await service.submit(credentialHash, { ...importRequest, idempotency_key: "profile-import-success", grant_id: successImportGrant.grant_id,
     task_scope: { ...importRequest.task_scope } });
   assert.equal(completedImport.status, "succeeded", JSON.stringify(completedImport));
@@ -1176,6 +1195,39 @@ try {
   assert.equal((completedImport.result as { import_report: { requires_login: boolean } }).import_report.requires_login, true);
   assert.equal(profileManagementSessionsOpened, profileManagementSessionsStopped, "the authenticated profile-management session is always stopped");
   assert.equal(profileImportWrites, importWritesBeforeQuery + 1, "the successful Run issued exactly one Harbor import");
+  assert.deepEqual(profileImportEvents.slice(importEventsBeforeSuccess), ["target_create", "session_open", "session_stop", "session_confirm", "import"],
+    "Core initializes the target through an authenticated session, stops and confirms it, then dispatches import");
+
+  const pendingImportGrant = await accessStore.createGrant({ idempotency_key: "profile-import-pending-grant", principal_id: principal.principal_id,
+    profile_refs: [], profile_source_refs: [profileSourceRef], allowed_operations: ["profile.import"], allowed_origins: ["https://example.com"],
+    expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 1, creation_template: grant.creation_template });
+  pendingProfileImport = true;
+  const importWritesBeforePending = profileImportWrites, createsBeforePending = creates, sessionsBeforePending = profileManagementSessionsOpened;
+  const pendingImport = await service.submit(credentialHash, { ...importRequest, idempotency_key: "profile-import-pending", grant_id: pendingImportGrant.grant_id,
+    task_scope: { ...importRequest.task_scope } });
+  assert.equal(pendingImport.status, "unknown_outcome", JSON.stringify(pendingImport));
+  assert.equal(profileImportWrites, importWritesBeforePending + 1);
+  const pendingImportQuery = await service.query(credentialHash, pendingImport.run_id);
+  assert.equal(pendingImportQuery.status, "unknown_outcome", "a durable possibly-dispatched receipt does not become success");
+  assert.equal((pendingImportQuery.result as { import_status: string }).import_status, "unknown");
+  assert.equal(profileImportWrites, importWritesBeforePending + 1, "query never retries an import with a pending receipt");
+  assert.equal(creates, createsBeforePending + 1, "query keeps the original target when import receipt is pending");
+  assert.equal(profileManagementSessionsOpened, sessionsBeforePending + 1, "query never starts another initialization session");
+
+  const revokedImportGrant = await accessStore.createGrant({ idempotency_key: "profile-import-revoked-grant", principal_id: principal.principal_id,
+    profile_refs: [], profile_source_refs: [profileSourceRef], allowed_operations: ["profile.import"], allowed_origins: ["https://example.com"],
+    expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 1, creation_template: grant.creation_template });
+  const createsBeforeRevokedImport = creates, sessionsBeforeRevokedImport = profileManagementSessionsOpened, writesBeforeRevokedImport = profileImportWrites;
+  afterCreate = async () => { await accessStore.revokeGrant({ idempotency_key: "profile-import-revoke-after-target", grant_id: revokedImportGrant.grant_id }); };
+  const revokedImport = await service.submit(credentialHash, { ...importRequest, idempotency_key: "profile-import-revoked-after-create", grant_id: revokedImportGrant.grant_id,
+    task_scope: { ...importRequest.task_scope } });
+  afterCreate = undefined;
+  assert.equal(revokedImport.status, "failed", JSON.stringify(revokedImport));
+  assert.equal(creates, createsBeforeRevokedImport + 1, "the already-created target is retained after authorization changes");
+  assert.equal((await accessStore.list()).grants.find(item => item.grant_id === revokedImportGrant.grant_id)?.created_profile_refs.length, 1,
+    "the original target still consumes the Grant creation quota");
+  assert.equal(profileManagementSessionsOpened, sessionsBeforeRevokedImport, "revocation after target creation prevents initialization");
+  assert.equal(profileImportWrites, writesBeforeRevokedImport, "revocation after target creation prevents import dispatch");
 
   await accessStore.setProfilePolicy({ idempotency_key: "profile-migration-policy", profile_ref: "profile:1",
     allowed_operations: ["profile.list", "profile.read", "profile.migrate.request"], allowed_origins: [] });

@@ -637,27 +637,51 @@ export class HarborRuntime {
     const previous = this.profileSources.getImport(idempotencyKey);
     if (previous) {
       if (previous.request_hash !== requestHash) throw new Error("profile_import_idempotency_conflict");
-      return previous;
+      if (previous.status === "completed") return previous;
+      throw new Error("profile_import_outcome_unknown");
     }
-    const snapshot = this.profileSources.readBookmarks(sourceRef);
     const target = this.identityEnvironments.list().find(record => record.refs.profile_ref === targetProfileRef);
-    const targetProfileStorageRef = target?.refs.profile_storage_ref;
+    const targetFacts = target ? this.identityEnvironments.getFacts(target.identity_environment_ref) : null;
+    const targetProfileStorageRef = targetFacts?.browser_storage.profile_storage_ref;
     if (!target || typeof targetProfileStorageRef !== "string" || !profileStoragePathExists(targetProfileStorageRef)) throw new Error("profile_import_target_missing");
-    if (profileStorageHasExternalLock(targetProfileStorageRef)) throw new Error("profile_import_target_locked");
-    const targetFacts = this.identityEnvironments.getFacts(target.identity_environment_ref);
-    if (targetFacts?.provider_binding.selected_provider_id !== "camoufox") throw new Error("profile_import_target_unsupported");
-    if (this.runtimeSessions.isProfileStorageInUse(targetProfileStorageRef)) throw new Error("profile_import_target_locked");
-    const recovery = this.profileRecovery.inspect(target.refs.profile_ref);
-    if (recovery.status !== "completed" || recovery.continuity !== "matchable" || recovery.active_instance) {
-      throw new Error("profile_import_target_unsupported");
+    const releaseMutation = this.runtimeSessions.reserveIdentityEnvironmentMutation([target.identity_environment_ref], [targetProfileStorageRef]);
+    if (!releaseMutation) throw new Error("profile_import_target_locked");
+    let ownership: ProfileStorageOwnershipLock;
+    try { ownership = acquireProfileStorageOwnership([targetProfileStorageRef]); }
+    catch {
+      releaseMutation();
+      throw new Error("profile_import_target_locked");
     }
-    const report = mergeBookmarksIntoTarget(join(profileStoragePath(targetProfileStorageRef), "places.sqlite"), snapshot.bookmarks,
-      () => this.profileSources.assertUnchanged(sourceRef, snapshot.fingerprint));
-    const receipt: ProfileImportReceipt = { schema_version: "harbor-profile-import-receipt/v1", idempotency_key: idempotencyKey,
-      request_hash: requestHash, source_ref: sourceRef, target_profile_ref: targetProfileRef,
-      target_identity_environment_ref: target.identity_environment_ref, report };
-    this.profileSources.saveImport(receipt);
-    return receipt;
+    let sourceSnapshot: ReturnType<ProfileSourceRegistry["openImportSnapshot"]> | undefined;
+    try {
+      const current = this.identityEnvironments.list().find(record => record.refs.profile_ref === targetProfileRef);
+      const currentFacts = current ? this.identityEnvironments.getFacts(current.identity_environment_ref) : null;
+      if (!current || current.identity_environment_ref !== target.identity_environment_ref || currentFacts?.browser_storage.profile_storage_ref !== targetProfileStorageRef) {
+        throw new Error("profile_import_target_changed");
+      }
+      if (profileStorageHasExternalLock(targetProfileStorageRef) || this.runtimeSessions.isProfileStorageInUse(targetProfileStorageRef) ||
+          this.runtimeSessions.isIdentityEnvironmentInUse(target.identity_environment_ref)) throw new Error("profile_import_target_locked");
+      if (currentFacts?.provider_binding.selected_provider_id !== "camoufox") throw new Error("profile_import_target_unsupported");
+      const recovery = this.profileRecovery.inspect(target.refs.profile_ref);
+      if (recovery.status !== "completed" || recovery.continuity !== "matchable" || recovery.active_instance) {
+        throw new Error("profile_import_target_unsupported");
+      }
+      sourceSnapshot = this.profileSources.openImportSnapshot(sourceRef);
+      sourceSnapshot.assertUnchanged();
+      const dispatch = this.profileSources.beginImport({ schema_version: "harbor-profile-import-receipt/v1", idempotency_key: idempotencyKey,
+        request_hash: requestHash, source_ref: sourceRef, target_profile_ref: targetProfileRef,
+        target_identity_environment_ref: target.identity_environment_ref });
+      if (dispatch.status === "completed") return dispatch;
+      const report = mergeBookmarksIntoTarget(join(profileStoragePath(targetProfileStorageRef), "places.sqlite"), sourceSnapshot.bookmarks,
+        sourceSnapshot.assertUnchanged);
+      const receipt: ProfileImportReceipt = { ...dispatch, status: "completed", report };
+      this.profileSources.saveImport(receipt);
+      return receipt;
+    } finally {
+      sourceSnapshot?.release();
+      ownership.release();
+      releaseMutation();
+    }
   }
 
   getProfileImportResult(idempotencyKey: string): ProfileImportReceipt | null {
