@@ -1034,8 +1034,22 @@ export class HarborRuntime {
     const request = input as Record<string, string>;
     const observed = this.runtimeSessions.findManagedObservation(identity_environment_ref, request.observation_ref, request.holder_ref);
     if (!observed || observed.account.status !== "verified" || observed.account.account_system_ref !== request.account_system_ref || observed.account.account_ref !== request.account_ref) return managedUnavailable("account_observation_required");
-    const fresh = await this.runtimeSessions.observeManagedSession(observed.runtime_session_ref, { holder_ref: request.holder_ref });
-    if (fresh.status !== "completed" || fresh.account.status !== "verified" || fresh.account.account_ref !== request.account_ref || fresh.account.account_system_ref !== request.account_system_ref || fresh.control_generation !== observed.control_generation) return managedUnavailable("account_observation_changed");
+    const session = this.runtimeSessions.getRecord(observed.runtime_session_ref);
+    if (!session || session.facts.identity_environment_ref !== identity_environment_ref) return managedUnavailable("account_observation_changed");
+    const fresh = await this.runtimeSessions.observeManagedSession(observed.runtime_session_ref, {
+      holder_ref: request.holder_ref,
+      scope_semantics: session.scope_semantics ?? "legacy_request_guard_v1",
+      ...(observed.page.page_id ? { page_id: observed.page.page_id } : {}),
+      ...(observed.page.page_ref ? { page_ref: observed.page.page_ref } : {}),
+      ...(observed.page.document_generation !== undefined ? { document_generation: observed.page.document_generation } : {}),
+      ...(typeof observed.page.origin === "string" ? { expected_origin: observed.page.origin } : {})
+    });
+    const samePage = fresh.status === "completed" &&
+      (observed.page.page_id === undefined || fresh.page.page_id === observed.page.page_id) &&
+      (observed.page.page_ref === undefined || fresh.page.page_ref === observed.page.page_ref) &&
+      (observed.page.document_generation === undefined || fresh.page.document_generation === observed.page.document_generation) &&
+      (observed.page.origin === undefined || fresh.page.origin === observed.page.origin);
+    if (fresh.status !== "completed" || !samePage || fresh.account.status !== "verified" || fresh.account.account_ref !== request.account_ref || fresh.account.account_system_ref !== request.account_system_ref || fresh.control_generation !== observed.control_generation) return managedUnavailable("account_observation_changed");
     try {
       return this.identityEnvironments.bindObservedAccount(identity_environment_ref, { account_system_ref: request.account_system_ref, account_ref: request.account_ref,
         observation_ref: fresh.observation_ref, bound_at: fresh.observed_at }, request.idempotency_key,

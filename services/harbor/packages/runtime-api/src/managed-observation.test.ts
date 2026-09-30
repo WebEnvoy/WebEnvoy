@@ -80,6 +80,117 @@ test("same-instance observation discovers without binding, rejects unknown/confl
   } finally { await runtime.stopSession(a.runtime_session_ref); await runtime.stopSession(b.runtime_session_ref); }
 });
 
+test("v2 owner binding rechecks the observed Page and persists only after a fresh same-Page observation", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "managed-v2-binding-"));
+  const origin = "https://github.com";
+  const pages: LocalProviderPageState[] = [
+    { provider_page_ref: "provider:a", current_url: `${origin}/other-user`, title: "Other", status: "ready", facts: [], active: true, document_generation: 1 },
+    { provider_page_ref: "provider:b", current_url: `${origin}/octocat`, title: "Octocat", status: "ready", facts: [], active: false, document_generation: 1 }
+  ];
+  const observedPages: (string | undefined)[] = [];
+  let changeDocumentDuringObservation = false;
+  const pageController: LocalProviderPageController = {
+    listPages: async () => structuredClone(pages),
+    openPage: async () => structuredClone(pages[0]!),
+    activatePage: async provider_page_ref => {
+      for (const page of pages) page.active = page.provider_page_ref === provider_page_ref;
+      return structuredClone(pages.find(page => page.provider_page_ref === provider_page_ref)!);
+    },
+    closePage: async provider_page_ref => {
+      const index = pages.findIndex(page => page.provider_page_ref === provider_page_ref);
+      if (index >= 0) pages.splice(index, 1);
+      return structuredClone(pages);
+    },
+    navigatePage: async provider_page_ref => structuredClone(pages.find(page => page.provider_page_ref === provider_page_ref)!)
+  };
+  const launcher: LocalProviderLauncher = async input => {
+    const ready = await createFixtureLauncher("ready")(input);
+    if (ready.status !== "ready") throw new Error("fixture unavailable");
+    return {
+      ...ready,
+      execution_surface: "local_provider",
+      page: pages[0]!,
+      pages,
+      pageController,
+      observePage: trustManagedPageObserver(async operation => {
+        const selected = pages.find(page => page.provider_page_ref === operation?.provider_page_ref);
+        observedPages.push(operation?.provider_page_ref);
+        if (!selected) throw new Error("provider page missing");
+        if (changeDocumentDuringObservation && selected.provider_page_ref === "provider:b") {
+          selected.document_generation = (selected.document_generation ?? 1) + 1;
+          changeDocumentDuringObservation = false;
+        }
+        return normalizeManagedProviderObservation({
+          current_url: selected.current_url,
+          title: selected.title,
+          ready_state: "complete",
+          stable_id: selected.provider_page_ref === "provider:b" ? "583231" : "832",
+          account_source_kind: "github.profile_meta.self_match/v1",
+          document_generation: selected.document_generation
+        });
+      })
+    };
+  };
+  const options = { persistence_path: join(dir, "identities.json"), provider_detection: testProviderDetection };
+  const runtime = new HarborRuntime(launcher, options);
+  runtime.createLocalIdentityEnvironment({ ...identityInput("identity:v2-bind", "profile:v2-bind"), site: { site_id: "github", origin, display_name: "GitHub" } });
+  const session = await runtime.openManagedIdentityEnvironmentSession({
+    identity_environment_ref: "identity:v2-bind",
+    url: `${origin}/other-user`,
+    control_owner: "core_task",
+    holder_ref: "principal:one",
+    operation_scope: "profile_management",
+    scope_semantics: "agent_operations_v2"
+  });
+  if ("status" in session) throw new Error("session unavailable");
+  try {
+    const listed = await runtime.operateManagedPage(session.runtime_session_ref, {
+      operation: "page.list", holder_ref: "principal:one", authorized_origins: [origin], scope_semantics: "agent_operations_v2"
+    });
+    if (!("pages" in listed)) throw new Error("page list unavailable");
+    const selected = listed.pages.find(page => page.current_url === `${origin}/octocat`)!;
+    const observation = await runtime.observeManagedSession(session.runtime_session_ref, {
+      holder_ref: "principal:one", scope_semantics: "agent_operations_v2", expected_origin: origin,
+      page_id: selected.page_id, page_ref: selected.page_ref, document_generation: selected.document_generation
+    });
+    if (observation.status !== "completed") throw new Error(`observation unavailable: ${observation.failure_class}`);
+    assert.equal(observation.page.page_ref, selected.page_ref);
+    const staleBindInput = {
+      observation_ref: observation.observation_ref,
+      account_system_ref: observation.account.account_system_ref!,
+      account_ref: observation.account.account_ref!,
+      idempotency_key: "bind:v2-during-observation-navigation",
+      holder_ref: "principal:one"
+    };
+    changeDocumentDuringObservation = true;
+    assert.equal((await runtime.bindManagedAccount("identity:v2-bind", staleBindInput) as { failure_class?: string }).failure_class, "account_observation_changed");
+    assert.deepEqual(observedPages, ["provider:b", "provider:b"], "owner recheck must use the Page from the trusted observation");
+
+    const refreshed = await runtime.operateManagedPage(session.runtime_session_ref, {
+      operation: "page.list", holder_ref: "principal:one", authorized_origins: [origin], scope_semantics: "agent_operations_v2"
+    });
+    if (!("pages" in refreshed)) throw new Error("refreshed page list unavailable");
+    const current = refreshed.pages.find(page => page.current_url === `${origin}/octocat`)!;
+    const currentObservation = await runtime.observeManagedSession(session.runtime_session_ref, {
+      holder_ref: "principal:one", scope_semantics: "agent_operations_v2", expected_origin: origin,
+      page_id: current.page_id, page_ref: current.page_ref, document_generation: current.document_generation
+    });
+    if (currentObservation.status !== "completed") throw new Error("current observation unavailable");
+    assert.equal(currentObservation.account.account_ref, observation.account.account_ref);
+    const bound = await runtime.bindManagedAccount("identity:v2-bind", {
+      observation_ref: currentObservation.observation_ref,
+      account_system_ref: currentObservation.account.account_system_ref!,
+      account_ref: currentObservation.account.account_ref!,
+      idempotency_key: "bind:v2-page",
+      holder_ref: "principal:one"
+    });
+    assert.ok("account_bindings" in bound && bound.account_bindings.length === 1, JSON.stringify(bound));
+    assert.deepEqual(observedPages, ["provider:b", "provider:b", "provider:b", "provider:b"], "owner recheck must retain the selected Page after a fresh observation");
+    const persisted = new HarborRuntime(launcher, options).getManagedLocalIdentityEnvironment("identity:v2-bind");
+    assert.ok(persisted?.account_bindings.some(binding => binding.account_ref === currentObservation.account.account_ref));
+  } finally { await runtime.stopSession(session.runtime_session_ref); rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("shared persisted binding owner protects direct creation/import and exposes no implicit discovery binding", () => {
   const dir = mkdtempSync(join(tmpdir(), "managed-bindings-"));
   try {
