@@ -17,6 +17,7 @@ const directory = await mkdtemp(join(tmpdir(), "managed-browser-check-"));
 const profiles: Record<string, unknown>[] = [];
 let creates = 0;
 let identityEnvironmentReads = 0;
+let managedOperationCatalogReads = 0;
 let navigations = 0, observations = 0, sessionReads = 0;
 let diagnostics = 0, lockAttempts = 0, dropDiagnosticsResponse = false;
 let capabilityDescriptions = 0;
@@ -43,6 +44,7 @@ const environmentReceipts = new Map<string, Record<string, unknown>>();
 let recoveryExpectedProfileRef: string | undefined;
 let afterCreate: (() => Promise<void>) | undefined;
 let afterProfileList: (() => Promise<void>) | undefined;
+let afterIdentityEnvironmentSnapshot: (() => Promise<void>) | undefined;
 let principalId: string | undefined;
 let browserPreference: string | null = null, preferenceMutations = 0, dropPreferenceResponse = false;
 const preferenceReceipts = new Map<string, unknown>();
@@ -91,12 +93,12 @@ const preferenceSnapshot = (providerId: string | null) => ({
 const server = createServer((req, res) => { void (async () => {
   assert.equal(req.headers.authorization, "Bearer fixture-supervisor");
   let value: unknown;
-  if (req.url === "/runtime/managed-operation-catalog") value = {
+  if (req.url === "/runtime/managed-operation-catalog") { managedOperationCatalogReads++; value = {
     schema_version: "webenvoy.harbor-operation-catalog.v0", catalog_ref: "harbor://managed-operations", catalog_version: "1",
     operations: [...managedOperations.filter(op => !(managedInteractionOperations as readonly string[]).includes(op) && !(managedBusinessTargetOperations as readonly string[]).includes(op) && !op.startsWith("provider.preference.")).map(operation_id => ({ operation_id, category: (managedFileOperations as readonly string[]).includes(operation_id) || operation_id === "environment.update" || operation_id === "recovery.request" || ["page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward"].includes(operation_id) ? "prepare" : ["profile.create", "profile.metadata.update", "account.bind"].includes(operation_id) ? "commit" : "read", target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: (managedFileOperations as readonly string[]).includes(operation_id) ? ["harbor://managed-profile", "harbor://controlled-page", "harbor://managed-file"] : ["harbor://managed-profile"] })),
       ...["provider.preference.read", "provider.preference.set", "provider.preference.clear"].map(operation_id => ({ operation_id, category: operation_id === "provider.preference.read" ? "read" : "commit", target_scope: { target_types: ["provider_preference"] }, resource_requirement_refs: ["harbor://browser-provider-preference"] })),
       ...["controlled-page.observe", "controlled-page.interact"].map(operation_id => ({ operation_id, category: operation_id === "controlled-page.interact" ? "prepare" : "read", target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: ["harbor://managed-profile", "harbor://controlled-page"] }))]
-  };
+  }; }
   else if (req.url === "/runtime/capabilities/describe") {
     let body = ""; for await (const chunk of req) body += chunk;
     const input = JSON.parse(body) as { operation: string; profile_ref: string; authorized_origins: string[]; runtime_session_ref?: string; page_id?: string; page_ref?: string; document_generation?: number };
@@ -165,7 +167,13 @@ const server = createServer((req, res) => { void (async () => {
     if (dropResponse) { req.socket.destroy(); return; }
     }
   } else if (req.url?.startsWith("/runtime/identity-environment-mutations/")) value = receipts.get(decodeURIComponent(req.url.split("/").at(-1)!)) ?? environmentReceipts.get(decodeURIComponent(req.url.split("/").at(-1)!));
-  else if (req.url === "/runtime/identity-environments") { identityEnvironmentReads++; await afterProfileList?.(); value = { identity_environments: profiles }; }
+  else if (req.url === "/runtime/identity-environments") {
+    identityEnvironmentReads++;
+    await afterProfileList?.();
+    value = { identity_environments: structuredClone(profiles) };
+    await afterIdentityEnvironmentSnapshot?.();
+    afterIdentityEnvironmentSnapshot = undefined;
+  }
   else if (req.url === "/runtime/identity-environments/identity%3A1/environment") {
     if (req.method === "GET") {
       environmentReads++;
@@ -430,11 +438,11 @@ try {
     const state = await accessStore.list();
     const currentPolicy = state.profile_policies.find(item => item.profile_ref === profileRef)!;
     await accessStore.updateAgentOperationsV2ProfilePolicy({ idempotency_key: `${suffix}-enable-business-target-policy`, profile_ref: profileRef,
-      current_policy_digest: currentPolicy.policy_digest, allowed_operations: [...managedBusinessTargetOperations], allowed_origins: [], controlled_interaction_origins: [] });
+      current_policy_digest: currentPolicy.policy_digest, allowed_operations: ["profile.read", ...managedBusinessTargetOperations], allowed_origins: [], controlled_interaction_origins: [] });
     const policyDigest = (await accessStore.list()).profile_policies.find(item => item.profile_ref === profileRef)!.policy_digest;
     return accessStore.issueAgentOperationsV2Grant({
       idempotency_key: `${suffix}-target-grant`, principal_id: principal.principal_id, profile_refs: [profileRef], policy_digest: policyDigest,
-      allowed_operations: [...managedBusinessTargetOperations], allowed_origins: [], expires_at: expiresAt,
+      allowed_operations: ["profile.read", ...managedBusinessTargetOperations], allowed_origins: [], expires_at: expiresAt,
       account_scope_selections: [{ account_system_ref: accountSystemRef, account_ref: selectedAccountRef }]
     }, service.resolveBusinessTargetAccountScopes);
   }
@@ -457,6 +465,30 @@ try {
   assert.equal(targetRecord.verification_state, "unverified");
   assert.equal(targetRecord.created_by_profile_ref, targetProfileRef);
   assert.match(String(targetRecord.business_target_ref), /^business-target:[0-9a-f-]{36}$/);
+  const targetDescribeContext = { grant_id: businessTargetGrant.grant_id, profile_ref: targetProfileRef,
+    task_scope: { operations: ["profile.read", "business_target.list"], profile_refs: [targetProfileRef], origins: [] } };
+  const beforeTargetDescribeCatalog = managedOperationCatalogReads, beforeTargetDescribeCapabilities = capabilityDescriptions;
+  const beforeTargetDescribeSessionReads = sessionReads, beforeTargetDescribeRuns = (await runRecordStore.listRunRecords()).length;
+  const beforeTargetDescribeDecisions = (await authorizationDecisionStore.queryAuthorizationDecisions({ limit: 100 })).authorization_decisions.length;
+  sessionStopped = true;
+  const localTargetDescription = await service.describe(credentialHash, { connection_id: connection.connection_id, operation: "business_target.list",
+    context: targetDescribeContext, arguments: { account_system_ref: accountSystemRef, account_ref: accountRefA } });
+  sessionStopped = false;
+  assert.equal((localTargetDescription.provider as { state: string }).state, "not_applicable", "Core-local metadata has no Provider runtime dependency");
+  assert.equal((localTargetDescription.availability as { state: string }).state, "no_known_blocker",
+    "a unique selected Account remains available when another binding makes the Profile aggregate conflicted");
+  assert.deepEqual(localTargetDescription.execution_checks, ["reauthorize", "check_current_account_binding"]);
+  assert.equal(managedOperationCatalogReads, beforeTargetDescribeCatalog, "Core-local metadata description does not require Harbor's operation catalog");
+  assert.equal(capabilityDescriptions, beforeTargetDescribeCapabilities, "Core-local metadata description does not query Harbor capability availability");
+  assert.equal(sessionReads, beforeTargetDescribeSessionReads, "Core-local metadata description does not require a running Instance");
+  assert.equal((await runRecordStore.listRunRecords()).length, beforeTargetDescribeRuns, "description remains read-only");
+  assert.equal((await authorizationDecisionStore.queryAuthorizationDecisions({ limit: 100 })).authorization_decisions.length, beforeTargetDescribeDecisions);
+  const beforeDeniedTargetIdentityReads = identityEnvironmentReads;
+  const deniedConflictBindingDescription = await service.describe(credentialHash, { connection_id: connection.connection_id, operation: "business_target.list",
+    context: targetDescribeContext, arguments: { account_system_ref: "account-system:other", account_ref: accountRefB } });
+  assert.equal((deniedConflictBindingDescription.authorization as { state: string }).state, "denied");
+  assert.equal((deniedConflictBindingDescription.availability as { state: string }).state, "blocked");
+  assert.equal(identityEnvironmentReads, beforeDeniedTargetIdentityReads, "an ungranted conflicting Account is refused before identity facts are read");
   assert.deepEqual(await service.submit(credentialHash, targetCreate), createdTarget, "same-key target creation returns the original Core Run result");
   await assert.rejects(service.submit(credentialHash, { ...targetCreate, label: "Changed" }), /idempotency_conflict/);
   const targetList = await service.submit(credentialHash, { idempotency_key: "business-target-list", ...targetBase, operation: "business_target.list",
@@ -536,6 +568,29 @@ try {
   assert.equal(migratedRecord.business_target_ref, targetRef);
   assert.equal(migratedRecord.created_by_profile_ref, targetProfileRef, "same Account migration keeps original Profile only as provenance");
   assert.equal(migratedRecord.status, "disabled", "disabled target history remains readable under a newly authorized Profile");
+  profileOne.identity_ownership = ownership(accountRefA);
+  const currentTargetDescribeContext = { grant_id: businessTargetGrant.grant_id, profile_ref: targetProfileRef,
+    task_scope: { operations: ["profile.read", "business_target.list"], profile_refs: [targetProfileRef], origins: [] } };
+  const changedOwnership = ownership(accountRefA, "conflict");
+  (changedOwnership.history.bindings[0] as { ownership_status: string }).ownership_status = "conflict";
+  afterIdentityEnvironmentSnapshot = async () => { profileOne.identity_ownership = changedOwnership; };
+  const changedBindingDescription = await service.describe(credentialHash, { connection_id: connection.connection_id, operation: "business_target.list",
+    context: currentTargetDescribeContext, arguments: { account_system_ref: accountSystemRef, account_ref: accountRefA } });
+  assert.equal((changedBindingDescription.provider as { state: string }).state, "not_applicable");
+  assert.equal((changedBindingDescription.availability as { state: string }).state, "unknown",
+    "a binding conflict appearing during description cannot be reported as available");
+  assert.deepEqual((changedBindingDescription.availability as { reason_codes: string[] }).reason_codes, ["facts_changed"]);
+  profileOne.identity_ownership = ownership(accountRefA);
+  afterIdentityEnvironmentSnapshot = async () => {
+    await accessStore.revokeGrant({ idempotency_key: "revoke-business-target-during-description", grant_id: businessTargetGrant.grant_id });
+  };
+  const revokedTargetDescription = await service.describe(credentialHash, { connection_id: connection.connection_id, operation: "business_target.list",
+    context: currentTargetDescribeContext, arguments: { account_system_ref: accountSystemRef, account_ref: accountRefA } });
+  assert.equal((revokedTargetDescription.provider as { state: string }).state, "not_applicable");
+  assert.equal((revokedTargetDescription.authorization as { state: string }).state, "unknown");
+  assert.equal((revokedTargetDescription.availability as { state: string }).state, "unknown",
+    "a Grant revoked while Harbor facts are being read cannot be reported as available");
+  assert.deepEqual((revokedTargetDescription.availability as { reason_codes: string[] }).reason_codes, ["facts_changed"]);
   profiles.splice(profiles.indexOf(profileOne), 1);
   profiles.splice(profiles.indexOf(migratedProfile), 1);
 

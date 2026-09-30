@@ -21,6 +21,18 @@ export type BusinessTarget = {
 };
 
 type OperationResult = { business_target: BusinessTarget } | { business_targets: BusinessTarget[] };
+type BusinessTargetRequest = {
+  operation: "business_target.create" | "business_target.list" | "business_target.read" | "business_target.metadata.update" | "business_target.disable";
+  profile_ref: string;
+  account_system_ref?: string;
+  account_ref?: string;
+  allowed_account_scopes: BusinessTargetAccountScope[];
+  blocked_account_scopes?: (BusinessTargetAccountScope & { ownership_status: "conflict" | "not_runnable" | "unknown" | "changed" })[];
+  business_target_ref?: string;
+  label?: string;
+  declared_external_id?: string;
+};
+type BusinessTargetAssessment = { state: "available"; status?: BusinessTarget["status"] } | { state: "blocked"; reason_code: string };
 type State = {
   schema_version: "webenvoy.business-target-store/v1";
   records: BusinessTarget[];
@@ -62,6 +74,31 @@ function assertRecord(value: unknown): asserts value is BusinessTarget {
 }
 function empty(): State { return { schema_version: "webenvoy.business-target-store/v1", records: [], receipts: [] }; }
 
+function assess(state: State, input: BusinessTargetRequest): { result: BusinessTargetAssessment; record?: BusinessTarget } {
+  if (input.operation === "business_target.create" || input.operation === "business_target.list") {
+    const system = accountSystemRef(input.account_system_ref), account = accountRef(input.account_ref);
+    if (!input.allowed_account_scopes.some(scope => scope.profile_ref === input.profile_ref && scope.account_system_ref === system && scope.account_ref === account)) {
+      return { result: { state: "blocked", reason_code: "business_target_scope_unavailable" } };
+    }
+    return { result: { state: "available" } };
+  }
+  const ref = text(input.business_target_ref, 128);
+  const record = state.records.find(item => item.business_target_ref === ref);
+  if (!record) return { result: { state: "blocked", reason_code: "business_target_unavailable" } };
+  if (!input.allowed_account_scopes.some(scope => scope.profile_ref === input.profile_ref && scope.account_system_ref === record.account_system_ref && scope.account_ref === record.account_ref)) {
+    const blocked = input.blocked_account_scopes?.find(scope => scope.profile_ref === input.profile_ref && scope.account_system_ref === record.account_system_ref && scope.account_ref === record.account_ref);
+    const reason_code = blocked?.ownership_status === "conflict" ? "business_target_account_binding_conflict"
+      : blocked?.ownership_status === "not_runnable" ? "business_target_account_not_runnable"
+        : blocked?.ownership_status === "unknown" ? "business_target_account_binding_unknown"
+          : blocked?.ownership_status === "changed" ? "business_target_account_binding_changed" : "business_target_unavailable";
+    return { result: { state: "blocked", reason_code } };
+  }
+  if (input.operation === "business_target.metadata.update" && record.status !== "active") {
+    return { result: { state: "blocked", reason_code: "business_target_disabled" }, record };
+  }
+  return { result: { state: "available", status: record.status }, record };
+}
+
 export function createFileBusinessTargetStore(options: { directory: string; clock?: () => Date; lockTimeoutMs?: number }) {
   const path = join(options.directory, "business-targets.json");
   const now = () => (options.clock?.() ?? new Date()).toISOString();
@@ -95,18 +132,12 @@ export function createFileBusinessTargetStore(options: { directory: string; cloc
     });
   }
   return {
-    async operate(input: {
-      operation: "business_target.create" | "business_target.list" | "business_target.read" | "business_target.metadata.update" | "business_target.disable";
+    async inspect(input: BusinessTargetRequest): Promise<BusinessTargetAssessment> {
+      return assess(await readState(), input).result;
+    },
+    async operate(input: BusinessTargetRequest & {
       operation_ref: string;
       request_hash: string;
-      profile_ref: string;
-      account_system_ref?: string;
-      account_ref?: string;
-      allowed_account_scopes: BusinessTargetAccountScope[];
-      blocked_account_scopes?: (BusinessTargetAccountScope & { ownership_status: "conflict" | "not_runnable" | "unknown" | "changed" })[];
-      business_target_ref?: string;
-      label?: string;
-      declared_external_id?: string;
     }): Promise<OperationResult> {
       if (!input.operation_ref || !/^[a-f0-9]{64}$/.test(input.request_hash) || !input.profile_ref || input.profile_ref.length > 512) return fail("business_target_invalid_input");
       return transaction(state => {
@@ -116,9 +147,10 @@ export function createFileBusinessTargetStore(options: { directory: string; cloc
           return structuredClone(previous.result);
         }
         let result: OperationResult;
+        const assessment = assess(state, input);
+        if (assessment.result.state === "blocked") return fail(assessment.result.reason_code);
         if (input.operation === "business_target.create" || input.operation === "business_target.list") {
           const system = accountSystemRef(input.account_system_ref), account = accountRef(input.account_ref);
-          if (!input.allowed_account_scopes.some(scope => scope.profile_ref === input.profile_ref && scope.account_system_ref === system && scope.account_ref === account)) return fail("business_target_scope_unavailable");
           if (input.operation === "business_target.list") {
             result = { business_targets: state.records.filter(record => record.account_system_ref === system && record.account_ref === account).sort((a, b) => a.created_at.localeCompare(b.created_at) || a.business_target_ref.localeCompare(b.business_target_ref)) };
           } else {
@@ -136,20 +168,9 @@ export function createFileBusinessTargetStore(options: { directory: string; cloc
             result = { business_target: record };
           }
         } else {
-          const ref = text(input.business_target_ref, 128);
-          const record = state.records.find(item => item.business_target_ref === ref);
-          if (!record) return fail("business_target_unavailable");
-          if (!input.allowed_account_scopes.some(scope => scope.profile_ref === input.profile_ref && scope.account_system_ref === record.account_system_ref && scope.account_ref === record.account_ref)) {
-            const blocked = input.blocked_account_scopes?.find(scope => scope.profile_ref === input.profile_ref && scope.account_system_ref === record.account_system_ref && scope.account_ref === record.account_ref);
-            if (blocked?.ownership_status === "conflict") return fail("business_target_account_binding_conflict");
-            if (blocked?.ownership_status === "not_runnable") return fail("business_target_account_not_runnable");
-            if (blocked?.ownership_status === "unknown") return fail("business_target_account_binding_unknown");
-            if (blocked?.ownership_status === "changed") return fail("business_target_account_binding_changed");
-            return fail("business_target_unavailable");
-          }
+          const record = assessment.record!;
           if (input.operation === "business_target.read") result = { business_target: record };
           else if (input.operation === "business_target.metadata.update") {
-            if (record.status !== "active") return fail("business_target_disabled");
             record.label = text(input.label, 256).trim();
             if (!record.label) return fail("managed_browser_invalid_input");
             record.updated_at = now();

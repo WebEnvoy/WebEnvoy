@@ -547,6 +547,33 @@ export function createManagedBrowserService(options: {
       return requireRunnableBusinessTargetBinding(match);
     });
   }
+  async function resolveBusinessTargetOperationFacts(access: Awaited<ReturnType<FileManagedAccessStore["checkAccess"]>>, input: Request) {
+    const profileRef = text(input.profile_ref);
+    const list = await harbor("/runtime/identity-environments");
+    if (!Array.isArray(list.identity_environments)) return fail("managed_browser_runtime_invalid");
+    const rawProfile = list.identity_environments.find(item => rawProfileRef(item) === profileRef);
+    const profile = rawProfile === undefined ? undefined : publicProfile(rawProfile);
+    if (!profile) return fail("business_target_profile_not_found");
+    const liveBindings = businessTargetAccountBindings(profile);
+    const snapshots = access.grant.business_target_account_scopes ?? [];
+    const allowedAccountScopes = snapshots.filter(snapshot => snapshot.profile_ref === profileRef && liveBindings.some(live =>
+      live.ownership_status === "unique" && live.account_system_ref === snapshot.account_system_ref && live.account_ref === snapshot.account_ref));
+    const blockedAccountScopes: (BusinessTargetAccountScope & { ownership_status: "conflict" | "not_runnable" | "unknown" | "changed" })[] = [];
+    for (const snapshot of snapshots) {
+      if (snapshot.profile_ref !== profileRef) continue;
+      const live = liveBindings.find(binding => binding.account_system_ref === snapshot.account_system_ref && binding.account_ref === snapshot.account_ref);
+      if (!live) blockedAccountScopes.push({ ...snapshot, ownership_status: "changed" });
+      else if (live.ownership_status !== "unique") blockedAccountScopes.push({ ...snapshot, ownership_status: live.ownership_status });
+    }
+    if (["business_target.create", "business_target.list"].includes(input.operation)) {
+      const selected = snapshots.find(scope => scope.profile_ref === profileRef && scope.account_system_ref === input.account_system_ref && scope.account_ref === input.account_ref);
+      if (!selected) return fail("business_target_scope_unavailable");
+      const live = liveBindings.find(binding => binding.account_system_ref === input.account_system_ref && binding.account_ref === input.account_ref);
+      if (!live) return fail("business_target_account_binding_changed");
+      requireRunnableBusinessTargetBinding(live);
+    }
+    return { allowed_account_scopes: allowedAccountScopes, blocked_account_scopes: blockedAccountScopes };
+  }
   async function authorize(hash: string, input: Request, runId: string, deadlineAt?: number) {
     const access = await options.accessStore.checkAccess(hash, accessRequest(input));
     const catalog = await harbor("/runtime/managed-operation-catalog", undefined, undefined, deadlineAt);
@@ -577,31 +604,7 @@ export function createManagedBrowserService(options: {
   async function executeBusinessTarget(hash: string, input: Request, runId: string): Promise<ObjectValue> {
     const access = await options.accessStore.checkAccess(hash, accessRequest(input));
     const profileRef = text(input.profile_ref);
-    const list = await harbor("/runtime/identity-environments");
-    if (!Array.isArray(list.identity_environments)) return fail("managed_browser_runtime_invalid");
-    const rawProfile = list.identity_environments.find(item => rawProfileRef(item) === profileRef);
-    const profile = rawProfile === undefined ? undefined : publicProfile(rawProfile);
-    if (!profile) return fail("business_target_profile_not_found");
-    const liveBindings = businessTargetAccountBindings(profile);
-    const snapshots = access.grant.business_target_account_scopes ?? [];
-    const liveForRequest = input.account_system_ref === undefined || input.account_ref === undefined ? undefined :
-      liveBindings.find(binding => binding.account_system_ref === input.account_system_ref && binding.account_ref === input.account_ref);
-    if (liveForRequest && liveForRequest.ownership_status !== "unique") requireRunnableBusinessTargetBinding(liveForRequest);
-    const allowedAccountScopes = snapshots.filter(snapshot => snapshot.profile_ref === profileRef && liveBindings.some(live =>
-      live.ownership_status === "unique" && live.account_system_ref === snapshot.account_system_ref && live.account_ref === snapshot.account_ref));
-    const blockedAccountScopes: (BusinessTargetAccountScope & { ownership_status: "conflict" | "not_runnable" | "unknown" | "changed" })[] = [];
-    for (const snapshot of snapshots) {
-      if (snapshot.profile_ref !== profileRef) continue;
-      const live = liveBindings.find(binding => binding.account_system_ref === snapshot.account_system_ref && binding.account_ref === snapshot.account_ref);
-      if (!live) blockedAccountScopes.push({ ...snapshot, ownership_status: "changed" });
-      else if (live.ownership_status !== "unique") blockedAccountScopes.push({ ...snapshot, ownership_status: live.ownership_status });
-    }
-    if (["business_target.create", "business_target.list"].includes(input.operation)) {
-      const selected = snapshots.find(scope => scope.profile_ref === profileRef && scope.account_system_ref === input.account_system_ref && scope.account_ref === input.account_ref);
-      if (!selected) return fail("business_target_scope_unavailable");
-      if (!liveForRequest) return fail("business_target_account_binding_changed");
-      requireRunnableBusinessTargetBinding(liveForRequest);
-    }
+    const targetFacts = await resolveBusinessTargetOperationFacts(access, input);
     const currentAccess = await options.accessStore.checkAccess(hash, accessRequest(input));
     if (currentAccess.grant.grant_id !== access.grant.grant_id) return fail("managed_access_denied");
     await store.updateRunRecord(runId, { evidence_refs: [`managed-business-target:${runId}`] });
@@ -610,8 +613,8 @@ export function createManagedBrowserService(options: {
       operation_ref: runId,
       request_hash: digest(JSON.stringify(input)),
       profile_ref: profileRef,
-      allowed_account_scopes: allowedAccountScopes,
-      blocked_account_scopes: blockedAccountScopes,
+      allowed_account_scopes: targetFacts.allowed_account_scopes,
+      blocked_account_scopes: targetFacts.blocked_account_scopes,
       ...(input.account_system_ref === undefined ? {} : { account_system_ref: input.account_system_ref }),
       ...(input.account_ref === undefined ? {} : { account_ref: input.account_ref }),
       ...(input.business_target_ref === undefined ? {} : { business_target_ref: input.business_target_ref }),
@@ -917,6 +920,122 @@ export function createManagedBrowserService(options: {
       owner_proof: proof, context: { skill_ref: "harbor:managed-browser" },
       policies: await options.executionPolicyConfigStore.resolveSources({ skill_ref: "harbor:managed-browser" }) });
   }
+  async function describeBusinessTargetContext(
+    credentialHash: string,
+    connection: Awaited<ReturnType<FileManagedAccessStore["checkConnection"]>>,
+    context: DescribeContext,
+    target: Request,
+    assessment: ReturnType<typeof describeInputAssessment>,
+    visibilitySnapshot: string,
+    result: ObjectValue,
+    finish: () => ObjectValue
+  ): Promise<ObjectValue> {
+    const factsAt = () => new Date().toISOString();
+    const unknown = () => {
+      result.authorization = { state: "unknown", reason_codes: ["facts_changed"] };
+      result.availability = { state: "unknown", reason_codes: ["facts_changed"], facts_at: null };
+      result.next_steps = [discoveryNextStep("retry_description", target.operation)];
+      return finish();
+    };
+    result.provider = { state: "not_applicable", provider_id: null, reason_codes: [], limitations: [], facts_at: factsAt() };
+    result.authorization = { state: "not_evaluated", reason_codes: [] };
+    result.availability = { state: "not_evaluated", reason_codes: [], facts_at: null };
+    if (assessment.state === "incomplete" || assessment.state === "invalid" || assessment.state === "not_provided") {
+      try {
+        const finalConnection = await options.accessStore.checkConnection(credentialHash, connection.connection.connection_id);
+        const finalVisible = await readProfileVisibility(credentialHash, finalConnection.connection.connection_id, context);
+        if (finalConnection.principal.principal_id !== connection.principal.principal_id ||
+            finalConnection.connection.connection_id !== connection.connection.connection_id ||
+            accessFingerprint(finalVisible) !== visibilitySnapshot) return unknown();
+      } catch { return unknown(); }
+      result.next_steps = [discoveryNextStep("fill_inputs", target.operation, [...assessment.missing, ...assessment.invalid.map(issue => issue.path)])];
+    } else {
+      let initialAccess: Awaited<ReturnType<FileManagedAccessStore["checkAccess"]>> | undefined;
+      let initialAuthorization: { state: "allowed" | "denied" | "unknown"; reason_codes: string[] };
+      try {
+        initialAccess = await options.accessStore.checkAccess(credentialHash, accessRequest(target));
+        initialAuthorization = { state: "allowed", reason_codes: [] };
+      } catch (error) {
+        const code = error instanceof ManagedAccessError ? error.code : "managed_access_unavailable";
+        if (["managed_access_authentication_required", "managed_access_connection_unavailable", "managed_access_grant_unavailable"].includes(code)) throw error;
+        initialAuthorization = describeAuthorizationError(code);
+      }
+      result.authorization = initialAuthorization;
+      let initialAssessment: Awaited<ReturnType<typeof businessTargetStore.inspect>> | undefined;
+      let initialLocalState: string | undefined;
+      if (initialAccess) {
+        try {
+          const facts = await resolveBusinessTargetOperationFacts(initialAccess, target);
+          initialAssessment = await businessTargetStore.inspect({ operation: target.operation as typeof managedBusinessTargetOperations[number],
+            profile_ref: context.profile_ref, allowed_account_scopes: facts.allowed_account_scopes, blocked_account_scopes: facts.blocked_account_scopes,
+            ...(target.account_system_ref === undefined ? {} : { account_system_ref: target.account_system_ref }),
+            ...(target.account_ref === undefined ? {} : { account_ref: target.account_ref }),
+            ...(target.business_target_ref === undefined ? {} : { business_target_ref: target.business_target_ref }) });
+          initialLocalState = JSON.stringify(initialAssessment);
+          result.availability = initialAssessment.state === "available"
+            ? { state: "no_known_blocker", reason_codes: [], facts_at: factsAt() }
+            : { state: "blocked", reason_codes: [initialAssessment.reason_code], facts_at: factsAt() };
+        } catch (error) {
+          const code = error instanceof ManagedAccessError ? error.code : "runtime_facts_unavailable";
+          initialLocalState = `${code.startsWith("business_target_") ? "blocked" : "unknown"}:${code}`;
+          result.availability = code.startsWith("business_target_")
+            ? { state: "blocked", reason_codes: [code], facts_at: factsAt() }
+            : { state: "unknown", reason_codes: [code], facts_at: null };
+        }
+      } else {
+        result.availability = { state: initialAuthorization.state === "denied" ? "blocked" : "unknown",
+          reason_codes: initialAuthorization.reason_codes, facts_at: null };
+      }
+
+      // A contextual description is advisory. Re-read the exact authorization,
+      // selected Profile binding and local record before returning availability.
+      let changed = false;
+      try {
+        const finalConnection = await options.accessStore.checkConnection(credentialHash, connection.connection.connection_id);
+        if (finalConnection.principal.principal_id !== connection.principal.principal_id ||
+            finalConnection.connection.connection_id !== connection.connection.connection_id) changed = true;
+        if (!changed && initialAccess) {
+          let finalLocalState: string;
+          try {
+            const facts = await resolveBusinessTargetOperationFacts(initialAccess, target);
+            const finalAssessment = await businessTargetStore.inspect({ operation: target.operation as typeof managedBusinessTargetOperations[number],
+              profile_ref: context.profile_ref, allowed_account_scopes: facts.allowed_account_scopes, blocked_account_scopes: facts.blocked_account_scopes,
+              ...(target.account_system_ref === undefined ? {} : { account_system_ref: target.account_system_ref }),
+              ...(target.account_ref === undefined ? {} : { account_ref: target.account_ref }),
+              ...(target.business_target_ref === undefined ? {} : { business_target_ref: target.business_target_ref }) });
+            finalLocalState = JSON.stringify(finalAssessment);
+          } catch (error) {
+            const code = error instanceof ManagedAccessError ? error.code : "runtime_facts_unavailable";
+            finalLocalState = `${code.startsWith("business_target_") ? "blocked" : "unknown"}:${code}`;
+          }
+          if (finalLocalState !== initialLocalState) changed = true;
+        }
+        // Keep the last checks local to Core, after the Harbor binding read.
+        const finalVisible = await readProfileVisibility(credentialHash, finalConnection.connection.connection_id, context);
+        if (accessFingerprint(finalVisible) !== visibilitySnapshot) changed = true;
+        let finalAccess: Awaited<ReturnType<FileManagedAccessStore["checkAccess"]>> | undefined;
+        let finalAuthorization: { state: "allowed" | "denied" | "unknown"; reason_codes: string[] };
+        try {
+          finalAccess = await options.accessStore.checkAccess(credentialHash, accessRequest(target));
+          finalAuthorization = { state: "allowed", reason_codes: [] };
+        } catch (error) {
+          const code = error instanceof ManagedAccessError ? error.code : "managed_access_unavailable";
+          finalAuthorization = ["managed_access_authentication_required", "managed_access_connection_unavailable", "managed_access_grant_unavailable"].includes(code)
+            ? { state: "unknown", reason_codes: ["facts_changed"] } : describeAuthorizationError(code);
+        }
+        if (JSON.stringify(finalAuthorization) !== JSON.stringify(initialAuthorization) ||
+            initialAccess && (!finalAccess || accessFingerprint(finalAccess) !== accessFingerprint(initialAccess)) ||
+            !initialAccess && finalAccess) changed = true;
+      } catch {
+        changed = true;
+      }
+      if (changed) return unknown();
+      const availability = result.availability as ObjectValue;
+      if ((result.authorization as ObjectValue).state === "denied") result.next_steps = [discoveryNextStep("owner_authorize", target.operation)];
+      else if (availability.state === "unknown") result.next_steps = [discoveryNextStep("retry_description", target.operation)];
+    }
+    return finish();
+  }
   async function describe(credentialHash: string, value: unknown): Promise<ObjectValue> {
     const input = parseDescribe(value);
     const connection = await options.accessStore.checkConnection(credentialHash, input.connection_id);
@@ -974,6 +1093,9 @@ export function createManagedBrowserService(options: {
     }
     const target = { idempotency_key: "describe", connection_id: connection.connection.connection_id, operation: input.operation,
       grant_id: context.grant_id, profile_ref: context.profile_ref, task_scope: context.task_scope, ...(input.arguments ?? {}) } as Request;
+    if (isBusinessTargetOperation(input.operation)) {
+      return describeBusinessTargetContext(credentialHash, connection, context, target, assessment, visibilitySnapshot, result, finish);
+    }
     let targetAccess: Awaited<ReturnType<FileManagedAccessStore["checkAccess"]>> | undefined;
     let targetAuthorizationAssessed = false;
     let targetAuthorizationState: "allowed" | "denied" | "unknown" | undefined;
