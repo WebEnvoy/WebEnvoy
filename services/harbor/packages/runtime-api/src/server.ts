@@ -15,6 +15,7 @@ import {
   type WritePrecheckInput
 } from "./index.js";
 import {
+  authorizeOwnerRequest,
   authorizeIdentityEnvironmentMutationRequest,
   identityEnvironmentMutationStatusCode,
   isIdentityEnvironmentConfiguration,
@@ -37,6 +38,7 @@ import {
   requireEmptyProviderJsonObject
 } from "./provider-lifecycle-http.js";
 import type { ProfileRecoveryApplyInput, ProfileRecoveryPlanInput } from "./profile-recovery.js";
+import { ProfileSourceError } from "./profile-import.js";
 
 export const HARBOR_RUNTIME_API_READINESS_SCHEMA = "harbor-runtime-api-readiness/v0";
 
@@ -272,6 +274,78 @@ async function route(
     return;
   }
 
+  if (method === "POST" && url.pathname === "/owner/profile-sources") {
+    if (!authorizeIdentityEnvironmentMutationRequest(manualAuthenticationAuthorizer, request, response)) return;
+    const body = await readJson<unknown>(request);
+    if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length !== 1 || typeof (body as Record<string, unknown>).source_path !== "string") {
+      throw new BadRequest("Invalid Profile source registration request.");
+    }
+    try {
+      writeJson(response, 201, { source: runtime.registerProfileSource((body as { source_path: string }).source_path) });
+    } catch (error) {
+      throw profileSourceHttpError(error);
+    }
+    return;
+  }
+  if (method === "GET" && url.pathname === "/owner/profile-sources") {
+    if (!authorizeOwnerRequest(manualAuthenticationAuthorizer, request, response)) return;
+    writeJson(response, 200, { sources: runtime.listProfileSources() });
+    return;
+  }
+  if (method === "POST" && url.pathname === "/owner/profile-sources/revoke") {
+    if (!authorizeIdentityEnvironmentMutationRequest(manualAuthenticationAuthorizer, request, response)) return;
+    const body = await readJson<unknown>(request);
+    if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length !== 1 || typeof (body as Record<string, unknown>).source_ref !== "string") {
+      throw new BadRequest("Invalid Profile source revocation request.");
+    }
+    try {
+      writeJson(response, 200, { source: runtime.revokeProfileSource((body as { source_ref: string }).source_ref) });
+    } catch (error) {
+      throw profileSourceHttpError(error);
+    }
+    return;
+  }
+
+  if (method === "GET" && parts[0] === "runtime" && parts[1] === "profile-sources" && parts[2] && parts.length === 3) {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    try {
+      writeJson(response, 200, { source: runtime.inspectProfileSource(parts[2]) });
+    } catch (error) { throw profileSourceHttpError(error); }
+    return;
+  }
+  if (method === "GET" && parts[0] === "runtime" && parts[1] === "profile-migrations" && parts[2] && parts[3] && parts.length === 4) {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    if (!boundedManagedRef(parts[2]) || !["cloakbrowser", "chrome_official", "camoufox"].includes(parts[3]!)) throw new BadRequest("Invalid Profile migration qualification request.");
+    try { writeJson(response, 200, runtime.getProfileMigrationFacts(parts[2], parts[3]!)); }
+    catch (error) {
+      const code = error instanceof Error && /^[a-z][a-z0-9_]{1,100}$/.test(error.message) ? error.message : "profile_migration_facts_unavailable";
+      writeJson(response, 409, { status: "unavailable", failure: { code } });
+    }
+    return;
+  }
+  if (method === "POST" && url.pathname === "/runtime/profile-imports") {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    const body = await readJson<unknown>(request);
+    if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length !== 3 ||
+      typeof (body as Record<string, unknown>).idempotency_key !== "string" || typeof (body as Record<string, unknown>).source_ref !== "string" ||
+      typeof (body as Record<string, unknown>).target_profile_ref !== "string") throw new BadRequest("Invalid Profile import request.");
+    const value = body as { idempotency_key: string; source_ref: string; target_profile_ref: string };
+    if (!value.idempotency_key.trim() || value.idempotency_key.length > 200 || !boundedManagedRef(value.target_profile_ref)) throw new BadRequest("Invalid Profile import request.");
+    try {
+      writeJson(response, 200, { receipt: runtime.importProfileBookmarks(value.idempotency_key, value.source_ref, value.target_profile_ref) });
+    } catch (error) {
+      const code = error instanceof Error && /^[a-z][a-z0-9_]{1,100}$/.test(error.message) ? error.message : "profile_import_failed";
+      writeJson(response, 409, { status: "rejected", failure: { code }, public_boundary: { raw_source_path: "not_exposed", raw_profile_material: "not_exposed" } });
+    }
+    return;
+  }
+  if (method === "GET" && parts[0] === "runtime" && parts[1] === "profile-imports" && parts[2] && parts.length === 3) {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    const receipt = runtime.getProfileImportResult(parts[2]);
+    writeJson(response, receipt ? 200 : 404, receipt ? { receipt } : { status: "unavailable", failure_class: "profile_import_receipt_missing", operation_ref: parts[2] });
+    return;
+  }
+
   if (method === "GET" && parts[0] === "runtime" && parts[1] === "identity-environment-mutations" && parts[2] && parts.length === 3) {
     if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
     if (parts[2].length > 256 || /[\u0000-\u001f\u007f]/.test(parts[2])) throw new BadRequest("Invalid idempotency key.");
@@ -400,6 +474,10 @@ function readinessBody(): object {
       "/runtime/browser-providers/cloakbrowser/lifecycle/recheck",
       "/runtime/identity-environments",
       "/runtime/identity-environment-mutations",
+      "/runtime/profile-sources/{source_ref}",
+      "/runtime/profile-migrations/{profile_ref}/{target_provider_id}",
+      "/runtime/profile-imports",
+      "/runtime/profile-imports/{idempotency_key}",
       "/runtime/profile-recovery/inspect",
       "/runtime/profile-recovery/backups",
       "/runtime/profile-recovery/plan",
@@ -845,6 +923,15 @@ function identityEnvironmentMissing(identity_environment_ref: string): object {
       raw_material: "not_exposed"
     }
   };
+}
+
+function profileSourceHttpError(error: unknown): ProviderLifecycleHttpError {
+  if (!(error instanceof ProfileSourceError)) return new ProviderLifecycleHttpError(500, "profile_source_failed", "Profile source operation failed.");
+  const statusCode = error.code === "profile_source_invalid" ? 400
+    : error.code === "profile_source_unsupported" ? 422
+      : error.code === "profile_source_persistence_failed" ? 500
+        : 409;
+  return new ProviderLifecycleHttpError(statusCode, error.code, error.code);
 }
 
 function identityEnvironmentRequired(): object {

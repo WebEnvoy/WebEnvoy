@@ -10,7 +10,7 @@ export const managedSkillOperations = ["skill.list", "skill.inspect", "skill.ins
 export const managedTaskOperations = ["task.submit", "task.query", "task.stop"] as const;
 export const managedFileOperations = ["file.upload", "file.download"] as const;
 export const managedBusinessTargetOperations = ["business_target.create", "business_target.list", "business_target.read", "business_target.metadata.update", "business_target.disable"] as const;
-export const managedOperations = ["profile.list", "profile.read", "profile.create", "profile.copy_environment", "profile.archive", "profile.delete", "profile.metadata.update", "provider.preference.read", "provider.preference.set", "provider.preference.clear", "account_system.import_template", "instance.start", "instance.stop", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "instance.navigate", "instance.read", "instance.handoff", "account.bind", "recovery.inspect", "recovery.request", "recovery.status", ...managedPageOperations, ...managedInteractionOperations, ...managedFileOperations, ...managedSkillOperations, ...managedTaskOperations, ...managedBusinessTargetOperations] as const;
+export const managedOperations = ["profile.list", "profile.read", "profile.create", "profile.import", "profile.migrate.request", "profile.copy_environment", "profile.archive", "profile.delete", "profile.metadata.update", "provider.preference.read", "provider.preference.set", "provider.preference.clear", "account_system.import_template", "instance.start", "instance.stop", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "instance.navigate", "instance.read", "instance.handoff", "account.bind", "recovery.inspect", "recovery.request", "recovery.status", ...managedPageOperations, ...managedInteractionOperations, ...managedFileOperations, ...managedSkillOperations, ...managedTaskOperations, ...managedBusinessTargetOperations] as const;
 export type ManagedOperation = typeof managedOperations[number];
 export type ManagedSkillOperation = typeof managedSkillOperations[number];
 export type ManagedTaskOperation = typeof managedTaskOperations[number];
@@ -24,6 +24,7 @@ export type ManagedProfilePolicy = { profile_ref: string; allowed_operations: Ma
 export type ManagedSkillScope = { skill_refs: string[]; source_refs: string[] };
 export type ManagedAccountSystemScope = { template_refs: string[] };
 export type ManagedAccountBindingScope = { profile_ref: string; account_system_ref: string; account_ref: string };
+export type ManagedProfileSourceScope = { profile_source_refs: string[] };
 export type ManagedFileScope = { upload_refs: string[]; allowed_mime_types: string[]; max_file_bytes: number };
 export type ManagedBusinessTargetAccountScope = BusinessTargetAccountScope;
 export type ManagedCreationTemplate = {
@@ -46,16 +47,17 @@ export type ManagedGrant = {
   max_created_profiles: number;
   created_profile_refs: string[];
   skill_scope?: ManagedSkillScope;
+  profile_source_refs?: string[];
   file_scope?: ManagedFileScope;
   business_target_account_scopes?: ManagedBusinessTargetAccountScope[];
   account_system_scope?: ManagedAccountSystemScope;
   account_binding_scopes?: ManagedAccountBindingScope[];
   scope_semantics?: ManagedScopeSemantics;
 };
-export type ManagedTaskScope = { operations: ManagedOperation[]; profile_refs: string[]; origins: string[]; file_refs?: string[]; skill_refs?: string[]; source_refs?: string[]; template_refs?: string[]; account_binding_scopes?: ManagedAccountBindingScope[] };
+export type ManagedTaskScope = { operations: ManagedOperation[]; profile_refs: string[]; origins: string[]; file_refs?: string[]; skill_refs?: string[]; source_refs?: string[]; profile_source_refs?: string[]; template_refs?: string[]; account_binding_scopes?: ManagedAccountBindingScope[] };
 export type ManagedAccessRequest = {
   connection_id: string; grant_id: string; operation: ManagedOperation;
-  profile_ref?: string; origin?: string; template_ref?: string; confirmation?: "delete_local_data"; skill_ref?: string; source_ref?: string; revision_ref?: string; file_refs?: string[];
+  profile_ref?: string; origin?: string; template_ref?: string; target_provider_id?: string; profile_source_ref?: string; confirmation?: "delete_local_data"; skill_ref?: string; source_ref?: string; revision_ref?: string; file_refs?: string[];
   account_system_ref?: string; account_ref?: string; business_target_ref?: string; task_scope: ManagedTaskScope;
 };
 export type ManagedAccess = {
@@ -147,6 +149,11 @@ function accountBindingScopes(value: unknown): ManagedAccountBindingScope[] {
   });
   if (new Set(scopes.map(item => canonical(item))).size !== scopes.length) return fail("managed_access_invalid_input");
   return scopes;
+}
+function profileSourceRefs(value: unknown): string[] {
+  const refs = strings(value);
+  if (refs.length > 64 || refs.some(ref => !/^profile-source:[0-9a-f-]{36}$/.test(ref))) return fail("managed_access_invalid_input");
+  return refs;
 }
 const managedFileMimeTypes = new Set(["image/png", "image/jpeg", "application/pdf", "text/plain", "text/csv"]);
 const managedFileRef = /^attachment:runtime\/[0-9a-f-]{36}$/;
@@ -246,6 +253,7 @@ function grantSnapshot(value: ManagedGrant): Record<string, unknown> {
     max_created_profiles: value.max_created_profiles,
     created_profile_refs: value.created_profile_refs,
     skill_scope: value.skill_scope ?? null,
+    ...(value.profile_source_refs === undefined ? {} : { profile_source_refs: value.profile_source_refs }),
     file_scope: value.file_scope ?? null,
     ...(value.business_target_account_scopes === undefined ? {} : { business_target_account_scopes: value.business_target_account_scopes }),
     ...(value.account_system_scope === undefined ? {} : { account_system_scope: value.account_system_scope }),
@@ -263,15 +271,17 @@ type ParsedGrant = {
   creation_template: ManagedCreationTemplate | null;
   max_created_profiles: number;
   skill_scope?: ManagedSkillScope;
+  profile_source_refs?: string[];
   file_scope?: ManagedFileScope;
   account_system_scope?: ManagedAccountSystemScope;
   account_binding_scopes?: ManagedAccountBindingScope[];
 };
 function grantFields(value: unknown): ParsedGrant {
-  const input = object(value, ["principal_id", "profile_refs", "allowed_operations", "allowed_origins", "expires_at", "creation_template", "max_created_profiles"], ["skill_scope", "file_scope", "account_system_scope", "account_binding_scopes"]);
+  const input = object(value, ["principal_id", "profile_refs", "allowed_operations", "allowed_origins", "expires_at", "creation_template", "max_created_profiles"], ["skill_scope", "profile_source_refs", "file_scope", "account_system_scope", "account_binding_scopes"]);
   const parsed = { principal_id: string(input.principal_id), profile_refs: strings(input.profile_refs), allowed_operations: operations(input.allowed_operations),
     allowed_origins: strings(input.allowed_origins, origin), expires_at: timestamp(input.expires_at), creation_template: template(input.creation_template), max_created_profiles: input.max_created_profiles,
     ...(input.skill_scope === undefined ? {} : { skill_scope: skillScope(input.skill_scope) }),
+    ...(input.profile_source_refs === undefined ? {} : { profile_source_refs: profileSourceRefs(input.profile_source_refs) }),
     ...(input.file_scope === undefined ? {} : { file_scope: fileScope(input.file_scope) }) } as ParsedGrant;
   if (input.account_system_scope !== undefined) parsed.account_system_scope = accountSystemScope(input.account_system_scope);
   if (input.account_binding_scopes !== undefined) parsed.account_binding_scopes = accountBindingScopes(input.account_binding_scopes);
@@ -327,13 +337,14 @@ export function createFileManagedAccessStore(options: { directory: string; clock
         if (entry.revoked_at !== null) timestamp(entry.revoked_at);
       }
       for (const entry of state.grants) {
-        object(entry, ["grant_id", "principal_id", "profile_refs", "allowed_operations", "allowed_origins", "expires_at", "revoked_at", "creation_template", "max_created_profiles", "created_profile_refs"], ["skill_scope", "file_scope", ...(state.schema_version === "webenvoy.managed-access.v0" ? [] : ["scope_semantics", "account_system_scope", "account_binding_scopes"]), ...(state.schema_version === "webenvoy.managed-access.v2" ? ["business_target_account_scopes"] : [])]);
+        object(entry, ["grant_id", "principal_id", "profile_refs", "allowed_operations", "allowed_origins", "expires_at", "revoked_at", "creation_template", "max_created_profiles", "created_profile_refs"], ["skill_scope", "profile_source_refs", "file_scope", ...(state.schema_version === "webenvoy.managed-access.v0" ? [] : ["scope_semantics", "account_system_scope", "account_binding_scopes"]), ...(state.schema_version === "webenvoy.managed-access.v2" ? ["business_target_account_scopes"] : [])]);
         string(entry.grant_id); string(entry.principal_id); strings(entry.profile_refs);
         operations(entry.allowed_operations); strings(entry.allowed_origins, origin); timestamp(entry.expires_at); template(entry.creation_template);
         if (state.schema_version === "webenvoy.managed-access.v0" && (Object.hasOwn(entry, "scope_semantics") ||
           (entry.creation_template && Object.hasOwn(entry.creation_template.permission_ceiling, "scope_semantics")))) return fail("managed_access_store_invalid");
         if (entry.scope_semantics !== undefined) scopeSemantics(entry.scope_semantics);
         if (entry.skill_scope !== undefined) skillScope(entry.skill_scope);
+        if (entry.profile_source_refs !== undefined) profileSourceRefs(entry.profile_source_refs);
         if (entry.file_scope !== undefined) fileScope(entry.file_scope);
         if (entry.business_target_account_scopes !== undefined) {
           if (state.schema_version !== "webenvoy.managed-access.v2") return fail("managed_access_store_invalid");
@@ -443,7 +454,7 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       });
     },
     async createGrant(value: unknown): Promise<ManagedGrant> {
-      const input = object(value, ["idempotency_key", "principal_id", "profile_refs", "allowed_operations", "allowed_origins", "expires_at", "creation_template", "max_created_profiles"], ["skill_scope", "file_scope", "account_system_scope", "account_binding_scopes"]);
+      const input = object(value, ["idempotency_key", "principal_id", "profile_refs", "allowed_operations", "allowed_origins", "expires_at", "creation_template", "max_created_profiles"], ["skill_scope", "profile_source_refs", "file_scope", "account_system_scope", "account_binding_scopes"]);
       const parsed = grantFields(Object.fromEntries(Object.keys(input).filter(key => key !== "idempotency_key").map(key => [key, input[key]])));
       if (parsed.allowed_operations.some(isBusinessTargetOperation)) return fail("managed_access_scope_confirmation_required");
       return transaction(state => receipt(state, "createGrant", input, () => {
@@ -455,7 +466,7 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       }));
     },
     async issueAgentOperationsV2Grant(value: unknown, resolveBusinessTargetAccountScopes?: (profileRef: string, selections: ManagedBusinessTargetAccountSelection[]) => Promise<ManagedBusinessTargetAccountScope[]>): Promise<ManagedGrant> {
-      const input = object(value, ["idempotency_key", "principal_id", "profile_refs", "policy_digest", "allowed_operations", "allowed_origins", "expires_at"], ["source_grant_id", "source_grant_digest", "replaces_grant_id", "replaces_grant_digest", "skill_scope", "file_scope", "account_scope_selections", "account_system_scope", "account_binding_scopes"]);
+      const input = object(value, ["idempotency_key", "principal_id", "profile_refs", "policy_digest", "allowed_operations", "allowed_origins", "expires_at"], ["source_grant_id", "source_grant_digest", "replaces_grant_id", "replaces_grant_digest", "skill_scope", "profile_source_refs", "file_scope", "account_scope_selections", "account_system_scope", "account_binding_scopes"]);
       const principalId = string(input.principal_id), policyDigest = string(input.policy_digest);
       if (!/^[a-f0-9]{64}$/.test(policyDigest)) return fail("managed_access_invalid_input");
       const profileRefs = strings(input.profile_refs);
@@ -469,6 +480,7 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       const replaceGrantDigest = input.replaces_grant_digest === undefined ? undefined : string(input.replaces_grant_digest);
       if ((replaceGrantId === undefined) !== (replaceGrantDigest === undefined) || replaceGrantDigest !== undefined && !/^[a-f0-9]{64}$/.test(replaceGrantDigest)) return fail("managed_access_invalid_input");
       const parsedSkillScope = input.skill_scope === undefined ? undefined : skillScope(input.skill_scope);
+      const parsedProfileSourceRefs = input.profile_source_refs === undefined ? undefined : profileSourceRefs(input.profile_source_refs);
       const parsedFileScope = input.file_scope === undefined ? undefined : fileScope(input.file_scope);
       const targetOperationsIncluded = parsedOperations.some(isBusinessTargetOperation);
       const accountScopeSelections = input.account_scope_selections === undefined ? undefined : businessTargetAccountSelections(input.account_scope_selections);
@@ -490,6 +502,7 @@ export function createFileManagedAccessStore(options: { directory: string; clock
         if (hash(canonical(policySnapshot(profilePolicy))) !== policyDigest) return fail("managed_access_policy_conflict");
         if (Date.parse(expiresAt) <= Date.parse(now()) || parsedOperations.includes("profile.create") ||
           !operationSubset(parsedOperations, profilePolicy.allowed_operations) || !subset(parsedOrigins, profilePolicy.allowed_origins)) return fail("managed_access_scope_confirmation_expands_scope");
+        if (parsedProfileSourceRefs && sourceGrant && !subset(parsedProfileSourceRefs, sourceGrant.profile_source_refs ?? [])) return fail("managed_access_scope_confirmation_expands_scope");
         const replacement = replaceGrantId === undefined ? undefined : state.grants.find(item => item.grant_id === replaceGrantId);
         if (replaceGrantId !== undefined && (!replacement || replacement.principal_id !== principalId || replacement.profile_refs.length !== 1 || replacement.profile_refs[0] !== profileRef || scopeSemantics(replacement.scope_semantics) !== "agent_operations_v2" || sourceGrant && (sourceGrant.profile_refs.length !== 1 || sourceGrant.revoked_at !== null || Date.parse(sourceGrant.expires_at) <= Date.parse(now())) || replacement.revoked_at !== null || Date.parse(replacement.expires_at) <= Date.parse(now()))) return fail("managed_access_v2_grant_replacement_invalid");
         if (replacement && replaceGrantDigest !== undefined && grantDigest(replacement) !== replaceGrantDigest) return fail("managed_access_grant_conflict");
@@ -510,6 +523,7 @@ export function createFileManagedAccessStore(options: { directory: string; clock
           max_created_profiles: 0,
           created_profile_refs: [],
           ...(parsedSkillScope === undefined ? {} : { skill_scope: parsedSkillScope }),
+          ...(parsedProfileSourceRefs === undefined ? {} : { profile_source_refs: parsedProfileSourceRefs }),
           ...(parsedFileScope === undefined ? {} : { file_scope: parsedFileScope }),
           ...(businessTargetAccountScopes === undefined ? {} : { business_target_account_scopes: businessTargetAccountScopes }),
           ...(parsedAccountSystemScope === undefined ? {} : { account_system_scope: parsedAccountSystemScope }),
@@ -582,7 +596,7 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       })));
     },
     async checkAccess(credentialHash: unknown, value: unknown): Promise<ManagedAccess> {
-      const input = object(value, ["connection_id", "grant_id", "operation", "task_scope"], ["profile_ref", "origin", "template_ref", "confirmation", "skill_ref", "source_ref", "revision_ref", "file_refs", "account_system_ref", "account_ref", "business_target_ref"]);
+      const input = object(value, ["connection_id", "grant_id", "operation", "task_scope"], ["profile_ref", "origin", "template_ref", "target_provider_id", "profile_source_ref", "confirmation", "skill_ref", "source_ref", "revision_ref", "file_refs", "account_system_ref", "account_ref", "business_target_ref"]);
       const connectionId = string(input.connection_id), grantId = string(input.grant_id), op = operation(input.operation);
       const profileRef = input.profile_ref === undefined ? undefined : string(input.profile_ref);
       const targetOrigin = input.origin === undefined ? undefined : origin(input.origin);
@@ -591,8 +605,11 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       if (op === "profile.delete" ? confirmation !== "delete_local_data" : confirmation !== undefined) return fail("managed_access_invalid_input");
       const accountSystemRef = input.account_system_ref === undefined ? undefined : string(input.account_system_ref);
       const accountRef = input.account_ref === undefined ? undefined : string(input.account_ref);
+      const targetProviderId = input.target_provider_id === undefined ? undefined : string(input.target_provider_id);
       const skillRef = input.skill_ref === undefined ? undefined : string(input.skill_ref);
       const sourceRef = input.source_ref === undefined ? undefined : string(input.source_ref);
+      const profileSourceRef = input.profile_source_ref === undefined ? undefined : string(input.profile_source_ref);
+      if (profileSourceRef !== undefined && profileSourceRefs([profileSourceRef]).length !== 1) return fail("managed_access_invalid_input");
       const revisionRef = input.revision_ref === undefined ? undefined : string(input.revision_ref);
       const requestedFileRefs = input.file_refs === undefined ? undefined : fileRefs(input.file_refs);
       const requestedAccountSystemRef = input.account_system_ref === undefined ? undefined : string(input.account_system_ref);
@@ -608,11 +625,14 @@ export function createFileManagedAccessStore(options: { directory: string; clock
         : businessTargetRef === undefined || requestedAccountSystemRef !== undefined || requestedAccountRef !== undefined)) return fail("managed_access_invalid_input");
       const skillOperation = (managedSkillOperations as readonly string[]).includes(op);
       const taskOperation = (managedTaskOperations as readonly string[]).includes(op);
+      const profileTransferOperation = op === "profile.import" || op === "profile.migrate.request";
       const accountSystemImport = op === "account_system.import_template";
       const scope = accountSystemImport
         ? object(input.task_scope, ["operations", "template_refs"])
         : skillOperation
         ? object(input.task_scope, ["operations", "skill_refs", "source_refs"], ["file_refs"])
+        : profileTransferOperation
+          ? object(input.task_scope, ["operations", "profile_refs", "origins", "profile_source_refs"])
         : taskOperation
           ? object(input.task_scope, ["operations", "skill_refs", "source_refs", "profile_refs", "origins"])
           : accountBind
@@ -628,6 +648,8 @@ export function createFileManagedAccessStore(options: { directory: string; clock
         ? { operations: operations(scope.operations), profile_refs: [] as string[], origins: [] as string[], ...(scope.file_refs === undefined ? {} : { file_refs: fileRefs(scope.file_refs) }), skill_refs: strings(scope.skill_refs), source_refs: strings(scope.source_refs) }
         : taskOperation
           ? { operations: operations(scope.operations), profile_refs: strings(scope.profile_refs), origins: strings(scope.origins, origin), skill_refs: strings(scope.skill_refs), source_refs: strings(scope.source_refs) }
+          : profileTransferOperation
+            ? { operations: operations(scope.operations), profile_refs: strings(scope.profile_refs), origins: strings(scope.origins, origin), profile_source_refs: profileSourceRefs(scope.profile_source_refs) }
           : { operations: operations(scope.operations), profile_refs: strings(scope.profile_refs), origins: strings(scope.origins, origin),
             ...(scope.file_refs === undefined ? {} : { file_refs: fileRefs(scope.file_refs) }),
             ...(scope.account_binding_scopes === undefined ? {} : { account_binding_scopes: accountBindingScopes(scope.account_binding_scopes) }) }) as ManagedTaskScope;
@@ -674,6 +696,7 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       }
       if (!taskOperation && (skillRef !== undefined || sourceRef !== undefined || revisionRef !== undefined)) return fail("managed_access_invalid_input");
       if (!accountBind && !businessTargetOperation && (accountSystemRef !== undefined || accountRef !== undefined || task.account_binding_scopes !== undefined || task.template_refs !== undefined)) return fail("managed_access_invalid_input");
+      if (profileTransferOperation && (skillRef !== undefined || sourceRef !== undefined || revisionRef !== undefined || requestedFileRefs !== undefined || task.file_refs !== undefined)) return fail("managed_access_invalid_input");
       if (requestedFileRefs !== undefined && ![...requestedFileRefs].every(ref => (task.file_refs ?? []).includes(ref))) return fail("managed_access_denied");
       if (managedFileOperations.includes(op as typeof managedFileOperations[number])) {
         const filePermission = grant.file_scope;
@@ -687,12 +710,24 @@ export function createFileManagedAccessStore(options: { directory: string; clock
         if (profileRef !== undefined || targetOrigin !== undefined || templateRef !== undefined || task.profile_refs.length || task.origins.length) return fail("managed_access_denied");
         return result;
       }
-      if (op === "profile.create") {
+      if (op === "profile.create" || op === "profile.import") {
         if (profileRef || !grant.creation_template || templateRef !== grant.creation_template.template_ref || grant.created_profile_refs.length >= grant.max_created_profiles) return fail("managed_access_creation_denied");
         const creationOrigin = grant.creation_template.site.origin;
         if ((targetOrigin !== undefined && targetOrigin !== creationOrigin) || !grant.allowed_origins.includes(creationOrigin) || !task.origins.includes(creationOrigin)) return fail("managed_access_denied");
+        if (op === "profile.import") {
+          const authorizedSources = grant.profile_source_refs ?? [];
+          if (!profileSourceRef || task.profile_refs.length !== 0 || task.profile_source_refs?.length !== 1 || task.profile_source_refs[0] !== profileSourceRef || !authorizedSources.includes(profileSourceRef)) return fail("managed_access_denied");
+        } else if (profileSourceRef !== undefined || task.profile_source_refs?.length) return fail("managed_access_invalid_input");
         return { ...result, creation_template: grant.creation_template };
       }
+      if (op === "profile.migrate.request") {
+        if (!profileRef || !grant.profile_refs.includes(profileRef) || !task.profile_refs.includes(profileRef) || task.profile_refs.length !== 1 || task.origins.length !== 0 || !templateRef || !targetProviderId || !grant.creation_template || grant.creation_template.template_ref !== templateRef || grant.creation_template.provider_id !== targetProviderId || targetOrigin !== undefined || profileSourceRef !== undefined || task.profile_source_refs?.length) return fail("managed_access_denied");
+        const profile = state.profile_policies.find(item => item.profile_ref === profileRef);
+        if (!profile || !profile.allowed_operations.includes(op)) return fail("managed_access_denied");
+        if (!profileScopeIndependentReads.includes(op) && scopeSemantics(profile.scope_semantics) !== grantScope) return fail("managed_access_scope_semantics_mismatch");
+        return { ...result, creation_template: grant.creation_template, profile_policy: profile };
+      }
+      if (targetProviderId !== undefined || profileSourceRef !== undefined || task.profile_source_refs?.length) return fail("managed_access_invalid_input");
       if (op === "profile.copy_environment") {
         if (!profileRef || !grant.creation_template || templateRef !== grant.creation_template.template_ref || grant.created_profile_refs.length >= grant.max_created_profiles ||
           targetOrigin !== undefined || task.origins.length !== 0 || task.profile_refs.length !== 1 || task.profile_refs[0] !== profileRef) return fail("managed_access_creation_denied");
@@ -764,6 +799,7 @@ export function createFileManagedAccessStore(options: { directory: string; clock
             newPolicy.controlled_interaction_origins?.some(item => !sourcePolicy.controlled_interaction_origins?.includes(item)) ||
             !subset(newGrant.allowed_origins, newPolicy.allowed_origins)) return fail("managed_access_scope_confirmation_expands_scope");
           if (newGrant.skill_scope && (!sourceGrant.skill_scope || !subset(newGrant.skill_scope.skill_refs, sourceGrant.skill_scope.skill_refs) || !subset(newGrant.skill_scope.source_refs, sourceGrant.skill_scope.source_refs))) return fail("managed_access_scope_confirmation_expands_scope");
+          if (newGrant.profile_source_refs && !subset(newGrant.profile_source_refs, sourceGrant.profile_source_refs ?? [])) return fail("managed_access_scope_confirmation_expands_scope");
           if (newGrant.file_scope && (!sourceGrant.file_scope || !subset(newGrant.file_scope.upload_refs, sourceGrant.file_scope.upload_refs) || !subset(newGrant.file_scope.allowed_mime_types, sourceGrant.file_scope.allowed_mime_types) || newGrant.file_scope.max_file_bytes > sourceGrant.file_scope.max_file_bytes)) return fail("managed_access_scope_confirmation_expands_scope");
           if (newGrant.account_system_scope && (!sourceGrant.account_system_scope || !subset(newGrant.account_system_scope.template_refs, sourceGrant.account_system_scope.template_refs))) return fail("managed_access_scope_confirmation_expands_scope");
           if (newGrant.account_binding_scopes && (!sourceGrant.account_binding_scopes || newGrant.account_binding_scopes.some(item => !sourceGrant.account_binding_scopes!.some(source => canonical(source) === canonical(item))))) return fail("managed_access_scope_confirmation_expands_scope");

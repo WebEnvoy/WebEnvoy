@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/harbor/profile-import-receipt.v1.schema.json",
+  "title": "Harbor Profile bookmark import receipt",
+  "description": "Durable, read-only reconciliation result for an owner-registered source imported into a new managed Profile.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "idempotency_key", "request_hash", "source_ref", "target_profile_ref", "target_identity_environment_ref", "report"],
+  "properties": {
+    "schema_version": { "const": "harbor-profile-import-receipt/v1" },
+    "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "request_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "source_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "target_profile_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "target_identity_environment_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "status", "imported", "skipped", "repair_status", "requires_login", "exclusions"],
+      "properties": {
+        "schema_version": { "const": "harbor-profile-import-report/v1" },
+        "status": { "enum": ["completed", "partial"] },
+        "imported": { "$ref": "#/$defs/counts" },
+        "skipped": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["bookmarks", "folders", "separators", "unsafe_urls"],
+          "properties": {
+            "bookmarks": { "type": "integer", "minimum": 0 },
+            "folders": { "type": "integer", "minimum": 0 },
+            "separators": { "type": "integer", "minimum": 0 },
+            "unsafe_urls": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "repair_status": { "const": "not_attempted" },
+        "requires_login": { "const": true },
+        "exclusions": {
+          "type": "array", "minItems": 7, "maxItems": 7, "uniqueItems": true,
+          "items": { "enum": ["history", "cookies", "logins", "extensions", "provider_configuration", "account_binding", "runtime_runs"] }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bookmarks", "folders"],
+      "properties": {
+        "bookmarks": { "type": "integer", "minimum": 0 },
+        "folders": { "type": "integer", "minimum": 0 }
+      }
+    }
+  },
+  "x-webenvoy": {
+    "owner": "Harbor Profile import receipt",
+    "status": "candidate-v1",
+    "schema_version": "harbor-profile-import-receipt/v1",
+    "compatibility_boundary": "Read-only receipt for the bounded Camoufox Places v86 public-bookmark import. It identifies the original opaque source and newly managed target; it carries no source path, browser data, credentials, or authorization. Missing receipts never prove an import was not dispatched.",
+    "source_adrs": ["docs/specs/profile-transfer-v1.md", "docs/adr/0012-runtime-capability-plane-and-plugin-first.md"],
+    "field_owners": { "source_ref": "Harbor owner source registry", "target_profile_ref": "Harbor Profile", "target_identity_environment_ref": "Harbor Identity Environment", "report": "Harbor bookmark importer" }
+  }
+}

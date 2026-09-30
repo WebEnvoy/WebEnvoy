@@ -28,6 +28,7 @@ Commands:
   files       Manage owner-registered file references (owner-only)
   account     Inspect bindings and explicitly bind a verified observation (owner-only)
   account-system  Import and manage local AccountSystem definitions (owner-only)
+  profile-source Register, inspect and revoke a local Profile import source (owner-only)
   site-task-admission  Review and admit private Git site-task repairs (owner-only)
   recovery    Inspect or apply owner-managed recovery (owner-only)
   instance    Discover and control a Runtime instance (owner-only)
@@ -64,6 +65,13 @@ Owner-only local AccountSystem definitions. Import a fixed Lode template, edit
 an owner-local draft from a JSON file, inspect its exact field diff and
 dependencies, pin a new immutable revision, then explicitly enable or roll
 back. Template data never infers login identity or credentials.`,
+  'profile-source': `Usage: webenvoy profile-source <register|list|revoke> --data-dir DIR
+
+Owner-only management of local browser Profile import sources. register
+requires --source-path and emits only an opaque source_ref; list returns active
+source refs and expiry; revoke requires --source-ref. Agent requests cannot
+accept source paths or invoke these owner routes. Only supported public
+bookmarks are imported; login state and other Profile data are never copied.`,
   account: `Usage: webenvoy account <bindings|bind> --data-dir DIR
 
 bindings --identity-environment-ref REF reads current Harbor account bindings.
@@ -171,7 +179,7 @@ const VALUE_FLAGS = new Set([
   '--source-path', '--profile-ref', '--mime-type', '--file-ref', '--destination-path', '--backup-ref', '--plan-file', '--confirmation-file',
   '--client-file', '--request-file', '--run-id', '--runtime-session-ref', '--expected-control-file', '--agent-uid', '--owner-uid', '--agent-endpoint',
   '--template-ref', '--local-definition-ref', '--base-revision-ref', '--draft-ref', '--definition-file', '--conflict-resolutions-file', '--expected-record-version', '--revision-ref',
-  '--identity-environment-ref', '--observation-ref', '--account-system-ref', '--account-ref',
+  '--identity-environment-ref', '--observation-ref', '--account-system-ref', '--account-ref', '--source-ref',
   '--path', '--repository-ref', '--package-ref', '--task-ref', '--candidate-ref', '--admission-ref'
 ]);
 const COMMAND_FLAGS = new Map([
@@ -201,6 +209,9 @@ const COMMAND_FLAGS = new Map([
   ['account-system:resolve', new Set(['--data-dir', '--local-definition-ref', '--revision-ref', '--historical'])],
   ['account:bindings', new Set(['--data-dir', '--identity-environment-ref'])],
   ['account:bind', new Set(['--data-dir', '--profile-ref', '--identity-environment-ref', '--runtime-session-ref', '--observation-ref', '--account-system-ref', '--account-ref', '--idempotency-key', '--confirm'])],
+  ['profile-source:register', new Set(['--data-dir', '--source-path'])],
+  ['profile-source:list', new Set(['--data-dir'])],
+  ['profile-source:revoke', new Set(['--data-dir', '--source-ref'])],
   ['site-task-admission:select-repository', new Set(['--data-dir', '--path'])],
   ['site-task-admission:list-repositories', new Set(['--data-dir'])],
   ['site-task-admission:inspect-candidate', new Set(['--data-dir', '--repository-ref', '--package-ref', '--base-revision-ref', '--first-admission', '--task-ref'])],
@@ -254,7 +265,7 @@ function validateCliSyntax(name, values) {
     if (topics.length > 3) throw cliError('help_topic_invalid');
     return;
   }
-  const action = ['access', 'files', 'account', 'account-system', 'site-task-admission', 'recovery', 'instance', 'agent'].includes(name) ? values[0] : undefined;
+  const action = ['access', 'files', 'profile-source', 'account', 'account-system', 'site-task-admission', 'recovery', 'instance', 'agent'].includes(name) ? values[0] : undefined;
   const nestedAgentTask = name === 'agent' && action === 'task';
   const nestedTaskHelp = nestedAgentTask && values[1] === '--help';
   const nestedTaskCommand = nestedAgentTask && !nestedTaskHelp ? values[1] : undefined;
@@ -456,7 +467,7 @@ if (command === 'setup') {
   } else if (action === 'grant') {
     const value = await readJsonFile(required('--grant-file'), 'access_grant_file_invalid');
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('access_grant_file_invalid');
-    const allowed = ['idempotency_key', 'principal_id', 'profile_refs', 'allowed_operations', 'allowed_origins', 'expires_at', 'creation_template', 'max_created_profiles', 'skill_scope', 'file_scope', 'account_system_scope', 'account_binding_scopes'];
+    const allowed = ['idempotency_key', 'principal_id', 'profile_refs', 'allowed_operations', 'allowed_origins', 'expires_at', 'creation_template', 'max_created_profiles', 'skill_scope', 'profile_source_refs', 'file_scope', 'account_system_scope', 'account_binding_scopes'];
     if (Object.keys(value).some(key => !allowed.includes(key)) || typeof value.idempotency_key !== 'string' || !value.idempotency_key) throw new Error('access_grant_file_invalid');
     await ensureOwnerRuntime(dataDir);
     result = await requestOwner('/agent-access/grants', value);
@@ -464,7 +475,7 @@ if (command === 'setup') {
     if (!args.includes('--confirm')) throw new Error('access_confirmation_required');
     const value = await readJsonFile(required('--grant-file'), 'access_v2_grant_file_invalid');
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('access_v2_grant_file_invalid');
-    const allowed = ['idempotency_key', 'source_grant_id', 'source_grant_digest', 'principal_id', 'profile_refs', 'policy_digest', 'allowed_operations', 'allowed_origins', 'expires_at', 'skill_scope', 'file_scope', 'account_scope_selections', 'account_system_scope', 'account_binding_scopes', 'replaces_grant_id', 'replaces_grant_digest'];
+    const allowed = ['idempotency_key', 'source_grant_id', 'source_grant_digest', 'principal_id', 'profile_refs', 'policy_digest', 'allowed_operations', 'allowed_origins', 'expires_at', 'skill_scope', 'profile_source_refs', 'file_scope', 'account_scope_selections', 'account_system_scope', 'account_binding_scopes', 'replaces_grant_id', 'replaces_grant_digest'];
     if (Object.keys(value).some(key => !allowed.includes(key)) || typeof value.idempotency_key !== 'string' || !value.idempotency_key) throw new Error('access_v2_grant_file_invalid');
     await ensureOwnerRuntime(dataDir);
     result = await requestOwner('/agent-access/v2/grants', value);
@@ -510,6 +521,20 @@ if (command === 'setup') {
     await ensureOwnerRuntime(dataDir);
     result = await requestOwner(`/owner/files/${action}`, input);
   } else throw new Error('Use files import, inspect, export, revoke or delete with --data-dir. Owner file paths never enter Agent requests.');
+  printResult(result);
+} else if (command === 'profile-source') {
+  const action = args[0];
+  let result;
+  if (action === 'register') {
+    const sourcePath = resolve(required('--source-path'));
+    await ensureOwnerRuntime(dataDir, { requireHarbor: true });
+    result = await ownerWriteRequest(dataDir, '/owner/profile-sources', { source_path: sourcePath });
+  } else if (action === 'list') {
+    result = await ownerRequest(dataDir, '/owner/profile-sources');
+  } else if (action === 'revoke') {
+    await ensureOwnerRuntime(dataDir, { requireHarbor: true });
+    result = await ownerWriteRequest(dataDir, '/owner/profile-sources/revoke', { source_ref: required('--source-ref') });
+  } else throw new Error('Use profile-source register --source-path PATH, list, or revoke --source-ref REF with --data-dir. This is an owner-only command.');
   printResult(result);
 } else if (command === 'account') {
   const action = args[0];

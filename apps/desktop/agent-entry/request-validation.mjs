@@ -74,9 +74,11 @@ function assertTaskScope(scope, definition, code) {
     return;
   }
   const fileScope = definition?.file_scope;
-  const keys = ['operations', 'profile_refs', 'origins', ...(fileScope ? ['file_refs'] : [])];
+  const profileTransfer = ['profile.import', 'profile.migrate.request'].includes(definition?.id);
+  const keys = ['operations', 'profile_refs', 'origins', ...(fileScope ? ['file_refs'] : []), ...(profileTransfer ? ['profile_source_refs'] : [])];
   assertExactObject(scope, keys, code);
   for (const key of ['operations', 'profile_refs', 'origins']) if (!Array.isArray(scope[key]) || scope[key].some(value => typeof value !== 'string')) throw new Error(code);
+  if (profileTransfer && (!Array.isArray(scope.profile_source_refs) || scope.profile_source_refs.length > 64 || scope.profile_source_refs.some(value => typeof value !== 'string' || !/^profile-source:[0-9a-f-]{36}$/.test(value)))) throw new Error(code);
   if (fileScope === 'upload' && (!Array.isArray(scope.file_refs) || scope.file_refs.length !== 1 || typeof scope.file_refs[0] !== 'string')) throw new Error(code);
   if (fileScope === 'download' && (!Array.isArray(scope.file_refs) || scope.file_refs.length !== 0)) throw new Error(code);
 }
@@ -278,6 +280,8 @@ export function validateOperationRequest(value, definitions) {
   const definition = exposed.find(item => item.id === value.operation);
   if (!definition) throw new Error(code);
   assertTaskScope(value.task_scope, definition, code);
+  if (definition.id === 'profile.import' && (value.task_scope.profile_source_refs.length !== 1 || value.task_scope.profile_source_refs[0] !== value.profile_source_ref)) throw new Error(code);
+  if (definition.id === 'profile.migrate.request' && value.task_scope.profile_source_refs.length !== 0) throw new Error(code);
   if (!value.task_scope.operations.includes(definition.id)) throw new Error(code);
   if (definition.id === 'account_system.import_template' && value.task_scope.template_refs[0] !== value.template_ref) throw new Error(code);
   if (definition.id === 'account.bind') {
@@ -322,6 +326,7 @@ export function validateDescribeRequest(value, definitions) {
     assertString(context.grant_id, code);
     if (!core) assertString(context.profile_ref, code);
     assertTaskScope(context.task_scope, definition, code);
+    if (value.operation === 'profile.migrate.request' && context.task_scope.profile_source_refs.length !== 0) throw new Error(code);
   }
   if (value.arguments !== undefined) {
     const draft = assertObject(value.arguments, code);

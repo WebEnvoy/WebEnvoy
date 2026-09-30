@@ -75,7 +75,10 @@ let afterIdentityEnvironmentSnapshot: (() => Promise<void>) | undefined;
 let principalId: string | undefined;
 let browserPreference: string | null = null, preferenceMutations = 0, dropPreferenceResponse = false;
 const preferenceReceipts = new Map<string, unknown>();
+const profileImportReceipts = new Map<string, Record<string, unknown>>();
+let profileManagementSessionsOpened = 0, profileManagementSessionsStopped = 0, profileImportWrites = 0;
 let providerCatalogReads = 0;
+let profileMigrationFactReads = 0;
 const providerCatalog = {
   schema_version: "harbor-browser-provider-status/v0",
   providers: [
@@ -278,6 +281,49 @@ const server = createServer((req, res) => { void (async () => {
     if (req.method === "GET" && receipt && typeof receipt === "object" && (receipt as { operation?: unknown }).operation === "archive") archiveReceiptReads++;
     value = receipt;
   }
+  else if (req.url?.startsWith("/runtime/profile-sources/")) {
+    const sourceRef = decodeURIComponent(req.url.split("/").at(-1)!);
+    if (sourceRef !== "profile-source:11111111-1111-4111-8111-111111111111") { res.writeHead(404); res.end("{}"); return; }
+    value = { source: { schema_version: "harbor-profile-source/v1", source_ref: sourceRef, provider_id: "camoufox", source_format: "camoufox.firefox-places.v86", bookmark_count: 1 } };
+  } else if (req.url === "/runtime/profile-imports" && req.method === "POST") {
+    let body = ""; for await (const chunk of req) body += chunk;
+    const input = JSON.parse(body) as { idempotency_key: string; source_ref: string; target_profile_ref: string };
+    profileImportWrites++;
+    const profile = profiles.find(item => (item.refs as Record<string, unknown>).profile_ref === input.target_profile_ref)!;
+    const receipt = { schema_version: "harbor-profile-import-receipt/v1", idempotency_key: input.idempotency_key, source_ref: input.source_ref,
+      target_profile_ref: input.target_profile_ref, target_identity_environment_ref: profile.identity_environment_ref,
+      report: { schema_version: "harbor-profile-import-report/v1", status: "completed", imported: { bookmarks: 1, folders: 1 },
+        skipped: { bookmarks: 0, folders: 0, separators: 0, unsafe_urls: 0 }, repair_status: "not_attempted", requires_login: true,
+        exclusions: ["history", "cookies", "logins", "extensions", "provider_configuration", "account_binding", "runtime_runs"] } };
+    profileImportReceipts.set(input.idempotency_key, receipt);
+    value = { receipt };
+  } else if (req.url?.startsWith("/runtime/profile-imports/")) {
+    const key = decodeURIComponent(req.url.split("/").at(-1)!);
+    const receipt = profileImportReceipts.get(key);
+    if (!receipt) { res.writeHead(404); res.end("{}"); return; }
+    value = { receipt };
+  } else if (req.url === "/runtime/identity-environment-sessions" && req.method === "POST") {
+    profileManagementSessionsOpened++;
+    value = { runtime_session_ref: `session:profile-management-${profileManagementSessionsOpened}` };
+  } else if (req.url?.startsWith("/runtime/sessions/") && req.url.endsWith("/stop") && req.method === "POST") {
+    profileManagementSessionsStopped++;
+    value = { status: "stopped" };
+  } else if (req.url?.startsWith("/runtime/profile-migrations/")) {
+    const parts = req.url.split("/").slice(-2).map(decodeURIComponent);
+    const profileRef = parts[0]!, targetProviderId = parts[1]!;
+    const record = profiles.find(item => (item.refs as Record<string, unknown>).profile_ref === profileRef);
+    const targetProvider = providerCatalog.providers.find(item => item.provider_id === targetProviderId);
+    profileMigrationFactReads++;
+    if (!record || !targetProvider) { res.writeHead(404); res.end("{}"); return; }
+    const versions = (providerId: string) => providerId === "camoufox"
+      ? { version: "0.5.6", camoufox_version: "0.5.6", browser_version: "152.0.4-beta.30", playwright_version: "1.60.0" }
+      : providerId === "chrome_official" ? { version: "stable-1", browser_version: "stable-1", playwright_version: "1.60.0" } : { version: "unknown" };
+    const sourceProviderId = String((record.environment_summary as Record<string, unknown>).provider_id);
+    value = { schema_version: "harbor-profile-migration-qualification/v1",
+      source: { profile_ref: profileRef, provider_id: sourceProviderId, ...versions(sourceProviderId) },
+      target: { provider_id: targetProviderId, ...versions(targetProviderId), availability: targetProvider.availability.state,
+        unavailable_reason: targetProvider.availability.unavailable_reason, role: targetProvider.role } };
+  } else if (req.url?.startsWith("/runtime/identity-environments/") && req.url.endsWith("/session") && req.url !== "/runtime/identity-environments/identity%3A1/session") value = { runtime_session: null };
   else if (req.url === "/runtime/identity-environments") {
     identityEnvironmentReads++;
     await afterProfileList?.();
@@ -1090,6 +1136,86 @@ try {
     [`profile:${createCountBeforeMalformedReply + 1}`]);
   await assert.rejects(service.submit(credentialHash, { ...malformedCreateRequest, idempotency_key: "create-after-malformed-reconciliation" }), /managed_access_creation_denied/);
   assert.equal(creates, createCountBeforeMalformedReply + 1, "receipt reconciliation consumes the only quota slot without replay");
+  const profileSourceRef = "profile-source:11111111-1111-4111-8111-111111111111";
+  const importGrant = await accessStore.createGrant({ idempotency_key: "profile-import-grant", principal_id: principal.principal_id,
+    profile_refs: [], profile_source_refs: [profileSourceRef], allowed_operations: ["profile.import"], allowed_origins: ["https://example.com"],
+    expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 2, creation_template: grant.creation_template });
+  const importRequest = { idempotency_key: "profile-import-lost-target-response", connection_id: connection.connection_id, grant_id: importGrant.grant_id,
+    operation: "profile.import" as const, template_ref: grant.creation_template!.template_ref, profile_source_ref: profileSourceRef,
+    task_scope: { operations: ["profile.import" as const], profile_refs: [], origins: ["https://example.com"], profile_source_refs: [profileSourceRef] } };
+  const createsBeforeImport = creates;
+  dropResponse = true;
+  const lostImport = await service.submit(credentialHash, importRequest);
+  dropResponse = false;
+  assert.equal(lostImport.status, "unknown_outcome");
+  assert.equal(creates, createsBeforeImport + 1, "the original target Profile was created before response loss");
+  const importGrantBeforeQuery = (await accessStore.list()).grants.find(item => item.grant_id === importGrant.grant_id)!;
+  assert.equal(importGrantBeforeQuery.created_profile_refs.length, 0, "Core had not yet received Harbor's create response");
+  const importWritesBeforeQuery = profileImportWrites, importSessionsBeforeQuery = profileManagementSessionsOpened;
+  const queriedLostImport = await service.query(credentialHash, lostImport.run_id);
+  assert.equal(queriedLostImport.status, "unknown_outcome", "query preserves the original unknown outcome");
+  assert.equal((queriedLostImport.result as { import_status: string }).import_status, "unknown", "no import receipt means the import result remains unknown");
+  const recoveredProfileRef = (queriedLostImport.result as { profile: { profile_ref: string } }).profile.profile_ref;
+  assert.equal((await accessStore.list()).grants.find(item => item.grant_id === importGrant.grant_id)?.created_profile_refs[0], recoveredProfileRef,
+    "query reconciles the original created target against Grant quota");
+  assert.equal(creates, createsBeforeImport + 1, "query never creates a replacement target");
+  assert.equal(profileImportWrites, importWritesBeforeQuery, "query never starts import after finding no Harbor receipt");
+  assert.equal(profileManagementSessionsOpened, importSessionsBeforeQuery, "query never starts a provider session");
+  const blockedImportRetry = await service.submit(credentialHash, { ...importRequest, idempotency_key: "profile-import-new-key-blocked" });
+  assert.equal(blockedImportRetry.failure?.code, "managed_browser_creation_reconciliation_required", "unknown import blocks further quota use on the Grant");
+  assert.equal(creates, createsBeforeImport + 1);
+
+  const successImportGrant = await accessStore.createGrant({ idempotency_key: "profile-import-success-grant", principal_id: principal.principal_id,
+    profile_refs: [], profile_source_refs: [profileSourceRef], allowed_operations: ["profile.import"], allowed_origins: ["https://example.com"],
+    expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 1, creation_template: grant.creation_template });
+  const completedImport = await service.submit(credentialHash, { ...importRequest, idempotency_key: "profile-import-success", grant_id: successImportGrant.grant_id,
+    task_scope: { ...importRequest.task_scope } });
+  assert.equal(completedImport.status, "succeeded", JSON.stringify(completedImport));
+  assert.equal((completedImport.result as { import_status: string }).import_status, "completed");
+  assert.equal((completedImport.result as { import_report: { imported: { bookmarks: number }; requires_login: boolean } }).import_report.imported.bookmarks, 1);
+  assert.equal((completedImport.result as { import_report: { requires_login: boolean } }).import_report.requires_login, true);
+  assert.equal(profileManagementSessionsOpened, profileManagementSessionsStopped, "the authenticated profile-management session is always stopped");
+  assert.equal(profileImportWrites, importWritesBeforeQuery + 1, "the successful Run issued exactly one Harbor import");
+
+  await accessStore.setProfilePolicy({ idempotency_key: "profile-migration-policy", profile_ref: "profile:1",
+    allowed_operations: ["profile.list", "profile.read", "profile.migrate.request"], allowed_origins: [] });
+  const migrationTemplate = { ...grant.creation_template!, template_ref: "template:approved-camoufox", provider_id: "camoufox" as const };
+  const migrationGrant = await accessStore.createGrant({ idempotency_key: "profile-migration-grant", principal_id: principal.principal_id,
+    profile_refs: ["profile:1"], allowed_operations: ["profile.migrate.request"], allowed_origins: [], expires_at: new Date(Date.now() + 60_000).toISOString(),
+    max_created_profiles: 0, creation_template: migrationTemplate });
+  const migrationRequest = { idempotency_key: "profile-migration-same-version", connection_id: connection.connection_id, grant_id: migrationGrant.grant_id,
+    operation: "profile.migrate.request" as const, profile_ref: "profile:1", template_ref: migrationTemplate.template_ref, target_provider_id: "camoufox" as const,
+    task_scope: { operations: ["profile.migrate.request" as const], profile_refs: ["profile:1"], origins: [], profile_source_refs: [] } };
+  const sessionReadsBeforeMigration = sessionReads, createsBeforeMigration = creates, importWritesBeforeMigration = profileImportWrites;
+  const sameVersionMigration = await service.submit(credentialHash, migrationRequest);
+  assert.equal(sameVersionMigration.status, "succeeded", JSON.stringify(sameVersionMigration));
+  assert.equal((sameVersionMigration.result as { status: string }).status, "not_required");
+  assert.equal((sameVersionMigration.result as { qualification: { reason_code: string } }).qualification.reason_code, "profile_migration_same_provider_same_version");
+  assert.equal(sessionReads, sessionReadsBeforeMigration, "migration qualification does not read or require an active Instance");
+  assert.equal(creates, createsBeforeMigration, "migration request never creates a target");
+  assert.equal(profileImportWrites, importWritesBeforeMigration, "migration request never copies or imports data");
+  assert.equal(profileMigrationFactReads, 1);
+
+  const chromeMigrationTemplate = { ...migrationTemplate, template_ref: "template:approved-chrome", provider_id: "chrome_official" as const };
+  const chromeMigrationGrant = await accessStore.createGrant({ idempotency_key: "profile-migration-chrome-grant", principal_id: principal.principal_id,
+    profile_refs: ["profile:1"], allowed_operations: ["profile.migrate.request"], allowed_origins: [], expires_at: new Date(Date.now() + 60_000).toISOString(),
+    max_created_profiles: 0, creation_template: chromeMigrationTemplate });
+  const rejectedMigrationRequest = { ...migrationRequest, idempotency_key: "profile-migration-unqualified-pair", grant_id: chromeMigrationGrant.grant_id,
+    template_ref: chromeMigrationTemplate.template_ref, target_provider_id: "chrome_official" as const };
+  const unqualifiedMigration = await service.submit(credentialHash, rejectedMigrationRequest);
+  assert.equal(unqualifiedMigration.status, "succeeded", JSON.stringify(unqualifiedMigration));
+  assert.equal((unqualifiedMigration.result as { status: string }).status, "qualification_rejected");
+  assert.equal((unqualifiedMigration.result as { qualification: { reason_code: string } }).qualification.reason_code, "profile_migration_pair_not_qualified");
+  const capabilityDescriptionsBeforeMigrationDescribe = capabilityDescriptions;
+  const contextualMigration = await service.describe(credentialHash, { connection_id: connection.connection_id, operation: "profile.migrate.request",
+    context: { grant_id: chromeMigrationGrant.grant_id, profile_ref: "profile:1", task_scope: rejectedMigrationRequest.task_scope },
+    arguments: { template_ref: chromeMigrationTemplate.template_ref, target_provider_id: "chrome_official" } });
+  assert.equal((contextualMigration.availability as { state: string }).state, "blocked");
+  assert.deepEqual((contextualMigration.availability as { reason_codes: string[] }).reason_codes, ["profile_migration_pair_not_qualified"]);
+  assert.deepEqual(contextualMigration.execution_checks, ["reauthorize"], "contextual migration description has no browser-runtime check");
+  assert.equal(capabilityDescriptions, capabilityDescriptionsBeforeMigrationDescribe, "migration description uses the same Harbor Provider qualification facts instead of active-browser capability lookup");
+  assert.equal(sessionReads, sessionReadsBeforeMigration, "contextual migration description also avoids active-session reads");
+  assert.equal(profileMigrationFactReads, 4, "describing rechecks the exact Harbor qualification facts");
 
   const browserOps = ["instance.navigate", "instance.read", "instance.observe"];
   await accessStore.setProfilePolicy({ idempotency_key: "public-policy", profile_ref: "profile:1", allowed_operations: browserOps, allowed_origins: ["https://example.com"] });

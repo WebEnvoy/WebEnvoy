@@ -97,6 +97,35 @@ test("serves readiness and provider facts as JSON", async () => {
   }
 });
 
+test("Profile transfer routes keep owner source registration separate from Core operations", async () => {
+  const persistencePath = join(testProfileRoot, `profile-transfer-${Date.now()}.json`);
+  const runtime = new HarborRuntime(createFixtureLauncher("ready"), { persistence_path: persistencePath });
+  const running = await startHarborRuntimeServer({ port: 0, runtime });
+  try {
+    const ownerReadDenied = await fetch(`${running.url}/owner/profile-sources`);
+    assert.equal(ownerReadDenied.status, 403);
+    const invalidRegistration = await fetch(`${running.url}/owner/profile-sources`, {
+      method: "POST", headers: { "content-type": "application/json", ...manualAuthHeaders() },
+      body: JSON.stringify({ source_path: join(testProfileRoot, "missing-source"), agent_source_path: "/must-not-be-accepted" })
+    });
+    assert.equal(invalidRegistration.status, 400, "owner registration accepts only its explicit source_path field");
+    assert.equal((await invalidRegistration.text()).includes("missing-source"), false, "private source paths are not reflected in route errors");
+    const ownerList = await fetch(`${running.url}/owner/profile-sources`, { headers: manualAuthHeaders() });
+    assert.equal(ownerList.status, 200);
+    assert.deepEqual((await ownerList.json() as { sources: unknown[] }).sources, []);
+    for (const [path, method, body] of [
+      ["/runtime/profile-sources/profile-source:untrusted", "GET", undefined],
+      ["/runtime/profile-migrations/profile:managed/camoufox", "GET", undefined],
+      ["/runtime/profile-imports", "POST", JSON.stringify({ idempotency_key: "run:untrusted", source_ref: "profile-source:untrusted", target_profile_ref: "profile:managed" })]
+    ] as const) {
+      const response = await fetch(`${running.url}${path}`, { method, ...(body ? { headers: { "content-type": "application/json" }, body } : {}) });
+      assert.equal(response.status, 403, `${method} ${path} requires the Core supervisor route`);
+    }
+  } finally {
+    await running.close();
+  }
+});
+
 test("serves canonical owner runtime facts separately from legacy business adapters", async () => {
   const runtime = new HarborRuntime(createFixtureLauncher("ready"));
   const running = await startHarborRuntimeServer({ port: 0, runtime });

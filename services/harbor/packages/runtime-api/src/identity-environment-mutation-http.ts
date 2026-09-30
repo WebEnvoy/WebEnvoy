@@ -17,6 +17,20 @@ export function authorizeIdentityEnvironmentMutationRequest(
   request: IncomingMessage,
   response: ServerResponse
 ): boolean {
+  if (!authorizeOwnerRequest(authorizer, request, response)) return false;
+  const contentTypes = headerValues(request, "content-type");
+  if (contentTypes.length !== 1 || !/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(contentTypes[0])) {
+    writeJson(response, 415, { failure_class: "json_content_type_required" });
+    return false;
+  }
+  return true;
+}
+
+export function authorizeOwnerRequest(
+  authorizer: ManualAuthenticationAuthorizer,
+  request: IncomingMessage,
+  response: ServerResponse
+): boolean {
   const authorization = authorizer.authorize(request);
   if (!authorization.authorized) {
     writeJson(response, authorization.status_code, { failure_class: authorization.failure_class });
@@ -24,11 +38,6 @@ export function authorizeIdentityEnvironmentMutationRequest(
   }
   if (headerValues(request, "origin").length > 0) {
     writeJson(response, 403, { failure_class: "browser_origin_not_allowed" });
-    return false;
-  }
-  const contentTypes = headerValues(request, "content-type");
-  if (contentTypes.length !== 1 || !/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(contentTypes[0])) {
-    writeJson(response, 415, { failure_class: "json_content_type_required" });
     return false;
   }
   return true;
