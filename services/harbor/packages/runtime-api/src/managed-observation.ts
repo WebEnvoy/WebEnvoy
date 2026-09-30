@@ -41,6 +41,16 @@ export type ManagedObservation = {
 };
 export type ManagedObservationUnavailable = { status: "unavailable"; failure_class: string; retryable: boolean };
 export type ManagedAccountBinding = { account_system_ref: string; account_ref: string; observation_ref: string; bound_at: string };
+export const HARBOR_PROFILE_IDENTITY_OWNERSHIP_SCHEMA = "webenvoy.profile-identity-ownership/v1";
+export type ProfileIdentityOwnership = {
+  schema_version: typeof HARBOR_PROFILE_IDENTITY_OWNERSHIP_SCHEMA;
+  current: { status: "verified" | "discovered" | "conflict" | "unknown"; observed_at: string | null; account_system_ref: string | null; account_ref: string | null };
+  history: {
+    bindings: { status: "bound"; verification: "verified_at_binding"; account_system_ref: string; account_ref: string; bound_at: string }[];
+    declared: { status: "declared"; account_system_ref: string; account_ref: string } | null;
+  };
+  ownership: { status: "unique" | "conflict" | "unknown" };
+};
 export const unknownManagedAccount = (): DiscoveredManagedAccount => ({ status: "unknown", account_system_ref: null, account_ref: null });
 export function managedUnavailable(failure_class: string): ManagedObservationUnavailable { return { status: "unavailable", failure_class, retryable: false }; }
 export function boundedManagedRef(value: unknown): value is string { return typeof value === "string" && /^[A-Za-z0-9:_./-]{1,256}$/.test(value); }
@@ -104,6 +114,54 @@ export function hasManagedBindingConflict(records: Iterable<import("./identity-e
     if (effectiveManagedBindings(record).some(other => bindings.some(binding => binding.account_system_ref === other.account_system_ref && binding.account_ref === other.account_ref))) return true;
   }
   return false;
+}
+
+export function profileIdentityOwnership(
+  records: Iterable<import("./identity-environment-manager.js").StoredLocalIdentityEnvironmentRecord>,
+  candidate: import("./identity-environment-manager.js").StoredLocalIdentityEnvironmentRecord,
+  currentObservation: ManagedObservation | null
+): ProfileIdentityOwnership {
+  const persistedBindings = candidate.account_bindings ?? [];
+  const current: ProfileIdentityOwnership["current"] = { status: "unknown", observed_at: currentObservation?.observed_at ?? null, account_system_ref: null, account_ref: null };
+  const identity = currentObservation?.account;
+  if (currentObservation?.identity_environment_ref === candidate.identity_environment.identity_environment_ref &&
+    currentObservation.profile_ref === candidate.identity_environment.profile_ref &&
+    identity?.status === "verified" && boundedManagedRef(identity.account_system_ref) && boundedManagedRef(identity.account_ref)) {
+    const observedBinding: ManagedAccountBinding = {
+      account_system_ref: identity.account_system_ref,
+      account_ref: identity.account_ref,
+      observation_ref: currentObservation.observation_ref,
+      bound_at: currentObservation.observed_at
+    };
+    const withCurrent = { ...candidate, account_bindings: [...persistedBindings, observedBinding] };
+    const conflict = hasManagedBindingConflict(records, withCurrent);
+    const existingBinding = persistedBindings.find(binding => binding.account_system_ref === identity.account_system_ref);
+    current.status = conflict ? "conflict" : existingBinding?.account_ref === identity.account_ref ? "verified" : "discovered";
+    current.account_system_ref = identity.account_system_ref;
+    current.account_ref = identity.account_ref;
+  }
+  const declaredAccountSystemRef = `account-system:${candidate.identity_environment.site_binding.site_id}`;
+  const declaredAccountRef = candidate.identity_environment.site_binding.account_ref;
+  const declared = boundedManagedRef(declaredAccountSystemRef) && boundedManagedRef(declaredAccountRef)
+    ? { status: "declared" as const, account_system_ref: declaredAccountSystemRef, account_ref: declaredAccountRef }
+    : null;
+  return {
+    schema_version: HARBOR_PROFILE_IDENTITY_OWNERSHIP_SCHEMA,
+    current,
+    history: {
+      bindings: persistedBindings.map(binding => ({
+        status: "bound" as const,
+        verification: "verified_at_binding" as const,
+        account_system_ref: binding.account_system_ref,
+        account_ref: binding.account_ref,
+        bound_at: binding.bound_at
+      })),
+      declared
+    },
+    ownership: {
+      status: persistedBindings.length === 0 ? "unknown" : hasManagedBindingConflict(records, candidate) ? "conflict" : "unique"
+    }
+  };
 }
 
 export type ManagedPublicPageInput = ManagedPageSelector & {

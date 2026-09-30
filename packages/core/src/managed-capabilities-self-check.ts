@@ -76,6 +76,8 @@ const observation = {
 };
 
 assert.equal(managedCapabilityDefinitions.operations.length, 33);
+assert.match(managedCapabilityDefinition("profile.read")?.summary ?? "", /current identity, binding history and Harbor ownership/);
+assert.match(managedCapabilityDefinition("profile.list")?.summary ?? "", /conflicting or unknown identity does not block the read/);
 assert.deepEqual(managedCapabilityInputFields("instance.observe"), [
   "idempotency_key", "connection_id", "grant_id", "operation", "task_scope",
   "profile_ref", "origin", "runtime_session_ref", "page_id", "page_ref", "document_generation"

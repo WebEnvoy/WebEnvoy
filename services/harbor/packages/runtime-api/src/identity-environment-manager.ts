@@ -1,4 +1,4 @@
-import { hasManagedBindingConflict, type ManagedAccountBinding } from "./managed-observation.js";
+import { hasManagedBindingConflict, profileIdentityOwnership, type ManagedAccountBinding, type ManagedObservation, type ProfileIdentityOwnership } from "./managed-observation.js";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { validateIdentityEnvironmentConfiguration } from "./identity-environment-configuration.js";
@@ -154,6 +154,10 @@ export interface LocalIdentityEnvironmentPublicRecord {
     not_exposed: readonly ["password", "verification_code", "cookie_value", "storage_value", "session_token", "raw_profile_data"];
   };
   risk_boundary: LocalIdentityEnvironmentFacts["risk_boundary"];
+}
+
+export interface ManagedIdentityEnvironmentReadRecord extends LocalIdentityEnvironmentPublicRecord {
+  identity_ownership: ProfileIdentityOwnership;
 }
 
 const LOCAL_IDENTITY_ENVIRONMENT_REBIND_CAPABILITY = Symbol("harbor.local_identity_environment.rebind");
@@ -319,6 +323,15 @@ export class LocalIdentityEnvironmentManager {
   list(): LocalIdentityEnvironmentPublicRecord[] {
     this.refresh();
     return Array.from(this.records.values()).map(publicRecord);
+  }
+
+  listForManagedRead(currentObservation: (identity_environment_ref: string) => ManagedObservation | null): ManagedIdentityEnvironmentReadRecord[] {
+    this.refresh();
+    const records = Array.from(this.records.values());
+    return records.map(record => ({
+      ...publicRecord(record),
+      identity_ownership: profileIdentityOwnership(records, record, currentObservation(record.identity_environment.identity_environment_ref))
+    }));
   }
 
   getFacts(identity_environment_ref: string): LocalIdentityEnvironmentFacts | null {

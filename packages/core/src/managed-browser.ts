@@ -336,7 +336,57 @@ function describeInputAssessment(input: DescribeInput, context: DescribeContext 
 function publicProfile(value: unknown): ObjectValue {
   const profile = object(value), refs = object(profile.refs);
   return { profile_ref: text(refs.profile_ref), identity_environment_ref: text(profile.identity_environment_ref), name: profile.name ?? text(refs.profile_ref), tags: profile.tags ?? [], site: profile.site,
-    status: profile.status, account_bindings: profile.account_bindings ?? [], environment_summary: profile.environment_summary };
+    status: profile.status, account_bindings: profile.account_bindings ?? [], environment_summary: profile.environment_summary,
+    identity_ownership: publicProfileIdentityOwnership(profile.identity_ownership) };
+}
+function publicProfileIdentityOwnership(value: unknown): ObjectValue {
+  const unknown = () => ({ schema_version: "webenvoy.profile-identity-ownership/v1",
+    current: { status: "unknown", observed_at: null, account_system_ref: null, account_ref: null },
+    history: { bindings: [], declared: null }, ownership: { status: "unknown" } });
+  if (value === undefined) return unknown();
+  const projection = object(value);
+  if (projection.schema_version !== "webenvoy.profile-identity-ownership/v1") return fail("managed_browser_runtime_invalid");
+  const current = object(projection.current), history = object(projection.history), ownership = object(projection.ownership);
+  const currentStatus = current.status;
+  if (!["verified", "discovered", "conflict", "unknown"].includes(String(currentStatus))) return fail("managed_browser_runtime_invalid");
+  const observedAt = current.observed_at === null ? null : typeof current.observed_at === "string" ? current.observed_at : fail("managed_browser_runtime_invalid");
+  if ((observedAt === null && currentStatus !== "unknown") ||
+    (observedAt !== null && (!Number.isFinite(Date.parse(observedAt)) || new Date(observedAt).toISOString() !== observedAt))) return fail("managed_browser_runtime_invalid");
+  const requiredRef = (item: unknown) => {
+    if (typeof item !== "string" || !/^[A-Za-z0-9:_./-]{1,256}$/.test(item)) return fail("managed_browser_runtime_invalid");
+    return item;
+  };
+  const optionalRef = (item: unknown) => item === null ? null : requiredRef(item);
+  const accountSystemRef = optionalRef(current.account_system_ref), accountRef = optionalRef(current.account_ref);
+  if ((currentStatus === "unknown") !== (accountSystemRef === null && accountRef === null) || (accountSystemRef === null) !== (accountRef === null)) return fail("managed_browser_runtime_invalid");
+  if (!Array.isArray(history.bindings) || history.bindings.length > 1024) return fail("managed_browser_runtime_invalid");
+  const bindings = history.bindings.map(value => {
+    const binding = object(value);
+    if (binding.status !== "bound" || binding.verification !== "verified_at_binding") return fail("managed_browser_runtime_invalid");
+    const boundAt = text(binding.bound_at);
+    if (!Number.isFinite(Date.parse(boundAt)) || new Date(boundAt).toISOString() !== boundAt) return fail("managed_browser_runtime_invalid");
+    return { status: "bound", verification: "verified_at_binding", account_system_ref: requiredRef(binding.account_system_ref), account_ref: requiredRef(binding.account_ref), bound_at: boundAt };
+  });
+  let declared: ObjectValue | null = null;
+  if (history.declared !== null) {
+    const declaration = object(history.declared);
+    if (declaration.status !== "declared") return fail("managed_browser_runtime_invalid");
+    declared = { status: "declared", account_system_ref: requiredRef(declaration.account_system_ref), account_ref: requiredRef(declaration.account_ref) };
+  }
+  if (!["unique", "conflict", "unknown"].includes(String(ownership.status)) || ownership.status === "unknown" && bindings.length > 0 || ownership.status !== "unknown" && bindings.length === 0) return fail("managed_browser_runtime_invalid");
+  return {
+    schema_version: projection.schema_version,
+    current: { status: currentStatus, observed_at: observedAt, account_system_ref: accountSystemRef, account_ref: accountRef },
+    history: { bindings, declared },
+    ownership: { status: ownership.status }
+  };
+}
+function rawProfileRef(value: unknown): string | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const refs = (value as ObjectValue).refs;
+  if (!refs || typeof refs !== "object" || Array.isArray(refs)) return undefined;
+  const profileRef = (refs as ObjectValue).profile_ref;
+  return typeof profileRef === "string" ? profileRef : undefined;
 }
 function publicProviderSelection(value: unknown): ObjectValue {
   if (!value || typeof value !== "object" || Array.isArray(value)) return fail("managed_browser_provider_selection_invalid");
@@ -517,10 +567,16 @@ export function createManagedBrowserService(options: {
     }
     const list = await runtimeHarbor("/runtime/identity-environments");
     if (!Array.isArray(list.identity_environments)) return fail("managed_browser_runtime_invalid");
-    const profiles = list.identity_environments.map(publicProfile);
-    if (input.operation === "profile.list") return { profiles: profiles.filter(profile => access.grant.profile_refs.includes(text(profile.profile_ref))) };
-    const profile = profiles.find(profile => profile.profile_ref === input.profile_ref);
-    if (!profile) return fail("managed_browser_profile_not_found");
+    if (input.operation === "profile.list") {
+      const visible = list.identity_environments.filter(raw => {
+        const profileRef = rawProfileRef(raw);
+        return profileRef !== undefined && access.grant.profile_refs.includes(profileRef);
+      }).map(publicProfile);
+      return { profiles: visible };
+    }
+    const rawProfile = list.identity_environments.find(raw => rawProfileRef(raw) === input.profile_ref);
+    if (!rawProfile) return fail("managed_browser_profile_not_found");
+    const profile = publicProfile(rawProfile);
     if (input.operation === "profile.read") return { profile };
     const identityEnvironmentRef = text(profile.identity_environment_ref);
     const identity = encodeURIComponent(identityEnvironmentRef);

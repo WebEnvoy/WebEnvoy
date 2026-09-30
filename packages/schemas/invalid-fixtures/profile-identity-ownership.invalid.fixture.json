@@ -1,0 +1,188 @@
+{
+  "schema": "profile-identity-ownership.schema.json",
+  "cases": [
+    {
+      "name": "unique ownership requires at least one persisted binding",
+      "instance": {
+        "schema_version": "webenvoy.profile-identity-ownership/v1",
+        "current": {
+          "status": "unknown",
+          "observed_at": null,
+          "account_system_ref": null,
+          "account_ref": null
+        },
+        "history": {
+          "bindings": [],
+          "declared": null
+        },
+        "ownership": {
+          "status": "unique"
+        }
+      }
+    },
+    {
+      "name": "binding history must not include its opaque observation reference",
+      "instance": {
+        "schema_version": "webenvoy.profile-identity-ownership/v1",
+        "current": {
+          "status": "unknown",
+          "observed_at": null,
+          "account_system_ref": null,
+          "account_ref": null
+        },
+        "history": {
+          "bindings": [
+            {
+              "status": "bound",
+              "verification": "verified_at_binding",
+              "account_system_ref": "account-system:xiaohongshu",
+              "account_ref": "account:sha256:0123456789abcdef",
+              "bound_at": "2026-09-01T12:00:00.000Z",
+              "observation_ref": "observation:private"
+            }
+          ],
+          "declared": null
+        },
+        "ownership": {
+          "status": "unique"
+        }
+      }
+    },
+    {
+      "name": "projection must not identify a conflicting Profile",
+      "instance": {
+        "schema_version": "webenvoy.profile-identity-ownership/v1",
+        "current": {
+          "status": "conflict",
+          "observed_at": "2026-09-01T12:00:00.000Z",
+          "account_system_ref": "account-system:xiaohongshu",
+          "account_ref": "account:sha256:0123456789abcdef"
+        },
+        "history": {
+          "bindings": [],
+          "declared": null
+        },
+        "ownership": {
+          "status": "unknown",
+          "other_profile_ref": "profile:private"
+        }
+      }
+    },
+    {
+      "name": "current ref must match bounded token grammar",
+      "instance": {
+        "$schema": "../schemas/profile-identity-ownership.schema.json",
+        "schema_version": "webenvoy.profile-identity-ownership/v1",
+        "current": {
+          "status": "conflict",
+          "observed_at": "2026-09-01T12:00:00.000Z",
+          "account_system_ref": "account-system:xiaohongshu",
+          "account_ref": "account: bad"
+        },
+        "history": {
+          "bindings": [
+            {
+              "status": "bound",
+              "verification": "verified_at_binding",
+              "account_system_ref": "account-system:xiaohongshu",
+              "account_ref": "account:sha256:0123456789abcdef",
+              "bound_at": "2026-09-01T12:00:00.000Z"
+            }
+          ],
+          "declared": null
+        },
+        "ownership": {
+          "status": "unique"
+        }
+      }
+    },
+    {
+      "name": "binding ref cannot exceed 256 characters",
+      "instance": {
+        "$schema": "../schemas/profile-identity-ownership.schema.json",
+        "schema_version": "webenvoy.profile-identity-ownership/v1",
+        "current": {
+          "status": "unknown",
+          "observed_at": null,
+          "account_system_ref": null,
+          "account_ref": null
+        },
+        "history": {
+          "bindings": [
+            {
+              "status": "bound",
+              "verification": "verified_at_binding",
+              "account_system_ref": "account-system:xiaohongshu",
+              "account_ref": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+              "bound_at": "2026-09-01T12:00:00.000Z"
+            }
+          ],
+          "declared": null
+        },
+        "ownership": {
+          "status": "unique"
+        }
+      }
+    },
+    {
+      "name": "declared refs must match bounded token grammar",
+      "instance": {
+        "$schema": "../schemas/profile-identity-ownership.schema.json",
+        "schema_version": "webenvoy.profile-identity-ownership/v1",
+        "current": {
+          "status": "unknown",
+          "observed_at": null,
+          "account_system_ref": null,
+          "account_ref": null
+        },
+        "history": {
+          "bindings": [
+            {
+              "status": "bound",
+              "verification": "verified_at_binding",
+              "account_system_ref": "account-system:xiaohongshu",
+              "account_ref": "account:sha256:0123456789abcdef",
+              "bound_at": "2026-09-01T12:00:00.000Z"
+            }
+          ],
+          "declared": {
+            "status": "declared",
+            "account_system_ref": "account system",
+            "account_ref": "account:legacy"
+          }
+        },
+        "ownership": {
+          "status": "unique"
+        }
+      }
+    },
+    {
+      "name": "non-unknown current status requires observation time",
+      "instance": {
+        "$schema": "../schemas/profile-identity-ownership.schema.json",
+        "schema_version": "webenvoy.profile-identity-ownership/v1",
+        "current": {
+          "status": "verified",
+          "observed_at": null,
+          "account_system_ref": "account-system:xiaohongshu",
+          "account_ref": "account:sha256:0123456789abcdef"
+        },
+        "history": {
+          "bindings": [
+            {
+              "status": "bound",
+              "verification": "verified_at_binding",
+              "account_system_ref": "account-system:xiaohongshu",
+              "account_ref": "account:sha256:0123456789abcdef",
+              "bound_at": "2026-09-01T12:00:00.000Z"
+            }
+          ],
+          "declared": null
+        },
+        "ownership": {
+          "status": "unique"
+        }
+      }
+    }
+  ]
+}

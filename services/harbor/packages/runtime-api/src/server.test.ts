@@ -228,6 +228,15 @@ test("serves identity, session, and evidence endpoint plumbing", async () => {
     assert.equal(created.public_boundary.raw_material, "not_exposed");
     assert.equal(created.record.refs.profile_storage_ref.startsWith("profile_storage_ref_"), true);
 
+    const managedProfileList = await getJson(`${running.url}/runtime/identity-environments`);
+    const managedProfile = managedProfileList.identity_environments.find((item: Record<string, any>) => item.identity_environment_ref === created.identity_environment_ref);
+    assert.deepEqual(managedProfile.identity_ownership, {
+      schema_version: "webenvoy.profile-identity-ownership/v1",
+      current: { status: "unknown", observed_at: null, account_system_ref: null, account_ref: null },
+      history: { bindings: [], declared: { status: "declared", account_system_ref: "account-system:xiaohongshu", account_ref: "account_server-test" } },
+      ownership: { status: "unknown" }
+    });
+
     const identityReadback = await getJson(`${running.url}/runtime/identity-environments/identity-env_server-test`);
     assert.equal(identityReadback.identity_environment_ref, created.identity_environment_ref);
     assert.equal(identityReadback.environment_summary.language, "zh-CN");

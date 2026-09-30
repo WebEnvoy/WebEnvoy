@@ -1403,6 +1403,29 @@ export class RuntimeSessionStore {
     return null;
   }
 
+  currentManagedObservation(identity_environment_ref: string): ManagedObservation | null {
+    const live = [...this.records.values()].filter(record => record.facts.identity_environment_ref === identity_environment_ref &&
+      ["active", "idle", "locked"].includes(record.facts.lifecycle_state));
+    if (live.length !== 1) return null;
+    const record = live[0]!;
+    const observed = record.managed_observations?.at(-1);
+    if (!observed || record.active_provider_interactions || record.control_generation !== observed.control_generation ||
+      observed.runtime_session_ref !== record.facts.runtime_session_ref || observed.identity_environment_ref !== identity_environment_ref ||
+      observed.profile_ref !== record.facts.profile_ref || observed.page.status !== "ready" ||
+      !observed.page.page_id || !observed.page.page_ref || observed.page.document_generation === undefined) return null;
+    const observedAt = Date.parse(observed.observed_at);
+    const pageObservedAt = Date.parse(record.facts.current_page.observed_at);
+    const age = Date.now() - observedAt;
+    if (!Number.isFinite(observedAt) || !Number.isFinite(pageObservedAt) || age < 0 || age > 30_000 ||
+      record.facts.current_page.status !== "ready" || record.facts.current_page.page_id !== observed.page.page_id ||
+      record.facts.current_page.page_ref !== observed.page.page_ref || record.facts.current_page.document_generation !== observed.page.document_generation ||
+      pageObservedAt > observedAt) return null;
+    const binding = record.page_registry?.binding({ page_ref: observed.page.page_ref });
+    if (!binding || binding.facts.page_id !== observed.page.page_id || binding.facts.page_ref !== observed.page.page_ref ||
+      binding.facts.document_generation !== observed.page.document_generation || binding.facts.status !== "ready") return null;
+    return snapshot(observed);
+  }
+
   getValidationRuntimeFacts(runtime_session_ref: string): ValidationRuntimeFacts | null {
     const record = this.records.get(runtime_session_ref);
     if (!record) return null;
