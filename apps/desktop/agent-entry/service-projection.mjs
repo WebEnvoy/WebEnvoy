@@ -18,6 +18,10 @@ const exactKeys = (value, required, optional = []) => {
   const keys = Object.keys(value);
   return required.every(key => Object.hasOwn(value, key)) && keys.every(key => required.includes(key) || optional.includes(key));
 };
+const projectHarborError = value => value && typeof value === 'object' && !Array.isArray(value) &&
+  typeof value.error === 'string' && safeIdentifier.test(value.error)
+  ? { error: value.error }
+  : undefined;
 
 const projectProfileSource = value => {
   const keys = ['schema_version', 'source_ref', 'provider_id', 'source_format', 'bookmark_count', 'registered_at', 'expires_at', 'revoked_at'];
@@ -93,6 +97,8 @@ export function projectHarborResponse(req, value) {
   const pathname = new URL(req.url, 'http://owner.local').pathname;
   const allowTerminalStop = req.method === 'POST' && /^\/runtime\/sessions\/[^/]+\/stop$/.test(pathname);
   if (pathname === '/owner/profile-sources') {
+    const error = projectHarborError(value);
+    if (error) return error;
     if (req.method === 'GET') {
       if (!value || typeof value !== 'object' || Array.isArray(value) || !Array.isArray(value.sources)) return undefined;
       const sources = value.sources.map(projectProfileSource);
@@ -104,6 +110,8 @@ export function projectHarborResponse(req, value) {
     }
   }
   if (pathname === '/owner/profile-sources/revoke' && req.method === 'POST') {
+    const error = projectHarborError(value);
+    if (error) return error;
     const source = projectProfileSource(value?.source);
     return source ? { source } : undefined;
   }
@@ -124,6 +132,6 @@ export function projectHarborResponse(req, value) {
     if (value.current_error) result.current_error = projectRuntimeError(value.current_error);
     return result;
   }
-  if (value && typeof value === 'object' && typeof value.error === 'string') return { error: value.error };
+  if (value && typeof value === 'object' && typeof value.error === 'string') return projectHarborError(value);
   return projectSessionFacts(value, { allowTerminalStop });
 }

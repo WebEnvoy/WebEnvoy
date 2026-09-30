@@ -29,4 +29,12 @@ test('owner Profile source routes are allowlisted, Harbor-forwarded, and safely 
   assert.deepEqual(projectHarborResponse(cases[1], { sources: [withPrivateFields] }), { sources: [sourceRecord] });
   assert.deepEqual(projectHarborResponse(cases[2], { source: withPrivateFields }), { source: sourceRecord });
   assert.equal(projectHarborResponse(cases[1], { sources: [{ ...sourceRecord, source_ref: 'profile-source_766261cf-b05c-431f-a6c2-4e6efa723d5d' }] }), undefined);
+
+  assert.deepEqual(projectHarborResponse(cases[0], {
+    error: 'profile_source_locked', message: '/private/source/.parentlock'
+  }), { error: 'profile_source_locked' });
+  assert.deepEqual(projectHarborResponse(cases[2], {
+    error: 'profile_source_invalid', message: '/private/source/places.sqlite'
+  }), { error: 'profile_source_invalid' });
+  assert.equal(projectHarborResponse(cases[0], { error: '/private/source/places.sqlite' }), undefined);
 });
