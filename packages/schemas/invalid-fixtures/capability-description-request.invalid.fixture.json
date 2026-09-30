@@ -52,6 +52,73 @@
         "connection_id": "connection:example",
         "arguments": { "delta_y": 0 }
       }
+    },
+    {
+      "name": "Core AccountSystem import context rejects Profile scope",
+      "instance": {
+        "operation": "account_system.import_template",
+        "connection_id": "connection:example",
+        "context": {
+          "grant_id": "grant:account-system-import",
+          "profile_ref": "profile:github",
+          "task_scope": {
+            "operations": ["account_system.import_template"],
+            "template_refs": ["lode://account-system/github@1.0.0"]
+          }
+        }
+      }
+    },
+    {
+      "name": "AccountSystem import rejects the legacy browser task scope",
+      "instance": {
+        "operation": "account_system.import_template",
+        "connection_id": "connection:example",
+        "context": {
+          "grant_id": "grant:account-system-import",
+          "task_scope": {
+            "operations": ["account_system.import_template"],
+            "profile_refs": [],
+            "origins": []
+          }
+        }
+      }
+    },
+    {
+      "name": "Account binding context requires its exact binding scope",
+      "instance": {
+        "operation": "account.bind",
+        "connection_id": "connection:example",
+        "context": {
+          "grant_id": "grant:account-bind",
+          "profile_ref": "profile:github",
+          "task_scope": {
+            "operations": ["account.bind"],
+            "profile_refs": ["profile:github"],
+            "origins": ["https://github.com"]
+          }
+        }
+      }
+    },
+    {
+      "name": "ordinary operation rejects Account binding scope",
+      "instance": {
+        "operation": "business_target.create",
+        "connection_id": "connection:example",
+        "context": {
+          "grant_id": "grant:ordinary",
+          "profile_ref": "profile:github",
+          "task_scope": {
+            "operations": ["business_target.create"],
+            "profile_refs": ["profile:github"],
+            "origins": ["https://github.com"],
+            "account_binding_scopes": [{
+              "profile_ref": "profile:github",
+              "account_system_ref": "account-system:github",
+              "account_ref": "account:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }]
+          }
+        }
+      }
     }
   ]
 }

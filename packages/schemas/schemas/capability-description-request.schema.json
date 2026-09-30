@@ -12,7 +12,7 @@
     "context": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["grant_id", "profile_ref", "task_scope"],
+      "required": ["grant_id", "task_scope"],
       "properties": {
         "grant_id": { "type": "string", "minLength": 1, "maxLength": 512 },
         "profile_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
@@ -33,6 +33,8 @@
         "page_id": { "type": "string", "minLength": 1, "maxLength": 512 },
         "page_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
         "document_generation": { "type": "integer", "minimum": 1 },
+        "account_system_ref": { "type": "string", "pattern": "^account-system:[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+        "account_ref": { "type": "string", "pattern": "^account:sha256:[a-f0-9]{64}$" },
         "cursor": { "type": "string", "minLength": 1, "maxLength": 512 },
         "limit": { "type": "integer", "minimum": 1, "maximum": 64 },
         "target_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
@@ -58,6 +60,13 @@
   },
   "$defs": {
     "task_scope": {
+      "oneOf": [
+        { "$ref": "#/$defs/profile_task_scope" },
+        { "$ref": "#/$defs/account_system_import_task_scope" },
+        { "$ref": "#/$defs/account_binding_task_scope" }
+      ]
+    },
+    "profile_task_scope": {
       "type": "object",
       "additionalProperties": false,
       "required": ["operations", "profile_refs", "origins"],
@@ -68,8 +77,78 @@
         "file_refs": { "type": "array", "maxItems": 32, "uniqueItems": true, "items": { "type": "string", "pattern": "^attachment:runtime/[0-9a-f-]{36}$" } }
       }
     },
+    "account_system_import_task_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operations", "template_refs"],
+      "properties": {
+        "operations": { "type": "array", "minItems": 1, "maxItems": 1, "items": { "const": "account_system.import_template" } },
+        "template_refs": { "$ref": "#/$defs/template_refs" }
+      }
+    },
+    "account_binding_task_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operations", "profile_refs", "origins", "account_binding_scopes"],
+      "properties": {
+        "operations": { "type": "array", "minItems": 1, "maxItems": 1, "items": { "const": "account.bind" } },
+        "profile_refs": { "$ref": "#/$defs/refs" },
+        "origins": { "type": "array", "maxItems": 1024, "uniqueItems": true, "items": { "type": "string", "format": "webenvoy-public-origin" } },
+        "account_binding_scopes": { "type": "array", "minItems": 1, "maxItems": 1, "items": { "$ref": "#/$defs/account_binding_scope" } }
+      }
+    },
+    "account_binding_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile_ref", "account_system_ref", "account_ref"],
+      "properties": {
+        "profile_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "account_system_ref": { "type": "string", "pattern": "^account-system:[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+        "account_ref": { "type": "string", "pattern": "^account:sha256:[a-f0-9]{64}$" }
+      }
+    },
+    "template_refs": {
+      "type": "array", "maxItems": 1024, "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^lode://account-system/[a-z0-9][a-z0-9._-]*@[0-9]+\\.[0-9]+\\.[0-9]+$" }
+    },
     "refs": { "type": "array", "maxItems": 1024, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 512 } }
   },
+  "allOf": [
+    {
+      "if": { "required": ["operation"], "properties": { "operation": { "const": "account_system.import_template" } } },
+      "then": {
+        "properties": {
+          "context": {
+            "required": ["grant_id", "task_scope"],
+            "not": { "required": ["profile_ref"] },
+            "properties": { "task_scope": { "$ref": "#/$defs/account_system_import_task_scope" } }
+          }
+        }
+      }
+    },
+    {
+      "if": { "required": ["operation"], "properties": { "operation": { "const": "account.bind" } } },
+      "then": {
+        "properties": {
+          "context": {
+            "required": ["grant_id", "profile_ref", "task_scope"],
+            "properties": { "task_scope": { "$ref": "#/$defs/account_binding_task_scope" } }
+          }
+        }
+      }
+    },
+    {
+      "if": { "required": ["operation"], "not": { "properties": { "operation": { "enum": ["account_system.import_template", "account.bind"] } } } },
+      "then": {
+        "properties": {
+          "context": {
+            "required": ["grant_id", "profile_ref", "task_scope"],
+            "properties": { "task_scope": { "$ref": "#/$defs/profile_task_scope" } }
+          }
+        }
+      }
+    }
+  ],
   "x-webenvoy": {
     "owner": "Core Runtime",
     "status": "accepted",

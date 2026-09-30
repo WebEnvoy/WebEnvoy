@@ -93,12 +93,26 @@ function projectLocalDefinition(value: unknown, requestedTemplateRef: string): M
   };
 }
 
-/** Agent-facing, read-only AccountSystem projection guarded by an existing skill.inspect Grant. */
+/** Agent-facing AccountSystem projections; managed-browser Core owns import authorization and Run recording. */
 export function createManagedAccountSystemReadService(options: {
   managedAccessStore: Pick<FileManagedAccessStore, "checkAccess">;
-  accountSystemDefinitionService: Pick<FileAccountSystemDefinitionStore, "resolveTemplate">;
+  accountSystemDefinitionService: Pick<FileAccountSystemDefinitionStore, "resolveTemplate"> & Partial<Pick<FileAccountSystemDefinitionStore, "importTemplate">>;
 }) {
   return {
+    async importTemplate(templateRefValue: string): Promise<ManagedAccountSystemAgentProjection> {
+      const template_ref = string(templateRefValue);
+      if (!/^lode:\/\/account-system\/[a-z0-9][a-z0-9._-]*@[0-9]+\.[0-9]+\.[0-9]+$/.test(template_ref)) return fail("managed_account_system_invalid_input");
+      const importer = options.accountSystemDefinitionService.importTemplate;
+      if (!importer) return fail("account_system_definition_unavailable");
+      const imported = object(await importer({ template_ref }));
+      const importedSource = object(imported.source);
+      if (imported.template_ref !== template_ref || importedSource.template_ref !== template_ref) return fail("account_system_definition_unavailable");
+      // importTemplate returns the local definition and the selected revision,
+      // with its pin under source.template_sha256. resolveTemplate returns the
+      // same projection inputs with template_sha256 at the top level.
+      return projectLocalDefinition({ ...imported, template_sha256: importedSource.template_sha256 }, template_ref);
+    },
+    /** Read the enabled local definition under the existing skill.inspect Grant. */
     async read(credentialHash: string, value: unknown): Promise<ManagedAccountSystemAgentProjection> {
       const request = parseRequest(value);
       await options.managedAccessStore.checkAccess(credentialHash, {

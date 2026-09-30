@@ -213,6 +213,7 @@ export function createHttpAccountBindingOwnerApiService(options: HttpOwnerServic
       }
       const record = await request(`/runtime/identity-environments/${encodeURIComponent(input.identity_environment_ref)}/account-bindings`, "POST", {
         observation_ref: input.observation_ref,
+        runtime_session_ref: input.runtime_session_ref,
         account_system_ref: input.account_system_ref,
         account_ref: input.account_ref,
         idempotency_key: input.idempotency_key,

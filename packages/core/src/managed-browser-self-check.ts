@@ -61,6 +61,8 @@ const forwardedInteractionInputs: Record<string, unknown>[] = [];
 const receipts = new Map<string, unknown>();
 let pageLists = 0, pageMutations = 0, dropPageResponse = false;
 const pageReceipts = new Map<string, Record<string, unknown>>();
+let accountBindingPosts = 0, malformedAccountBindingResponse = false;
+const accountBindingReceipts = new Map<string, Record<string, unknown>>();
 let environmentReads = 0, environmentUpdates = 0, dropEnvironmentResponse = false, environmentUnavailable = false;
 let environmentConfigured = { timezone: "UTC", language: "en-US", viewport: "1280x720" };
 let environmentEffective = { ...environmentConfigured };
@@ -364,6 +366,30 @@ const server = createServer((req, res) => { void (async () => {
     }
   }
   else if (req.url?.startsWith("/runtime/managed-pages/")) value = pageReceipts.get(decodeURIComponent(req.url.split("/").at(-1)!));
+  else if (req.url?.startsWith("/runtime/identity-environments/identity%3A1/account-bindings")) {
+    let body = ""; for await (const chunk of req) body += chunk;
+    const input = JSON.parse(body) as Record<string, unknown>;
+    assert.equal(input.runtime_session_ref, "session:one");
+    assert.equal(input.page_id, "page-id:one");
+    assert.equal(input.page_ref, "page:one");
+    assert.equal(input.document_generation, 1);
+    assert.equal(input.holder_ref, principalId);
+    accountBindingPosts++;
+    const bindingResult = {
+      ...profiles[0]!, account_bindings: [{ account_system_ref: input.account_system_ref, account_ref: input.account_ref,
+        observation_ref: input.observation_ref, bound_at: new Date().toISOString() }],
+      observation: { status: "completed", observation_ref: input.observation_ref, observed_at: new Date().toISOString(),
+        runtime_session_ref: "session:one", profile_ref: "profile:1", control_generation: 3,
+        page: { page_id: "page-id:one", page_ref: "page:one", document_generation: 1 },
+        account: { status: "verified", account_system_ref: input.account_system_ref, account_ref: input.account_ref } }
+    };
+    accountBindingReceipts.set(String(input.idempotency_key), { status: "completed", result: bindingResult });
+    value = malformedAccountBindingResponse ? { status: "completed" } : bindingResult;
+  }
+  else if (req.url?.startsWith("/runtime/account-binding-operations/")) {
+    const key = decodeURIComponent(req.url.split("/").at(-1)!);
+    value = accountBindingReceipts.get(key);
+  }
   else if (req.url === "/runtime/sessions/session%3Aone/lock") {
     lockAttempts++;
     let body = ""; for await (const chunk of req) body += chunk;
@@ -429,7 +455,7 @@ try {
   const principal = await accessStore.registerPrincipal({ idempotency_key: "register", display_name: "Fixture Agent", credential_hash: credentialHash });
   principalId = principal.principal_id;
   const connection = await accessStore.connect(credentialHash);
-  const legacyOperations = managedOperations.filter(op => !(managedBusinessTargetOperations as readonly string[]).includes(op));
+  const legacyOperations = managedOperations.filter(op => op !== "account.bind" && op !== "account_system.import_template" && !(managedBusinessTargetOperations as readonly string[]).includes(op));
   const grant = await accessStore.createGrant({ idempotency_key: "grant", principal_id: principal.principal_id, profile_refs: [], allowed_operations: legacyOperations, allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 2,
     creation_template: { template_ref: "template:example", provider_id: "camoufox", site: { site_id: "example", origin: "https://example.com", display_name: "Example" }, language: "en-US", timezone: "UTC", permission_ceiling: { allowed_operations: ["profile.list", "profile.read"], allowed_origins: ["https://example.com"] } } });
   const request = { idempotency_key: "create-one", connection_id: connection.connection_id, grant_id: grant.grant_id, operation: "profile.create", template_ref: "template:example", task_scope: { operations: legacyOperations, profile_refs: ["profile:1", "profile:2"], origins: ["https://example.com"] } };
@@ -1151,6 +1177,61 @@ try {
   const observed = await service.submit(credentialHash, { ...navigation, idempotency_key: "observe-one", operation: "instance.observe", url: undefined });
   assert.equal(observed.status, "succeeded", JSON.stringify(observed));
   assert.equal((observed.result as { observation: { page: { current_url: string } } }).observation.page.current_url, "https://example.com/one");
+  const bindingAccountSystemRef = "account-system:github";
+  const accountRef = `account:sha256:${"a".repeat(64)}`;
+  const accountRef2 = `account:sha256:${"b".repeat(64)}`;
+  const accountBindingScopes = [
+    { profile_ref: "profile:1", account_system_ref: bindingAccountSystemRef, account_ref: accountRef },
+    { profile_ref: "profile:1", account_system_ref: bindingAccountSystemRef, account_ref: accountRef2 }
+  ];
+  await accessStore.setProfilePolicy({ idempotency_key: "account-bind-policy", profile_ref: "profile:1", allowed_operations: ["account.bind"], allowed_origins: ["https://example.com"] });
+  const accountBindGrant = await accessStore.createGrant({ idempotency_key: "account-bind-grant", principal_id: principal.principal_id,
+    profile_refs: ["profile:1"], allowed_operations: ["account.bind"], allowed_origins: ["https://example.com"],
+    expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null,
+    account_binding_scopes: accountBindingScopes });
+  const grantStoreAfterBindingGrant = JSON.parse(await readFile(join(directory, "access", "managed-access.json"), "utf8")) as { schema_version?: string };
+  assert.equal(grantStoreAfterBindingGrant.schema_version, "webenvoy.managed-access.v2", "adding a #605 binding Grant must preserve the v2 BusinessTarget tuple store version");
+  const reloadedGrantState = await accessStore.list();
+  const persistedBusinessTargetGrant = reloadedGrantState.grants.find(item => item.grant_id === businessTargetGrant.grant_id);
+  assert.equal(persistedBusinessTargetGrant?.scope_semantics, "agent_operations_v2");
+  assert.deepEqual(persistedBusinessTargetGrant?.business_target_account_scopes, businessTargetGrant.business_target_account_scopes,
+    "adding an Account binding Grant must preserve the existing #602 BusinessTarget tuple after a store reload");
+  assert.deepEqual(reloadedGrantState.grants.find(item => item.grant_id === accountBindGrant.grant_id)?.account_binding_scopes, accountBindingScopes);
+  await assert.rejects(accessStore.checkAccess(credentialHash, {
+    connection_id: connection.connection_id, grant_id: publicGrant.grant_id, operation: "instance.read", profile_ref: "profile:1", origin: "https://example.com",
+    account_system_ref: bindingAccountSystemRef, account_ref: accountRef,
+    task_scope: { operations: ["instance.read"], profile_refs: ["profile:1"], origins: ["https://example.com"] }
+  }), /managed_access_invalid_input/, "Account tuple fields are invalid on an unrelated shared access operation");
+  const accountBindRequest = { idempotency_key: "account-bind-lost-response", connection_id: connection.connection_id, grant_id: accountBindGrant.grant_id,
+    operation: "account.bind", profile_ref: "profile:1", origin: "https://example.com", runtime_session_ref: "session:one",
+    page_id: "page-id:one", page_ref: "page:one", document_generation: 1, observation_ref: "observation:trusted",
+    account_system_ref: bindingAccountSystemRef, account_ref: accountRef,
+    task_scope: { operations: ["account.bind"], profile_refs: ["profile:1"], origins: ["https://example.com"], account_binding_scopes: [accountBindingScopes[0]!] } };
+  malformedAccountBindingResponse = true;
+  const lostBindingResponse = await service.submit(credentialHash, accountBindRequest);
+  malformedAccountBindingResponse = false;
+  assert.equal(lostBindingResponse.status, "unknown_outcome", "a malformed post-bind success body cannot become a known failure");
+  assert.equal(lostBindingResponse.dispatch_state, "dispatched");
+  const observedBeforeBindingQuery = observations;
+  const reconciledBinding = await service.query(credentialHash, lostBindingResponse.run_id);
+  assert.equal(reconciledBinding.status, "unknown_outcome", "receipt recovery preserves the Run's historical unknown status");
+  assert.equal(reconciledBinding.reconciliation, "completed", JSON.stringify(reconciledBinding));
+  assert.equal((reconciledBinding.result as { observation: { account: { account_ref: string } } }).observation.account.account_ref, accountRef);
+  assert.equal(accountBindingPosts, 1, "binding query never replays Harbor's mutation");
+  assert.equal(observations, observedBeforeBindingQuery, "binding query never creates a fresh observation");
+  assert.deepEqual(await service.submit(credentialHash, accountBindRequest), reconciledBinding, "the same key retains its recovered original result");
+  await assert.rejects(service.submit(credentialHash, { ...accountBindRequest, account_ref: `account:sha256:${"b".repeat(64)}` }), /idempotency_conflict/);
+  const successfulBindingRequest = { ...accountBindRequest, idempotency_key: "account-bind-success", account_ref: accountRef2,
+    task_scope: { ...accountBindRequest.task_scope, account_binding_scopes: [accountBindingScopes[1]!] } };
+  const successfulBinding = await service.submit(credentialHash, successfulBindingRequest);
+  assert.equal(successfulBinding.status, "succeeded", JSON.stringify(successfulBinding));
+  assert.equal(successfulBinding.dispatch_state, "dispatched");
+  assert.equal((successfulBinding.result as { observation: { account: { account_ref: string } } }).observation.account.account_ref, accountRef2);
+  const observationsBeforeSuccessfulQuery = observations;
+  assert.deepEqual(await service.query(credentialHash, successfulBinding.run_id), successfulBinding);
+  assert.equal(observations, observationsBeforeSuccessfulQuery, "successful binding query must not create another observation");
+  assert.deepEqual(await service.submit(credentialHash, successfulBindingRequest), successfulBinding, "same-key success returns its persisted dispatch state and result");
+  assert.equal(accountBindingPosts, 2, "successful query and same-key retry never replay Harbor's mutation");
   for (const denied of [{ ...navigation, profile_ref: "profile:2" }, { ...navigation, origin: "https://denied.example", url: "https://denied.example/" }, { ...navigation, task_scope: { ...navigation.task_scope, operations: ["instance.read"] } }]) {
     await assert.rejects(service.submit(credentialHash, { ...denied, idempotency_key: "denied" }), /managed_access_denied/);
   }

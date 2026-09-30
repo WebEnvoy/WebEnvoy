@@ -1032,19 +1032,39 @@ export class HarborRuntime {
   }
 
   async bindManagedAccount(identity_environment_ref: string, input: unknown): Promise<LocalIdentityEnvironmentPublicRecord | ManagedObservationUnavailable> {
-    const required = ["observation_ref", "account_system_ref", "account_ref", "idempotency_key", "holder_ref"];
-    if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).length !== required.length || !required.every(key => boundedManagedRef((input as Record<string, unknown>)[key]))) return managedUnavailable("invalid_request");
-    const request = input as Record<string, string>;
+    const exactFields = ["observation_ref", "runtime_session_ref", "page_id", "page_ref", "account_system_ref", "account_ref", "idempotency_key", "holder_ref", "document_generation"];
+    const ownerFields = ["observation_ref", "runtime_session_ref", "account_system_ref", "account_ref", "idempotency_key", "holder_ref"];
+    if (!input || typeof input !== "object" || Array.isArray(input)) return managedUnavailable("invalid_request");
+    const raw = input as Record<string, unknown>;
+    const exactPage = exactFields.every(key => Object.hasOwn(raw, key));
+    const ownerProjection = ownerFields.every(key => Object.hasOwn(raw, key)) && exactFields.filter(key => !ownerFields.includes(key)).every(key => !Object.hasOwn(raw, key));
+    const fields = exactPage ? exactFields : ownerFields;
+    if ((!exactPage && !ownerProjection) || Object.keys(raw).length !== fields.length || !fields.every(key => Object.hasOwn(raw, key)) ||
+      fields.filter(key => key !== "document_generation").some(key => !boundedManagedRef(raw[key])) ||
+      exactPage && (!Number.isSafeInteger(raw.document_generation) || Number(raw.document_generation) < 1)) return managedUnavailable("invalid_request");
+    const request = raw as Record<string, string>;
+    const requestHash = createHash("sha256").update(JSON.stringify(fields.map(key => request[key]))).digest("hex");
+    const legacyFields = ["observation_ref", "account_system_ref", "account_ref", "idempotency_key", "holder_ref"];
+    const legacyRequestHash = exactPage ? undefined : createHash("sha256").update(JSON.stringify(legacyFields.map(key => request[key]))).digest("hex");
+    try {
+      const previous = this.identityEnvironments.findAccountBindingReceipt(identity_environment_ref, request.idempotency_key!, requestHash, legacyRequestHash);
+      if (previous) return previous.status === "completed" ? previous.result : managedUnavailable("unknown_outcome");
+    } catch (error) {
+      return managedUnavailable(error instanceof Error && error.message === "idempotency_conflict" ? "idempotency_conflict" : "persistence_failed");
+    }
     const observed = this.runtimeSessions.findManagedObservation(identity_environment_ref, request.observation_ref, request.holder_ref);
-    if (!observed || observed.account.status !== "verified" || observed.account.account_system_ref !== request.account_system_ref || observed.account.account_ref !== request.account_ref) return managedUnavailable("account_observation_required");
+    if (!observed || observed.runtime_session_ref !== request.runtime_session_ref ||
+      exactPage && (observed.page.page_id !== request.page_id || observed.page.page_ref !== request.page_ref || observed.page.document_generation !== Number(request.document_generation)) || observed.account.status !== "verified" ||
+      observed.account.account_system_ref !== request.account_system_ref || observed.account.account_ref !== request.account_ref) return managedUnavailable("account_observation_required");
+    if (!observed.page.page_id || !observed.page.page_ref || !observed.page.document_generation) return managedUnavailable("account_observation_required");
     const session = this.runtimeSessions.getRecord(observed.runtime_session_ref);
     if (!session || session.facts.identity_environment_ref !== identity_environment_ref) return managedUnavailable("account_observation_changed");
     const fresh = await this.runtimeSessions.observeManagedSession(observed.runtime_session_ref, {
       holder_ref: request.holder_ref,
       scope_semantics: session.scope_semantics ?? "legacy_request_guard_v1",
-      ...(observed.page.page_id ? { page_id: observed.page.page_id } : {}),
-      ...(observed.page.page_ref ? { page_ref: observed.page.page_ref } : {}),
-      ...(observed.page.document_generation !== undefined ? { document_generation: observed.page.document_generation } : {}),
+      page_id: observed.page.page_id,
+      page_ref: observed.page.page_ref,
+      document_generation: observed.page.document_generation,
       ...(typeof observed.page.origin === "string" ? { expected_origin: observed.page.origin } : {})
     });
     const samePage = fresh.status === "completed" &&
@@ -1055,12 +1075,15 @@ export class HarborRuntime {
     if (fresh.status !== "completed" || !samePage || fresh.account.status !== "verified" || fresh.account.account_ref !== request.account_ref || fresh.account.account_system_ref !== request.account_system_ref || fresh.control_generation !== observed.control_generation) return managedUnavailable("account_observation_changed");
     try {
       return this.identityEnvironments.bindObservedAccount(identity_environment_ref, { account_system_ref: request.account_system_ref, account_ref: request.account_ref,
-        observation_ref: fresh.observation_ref, bound_at: fresh.observed_at }, request.idempotency_key,
-        createHash("sha256").update(JSON.stringify(required.map(key => request[key]))).digest("hex"));
+        observation_ref: fresh.observation_ref, bound_at: fresh.observed_at }, request.idempotency_key!, requestHash, fresh as ManagedObservation);
     } catch (error) {
       const code = error instanceof Error && ["account_binding_conflict", "idempotency_conflict", "identity_environment_missing"].includes(error.message) ? error.message : "persistence_failed";
       return managedUnavailable(code);
     }
+  }
+
+  getManagedAccountBindingOperation(operation_ref: string) {
+    return this.identityEnvironments.getAccountBindingReceipt(operation_ref);
   }
 
   completeManualAuthentication(

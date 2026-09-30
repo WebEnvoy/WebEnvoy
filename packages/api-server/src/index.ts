@@ -139,7 +139,8 @@ if (import.meta.url === entrypoint) {
   const managedBrowserService = managedAccessStore && runRecordStore && authorizationDecisionStore && executionPolicyConfigStore && process.env.WEBENVOY_HARBOR_RUNTIME_URL
     ? createManagedBrowserService({ accessStore: managedAccessStore, runRecordStore, authorizationDecisionStore, executionPolicyConfigStore,
         harborBaseUrl: process.env.WEBENVOY_HARBOR_RUNTIME_URL, supervisorToken: process.env.HARBOR_RUNTIME_SUPERVISOR_TOKEN ?? "",
-        ...(managedRecoveryService === undefined ? {} : { recoveryService: managedRecoveryService }) })
+        ...(managedRecoveryService === undefined ? {} : { recoveryService: managedRecoveryService }),
+        ...(managedAccountSystemService === undefined ? {} : { accountSystemService: managedAccountSystemService }) })
     : undefined;
   const skillLibraryDirectory = runRecordStore
     ? process.env.WEBENVOY_SKILL_LIBRARY_DIR ?? process.env.WEBENVOY_RUNTIME_DATA_DIR ?? join(runRecordStore.directory, "..", "..")

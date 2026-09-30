@@ -1,10 +1,10 @@
 # Grant Wire Contract V1
 
-状态：Accepted；版本：v1.8（v1 兼容系列）；owner：Core。产品归口：[Work Item #508](https://github.com/WebEnvoy/WebEnvoy/issues/508)、已安装恢复 [#505](https://github.com/WebEnvoy/WebEnvoy/issues/505)、Provider 默认 [#516](https://github.com/WebEnvoy/WebEnvoy/issues/516)、受管浏览器文件 [#523](https://github.com/WebEnvoy/WebEnvoy/issues/523)、站点 SKILL [#563](https://github.com/WebEnvoy/WebEnvoy/issues/563)、Profile 元数据 [#599](https://github.com/WebEnvoy/WebEnvoy/issues/599)、Profile 安全生命周期 [#601](https://github.com/WebEnvoy/WebEnvoy/issues/601) 与 BusinessTarget metadata [#602](https://github.com/WebEnvoy/WebEnvoy/issues/602)。本合同冻结恢复 Grant、SKILL 资源范围、Provider preference/创建模板、browser-files 文件范围、managed-browser scope semantics、site-task Agent projection、Profile metadata operation、Account tuple snapshots 和 Profile 安全生命周期 operation 的跨进程语义；既有 Principal、Connection、Profile Grant、撤销和交集规则仍由 Core owner API 维护。
+状态：Accepted；版本：v1.9（v1 兼容系列）；owner：Core。产品归口：[Work Item #508](https://github.com/WebEnvoy/WebEnvoy/issues/508)、已安装恢复 [#505](https://github.com/WebEnvoy/WebEnvoy/issues/505)、Provider 默认 [#516](https://github.com/WebEnvoy/WebEnvoy/issues/516)、受管浏览器文件 [#523](https://github.com/WebEnvoy/WebEnvoy/issues/523)、站点 SKILL [#563](https://github.com/WebEnvoy/WebEnvoy/issues/563)、Profile 元数据 [#599](https://github.com/WebEnvoy/WebEnvoy/issues/599)、Profile 安全生命周期 [#601](https://github.com/WebEnvoy/WebEnvoy/issues/601)、Agent 账号委派 [#605](https://github.com/WebEnvoy/WebEnvoy/issues/605) 与 BusinessTarget metadata [#602](https://github.com/WebEnvoy/WebEnvoy/issues/602)。本合同冻结恢复 Grant、SKILL 资源范围、Provider preference/创建模板、browser-files 文件范围、managed-browser scope semantics、site-task Agent projection、Profile metadata operation、Account tuple snapshots 和 Profile 安全生命周期 operation 的跨进程语义；既有 Principal、Connection、Profile Grant、撤销和交集规则仍由 Core owner API 维护。
 
 ## 版本与兼容规则
 
-v1.0 的 recovery 与 v1.1 的 `skill_scope` 语义保持不变。v1.2 新增 preference operation 值，并允许新创建模板把 `provider_id` 明确设为 null；v1.3 新增可选 `file_scope` 与 browser task `file_refs`；v1.4 新增可选 `scope_semantics`，并以本节的 owner v2 lifecycle 兼容修订补齐正式 API/CLI；v1.5 新增 site task 的 `task.submit`、`task.query`、`task.stop` operation；v1.6 新增 `profile.metadata.update` operation 值，不增加 Grant 字段；v1.7 新增只由可信 owner 签发并经 Harbor 解析的 BusinessTarget Account tuple snapshots；v1.8 新增 `profile.copy_environment`、`profile.archive`、`profile.delete` operation 值，不增加 Grant 字段或 scope dimension。site task 的普通结构化参数由版本化 managed-task request 携带并按 Lode pinned input schema 校验，不增加第二个材料注册表或 Grant scope。上述扩展不改变既有网页 `profile_refs`、`allowed_origins`、`allowed_operations` 的交集含义。未携带 `scope_semantics` 的 Grant/Profile policy 解释为 `legacy_request_guard_v1`；首次 legacy→v2 仍只能沿用原 owner 确认路径，Agent/task 请求不能指定或升级语义。之后的续发、重签、替换和 v2 policy 调整只走本节的 owner API/CLI/App 入口。
+v1.0 的 recovery 与 v1.1 的 `skill_scope` 语义保持不变。v1.2 新增 preference operation 值，并允许新创建模板把 `provider_id` 明确设为 null；v1.3 新增可选 `file_scope` 与 browser task `file_refs`；v1.4 新增可选 `scope_semantics`，并以本节的 owner v2 lifecycle 兼容修订补齐正式 API/CLI；v1.5 新增 site task 的 `task.submit`、`task.query`、`task.stop` operation；v1.6 新增 `profile.metadata.update` operation 值，不增加 Grant 字段；v1.7 新增只由可信 owner 签发并经 Harbor 解析的 BusinessTarget Account tuple snapshots；v1.8 新增 `profile.copy_environment`、`profile.archive`、`profile.delete` operation 值，不增加 Grant 字段或 scope dimension；v1.9 新增 `account_system.import_template` 与 `account.bind` operation，以及各自独立的精确 `account_system_scope`、`account_binding_scopes`。site task 的普通结构化参数由版本化 managed-task request 携带并按 Lode pinned input schema 校验，不增加第二个材料注册表或 Grant scope。上述扩展不改变既有网页 `profile_refs`、`allowed_origins`、`allowed_operations` 的交集含义。未携带 `scope_semantics` 的 Grant/Profile policy 解释为 `legacy_request_guard_v1`；首次 legacy→v2 仍只能沿用原 owner 确认路径，Agent/task 请求不能指定或升级语义。之后的续发、重签、替换和 v2 policy 调整只走本节的 owner API/CLI/App 入口。
 
 ### Managed browser scope semantics
 
@@ -92,6 +92,43 @@ The resulting persisted field is a Core-local Grant dimension in `webenvoy.manag
 `profile.copy_environment`、`profile.archive` 与 `profile.delete` 是仅通过 `allowed_operations` 逐项授予的新 operation 值；它们不新增 Grant 字段或权限维度。copy 仍受同一 Grant 的精确 source `profile_refs`、固定 `creation_template`、`max_created_profiles`、`created_profile_refs` 与 source/template/Grant policy 交集约束；archive/delete 必须各自明确授予到唯一 task-scope Profile。所有三项的 Agent 输入、空 origin 与 Harbor receipt/no-replay 语义见 [Profile Safe Lifecycle V1](profile-safe-lifecycle-v1.md)。
 
 v1.8 reader 必须继续读取不含这些 operation 值的旧 Grant，且旧 Grant 不因此获得复制、归档或删除权限；只有 `allowed_operations` 明确含同名操作、task scope 再次选定唯一 Profile，且 Profile policy 同时允许操作时才可执行。删除还要求 `confirmation: "delete_local_data"` 表达本次删除意图，以及现行 Core ExecutionPolicy 对 Harbor catalog `destructive` category 的允许决定；该字符串不是授权或人工确认凭据。v1.7 或更旧的严格 reader 不认识新增 operation 值时必须拒绝含该值的 Grant，不能忽略后继续执行。
+
+## AccountSystem import and Account binding V1.9
+
+`account_system.import_template` and `account.bind` are distinct, explicitly granted managed operations. Neither is inferred from `skill.inspect`, Profile reads, `instance.observe`, the presence of an AccountSystem definition, or another Account binding.
+
+An import Grant carries:
+
+```json
+{
+  "allowed_operations": ["account_system.import_template"],
+  "account_system_scope": {
+    "template_refs": ["lode://account-system/github@1.0.0"]
+  }
+}
+```
+
+`template_refs` is a unique list of exact immutable Lode AccountSystem refs. A managed import request selects exactly one template in both `task_scope.template_refs` and top-level `template_ref`, with `task_scope.operations` containing only `account_system.import_template`. `profile_refs` and `origins` are not part of this Core metadata operation. Core verifies its approved source pin and exact bytes and runs the existing local definition import transaction without Harbor. The Agent cannot provide paths, source digests, local refs, revisions, or replacement scope.
+
+An Account binding Grant carries exact tuples:
+
+```json
+{
+  "allowed_operations": ["account.bind"],
+  "profile_refs": ["profile:github"],
+  "account_binding_scopes": [{
+    "profile_ref": "profile:github",
+    "account_system_ref": "account-system:github",
+    "account_ref": "account:sha256:<64 lowercase hex characters>"
+  }]
+}
+```
+
+Every tuple Profile must be in the Grant's `profile_refs`; a tuple has only `profile_ref`, `account_system_ref`, and `account_ref`. A managed binding request selects exactly one operation, one Profile, one authorized origin, and one tuple in `task_scope.account_binding_scopes`; the top-level Profile/System/Account refs must match it exactly. The selected `origin` must remain within the existing Grant ∩ Profile-policy ∩ task-scope origin intersection. The request also names the current Runtime Session, Page, document generation, and Harbor observation; these selectors do not establish identity. Harbor remains the single binding owner and enforces the fresh same-Page observation, current ControlLease generation, and existing cross-Profile/account conflict checks.
+
+The Agent receives these fields only through the owner-authenticated `access grant` and confirmed `access grant-v2` input files; both CLI allowlists preserve the selected scopes. The initial legacy-to-v2 scope transition carries only subsets of the source Grant's template refs and exact binding tuples. Later owner-issued v2 Grants use the explicit final scope selected in the current owner request and the existing policy/current-scope confirmation rules. `account_system_scope` requires the matching operation and non-empty refs; `account_binding_scopes` requires `account.bind`, valid tuples, and matching Grant Profiles. Omitting either field means an empty scope. Legacy Grants missing them cannot import templates or bind accounts. An older strict reader that does not recognize either field or operation must reject the Grant rather than ignore fields and continue.
+
+Both mutations use the generic managed-browser Core Run and `webenvoy_query`. The original idempotency key is bound to the complete wire request. A retry with the same request returns the original Run; changed wire under the same key conflicts. Harbor stores the exact safe original Account binding result under the Run key and exposes read-only receipt lookup; Core query never rebinds, reobserves, or guesses success from a later current binding. Missing/legacy receipt results preserve `unknown_outcome`; callers may query or reconcile the original Run but cannot replay under a new key.
 
 ## SKILL Grant 与 task scope
 

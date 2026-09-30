@@ -87,7 +87,22 @@ const managedTaskScopeProperties = {
   profile_refs: { type: 'array', items: { type: 'string' } },
   origins: { type: 'array', items: { type: 'string' } }
 };
-const managedTaskScopeSchema = fileScope => ({
+const managedTaskScopeSchema = (fileScope, operationId) => {
+  if (operationId === 'account_system.import_template') return {
+    type: 'object', properties: {
+      operations: { type: 'array', minItems: 1, maxItems: 1, items: { const: operationId } },
+      template_refs: { type: 'array', items: { type: 'string', pattern: '^lode://account-system/[a-z0-9][a-z0-9._-]*@[0-9]+\\.[0-9]+\\.[0-9]+$' } }
+    }, required: ['operations', 'template_refs'], additionalProperties: false
+  };
+  if (operationId === 'account.bind') return {
+    type: 'object', properties: {
+      operations: { type: 'array', minItems: 1, maxItems: 1, items: { const: operationId } },
+      profile_refs: { type: 'array', items: { type: 'string' } }, origins: { type: 'array', items: { type: 'string' } },
+      account_binding_scopes: { type: 'array', minItems: 1, items: { type: 'object', required: ['profile_ref', 'account_system_ref', 'account_ref'],
+        properties: { profile_ref: { type: 'string', minLength: 1 }, account_system_ref: { type: 'string', pattern: '^account-system:[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' }, account_ref: { type: 'string', pattern: '^account:sha256:[a-f0-9]{64}$' } }, additionalProperties: false } }
+    }, required: ['operations', 'profile_refs', 'origins', 'account_binding_scopes'], additionalProperties: false
+  };
+  return ({
   type: 'object',
   description: 'Authorization scope for this single submitted operation, not an entire multi-step workflow. File refs belong only to the current file operation.',
   properties: {
@@ -96,12 +111,24 @@ const managedTaskScopeSchema = fileScope => ({
   },
   required: ['operations', 'profile_refs', 'origins', ...(fileScope === 'upload' || fileScope === 'download' ? ['file_refs'] : [])],
   additionalProperties: false
-});
+  });
+};
 const managedOperationProperties = Object.fromEntries([
   ['idempotency_key', { type: 'string', description: 'A new idempotency key for this submitted operation.' }],
   ['grant_id', { type: 'string', description: 'The one owner-issued Grant for this submitted operation.' }],
   ['operation', { type: 'string', enum: managedOperationIds, pattern: capabilityDefinitions.operation_pattern, description: 'One exposed operation name.' }],
-  ['task_scope', { ...managedTaskScopeSchema('file'), description: 'Authorization scope for this single submitted operation.' }],
+  // The selected operation's allOf branch below supplies the closed scope
+  // shape. Keeping this property open here lets Core-only scopes participate
+  // in that same conditional instead of intersecting the legacy browser shape.
+  ['task_scope', { type: 'object', description: 'Authorization scope for this single submitted operation.', properties: {
+    ...managedTaskScopeProperties,
+    file_refs: { type: 'array', description: 'File refs for the current file operation only.', items: { type: 'string', pattern: '^attachment:runtime/[0-9a-f-]{36}$' } },
+    template_refs: { type: 'array', items: { type: 'string', pattern: '^lode://account-system/[a-z0-9][a-z0-9._-]*@[0-9]+\\.[0-9]+\\.[0-9]+$' } },
+    account_binding_scopes: { type: 'array', items: { type: 'object', required: ['profile_ref', 'account_system_ref', 'account_ref'], properties: {
+      profile_ref: { type: 'string', minLength: 1 }, account_system_ref: { type: 'string', pattern: '^account-system:[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' },
+      account_ref: { type: 'string', pattern: '^account:sha256:[a-f0-9]{64}$' }
+    }, additionalProperties: false } }
+  } }],
   ...Object.entries(capabilityDefinitions.fields).map(([name, schema]) => [name, { ...schema }])
 ]);
 const forbiddenFor = definition => Object.keys(capabilityDefinitions.fields).filter(field => !definition.allowed.includes(field));
@@ -138,7 +165,10 @@ const conditionThen = definition => {
 };
 const operationConditions = capabilityOperations.map(definition => ({
   if: { required: ['operation'], properties: { operation: { const: definition.id } } },
-  then: conditionThen(definition)
+  then: {
+    ...conditionThen(definition),
+    ...(definition.id === 'account_system.import_template' || definition.id === 'account.bind' ? { properties: { task_scope: managedTaskScopeSchema(undefined, definition.id) } } : {})
+  }
 }));
 const managedOperationSchema = {
   type: 'object',
@@ -149,7 +179,15 @@ const managedOperationSchema = {
     {
       if: { required: ['operation'], properties: { operation: { enum: managedFileOperationIds } } },
       then: { properties: { task_scope: { ...managedTaskScopeSchema('file'), description: 'Authorization scope for this single submitted operation. file_refs is allowed only for the current file.upload or file.download operation; upload carries one ref equal to file_ref and download carries []. Omit this field for every non-file operation.' } } },
-      else: { properties: { task_scope: managedTaskScopeSchema(undefined) } }
+      else: {
+        if: { required: ['operation'], properties: { operation: { const: 'account_system.import_template' } } },
+        then: { properties: { task_scope: managedTaskScopeSchema(undefined, 'account_system.import_template') } },
+        else: {
+          if: { required: ['operation'], properties: { operation: { const: 'account.bind' } } },
+          then: { properties: { task_scope: managedTaskScopeSchema(undefined, 'account.bind') } },
+          else: { properties: { task_scope: managedTaskScopeSchema(undefined) } }
+        }
+      }
     },
     {
       if: { required: ['operation'], properties: { operation: { enum: ['file.upload'] } } },
@@ -170,7 +208,7 @@ const tools = [
   { name: 'webenvoy_status', description: 'Verify installed Runtime and SKILL assets; return actual versions, readiness, and safe recovery guidance.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
   { name: 'webenvoy_skill', description: 'Read the actual installed, integrity-verified WebEnvoy management/controlled browser SKILL before operating.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
   { name: 'webenvoy_connect', description: 'Connect the already registered Agent Principal. Cannot register or grant permissions.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
-  { name: 'webenvoy_describe', description: 'Read the current static operation definition and, when explicitly supplied, the one authorized Profile/Provider/Runtime context. This is optional help: it never starts Runtime, opens a Page, acquires control, creates a Run, or grants permission.', inputSchema: {
+  { name: 'webenvoy_describe', description: 'Read the current static operation definition and, when explicitly supplied, the one authorized Core or Profile/Provider/Runtime context. This is optional help: it never starts Runtime, opens a Page, acquires control, creates a Run, or grants permission.', inputSchema: {
     type: 'object',
     properties: {
       operation: { type: 'string', pattern: capabilityDefinitions.operation_pattern, description: 'One operation name; unknown and out-of-scope names receive an explicit definition state.' },
@@ -179,9 +217,12 @@ const tools = [
         properties: {
           grant_id: { type: 'string' },
           profile_ref: { type: 'string' },
-          task_scope: { type: 'object', properties: { ...managedTaskScopeProperties, file_refs: { type: 'array', items: { type: 'string', pattern: '^attachment:runtime/[0-9a-f-]{36}$' }, description: 'Only for file operations; upload carries one ref and download carries an empty array.' } }, required: ['operations', 'profile_refs', 'origins'], additionalProperties: false }
+          task_scope: { type: 'object', properties: { ...managedTaskScopeProperties,
+            template_refs: { type: 'array', items: { type: 'string', pattern: '^lode://account-system/[a-z0-9][a-z0-9._-]*@[0-9]+\\.[0-9]+\\.[0-9]+$' } },
+            account_binding_scopes: { type: 'array', items: { type: 'object', required: ['profile_ref', 'account_system_ref', 'account_ref'], properties: { profile_ref: { type: 'string' }, account_system_ref: { type: 'string' }, account_ref: { type: 'string' } }, additionalProperties: false } },
+            file_refs: { type: 'array', items: { type: 'string', pattern: '^attachment:runtime/[0-9a-f-]{36}$' }, description: 'Only for file operations; upload carries one ref and download carries an empty array.' } }, required: ['operations'], additionalProperties: false }
         },
-        required: ['grant_id', 'profile_ref', 'task_scope'],
+        required: ['grant_id', 'task_scope'],
         additionalProperties: false
       },
       arguments: { type: 'object', description: 'A partial draft of the target operation fields; envelope and context fields are not accepted.', properties: Object.fromEntries(Object.entries(capabilityDefinitions.fields).filter(([name]) => name !== 'profile_ref').map(([name, schema]) => [name, { ...schema }])), additionalProperties: false }

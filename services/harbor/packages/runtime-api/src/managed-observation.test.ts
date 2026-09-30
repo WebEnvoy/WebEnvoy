@@ -96,10 +96,16 @@ test("same-instance observation discovers without binding, rejects unknown/confl
     assert.equal(discovered.identity_ownership.current.status, "discovered");
     assert.equal(discovered.identity_ownership.ownership.status, "unknown");
     assert.deepEqual(discovered.identity_ownership.history.bindings, []);
-    const input = { observation_ref: first.observation_ref, account_system_ref: first.account.account_system_ref, account_ref: first.account.account_ref, idempotency_key: "bind-a", holder_ref: "principal:one" };
+    const bindingInput = (observation: ManagedObservation, idempotency_key: string) => ({ observation_ref: observation.observation_ref,
+      runtime_session_ref: observation.runtime_session_ref, page_id: observation.page.page_id!, page_ref: observation.page.page_ref!,
+      document_generation: observation.page.document_generation!, account_system_ref: observation.account.account_system_ref!,
+      account_ref: observation.account.account_ref!, idempotency_key, holder_ref: "principal:one" });
+    const input = bindingInput(first, "bind-a");
     const bound = await runtime.bindManagedAccount("identity:a", input);
-    assert.ok("account_bindings" in bound && bound.account_bindings.length === 1);
+    assert.ok("account_bindings" in bound && bound.account_bindings.length === 1 && "observation" in bound);
     assert.deepEqual(await runtime.bindManagedAccount("identity:a", input), bound);
+    assert.deepEqual(runtime.getManagedAccountBindingOperation("bind-a"), { status: "completed", result: bound });
+    assert.equal((await runtime.bindManagedAccount("identity:a", { ...input, account_ref: `account:sha256:${"f".repeat(64)}` }) as { failure_class?: string }).failure_class, "idempotency_conflict");
     const owned = runtime.listManagedIdentityEnvironmentProfiles().find(profile => profile.identity_environment_ref === "identity:a")!;
     assert.equal(owned.identity_ownership.current.status, "verified");
     assert.equal(owned.identity_ownership.history.bindings[0]?.verification, "verified_at_binding");
@@ -111,7 +117,7 @@ test("same-instance observation discovers without binding, rejects unknown/confl
     assert.equal(conflicted.identity_ownership.current.status, "conflict");
     assert.equal(conflicted.identity_ownership.ownership.status, "unknown");
     assert.equal(JSON.stringify(conflicted.identity_ownership).includes("identity:a"), false, "account conflict must not expose the other Profile reference");
-    assert.equal((await runtime.bindManagedAccount("identity:b", { ...input, observation_ref: second.observation_ref, idempotency_key: "bind-b" }) as { failure_class?: string }).failure_class, "account_binding_conflict");
+    assert.equal((await runtime.bindManagedAccount("identity:b", bindingInput(second, "bind-b")) as { failure_class?: string }).failure_class, "account_binding_conflict");
     state.id = "account-other";
     const changed = await observe();
     if (changed.status !== "completed") throw new Error("observation unavailable");
@@ -119,14 +125,14 @@ test("same-instance observation discovers without binding, rejects unknown/confl
     assert.equal(changedProjection.identity_ownership.current.status, "conflict");
     assert.equal(changedProjection.identity_ownership.history.bindings[0]?.account_ref, first.account.account_ref);
     assert.equal(changedProjection.identity_ownership.ownership.status, "unique", "current login identity does not replace persistent owner binding");
-    assert.equal((await runtime.bindManagedAccount("identity:a", { ...input, observation_ref: changed.observation_ref, account_ref: changed.account.account_ref, idempotency_key: "bind-other" }) as { failure_class?: string }).failure_class, "account_binding_conflict");
+    assert.equal((await runtime.bindManagedAccount("identity:a", bindingInput(changed, "bind-other")) as { failure_class?: string }).failure_class, "account_binding_conflict");
     assert.equal((await runtime.bindManagedAccount("identity:a", { ...input, idempotency_key: "stale" }) as { failure_class?: string }).failure_class, "account_observation_changed");
     state.id = null;
     assert.equal((await observe()).status, "completed");
     assert.equal((await runtime.bindManagedAccount("identity:a", { ...input, idempotency_key: "unknown" }) as { failure_class?: string }).failure_class, "account_observation_changed");
     runtime.recordHandoff(a.runtime_session_ref, { control_owner: "user", handoff_reason: "login_required" });
     assert.equal((await observe() as { failure_class?: string }).failure_class, "control_lock_conflict");
-    assert.equal((await runtime.bindManagedAccount("identity:a", input) as { failure_class?: string }).failure_class, "account_observation_required");
+    assert.deepEqual(await runtime.bindManagedAccount("identity:a", input), bound, "the exact persisted binding receipt remains queryable after handoff");
     runtime.releaseSession(a.runtime_session_ref, { control_owner: "user" });
     const releasedRecord = (runtime as unknown as { runtimeSessions: import("./runtime-session.js").RuntimeSessionStore }).runtimeSessions.getRecord(a.runtime_session_ref)!;
     const releasedGeneration = releasedRecord.control_generation;
@@ -262,13 +268,12 @@ test("v2 owner binding rechecks the observed Page and persists only after a fres
     });
     if (observation.status !== "completed") throw new Error(`observation unavailable: ${observation.failure_class}`);
     assert.equal(observation.page.page_ref, selected.page_ref);
-    const staleBindInput = {
-      observation_ref: observation.observation_ref,
-      account_system_ref: observation.account.account_system_ref!,
-      account_ref: observation.account.account_ref!,
-      idempotency_key: "bind:v2-during-observation-navigation",
-      holder_ref: "principal:one"
-    };
+    const bindInput = (observed: ManagedObservation, idempotency_key: string) => ({
+      observation_ref: observed.observation_ref, runtime_session_ref: observed.runtime_session_ref,
+      page_id: observed.page.page_id!, page_ref: observed.page.page_ref!, document_generation: observed.page.document_generation!,
+      account_system_ref: observed.account.account_system_ref!, account_ref: observed.account.account_ref!, idempotency_key, holder_ref: "principal:one"
+    });
+    const staleBindInput = bindInput(observation, "bind:v2-during-observation-navigation");
     changeDocumentDuringObservation = true;
     assert.equal((await runtime.bindManagedAccount("identity:v2-bind", staleBindInput) as { failure_class?: string }).failure_class, "account_observation_changed");
     assert.deepEqual(observedPages, ["provider:b", "provider:b"], "owner recheck must use the Page from the trusted observation");
@@ -284,14 +289,8 @@ test("v2 owner binding rechecks the observed Page and persists only after a fres
     });
     if (currentObservation.status !== "completed") throw new Error("current observation unavailable");
     assert.equal(currentObservation.account.account_ref, observation.account.account_ref);
-    const bound = await runtime.bindManagedAccount("identity:v2-bind", {
-      observation_ref: currentObservation.observation_ref,
-      account_system_ref: currentObservation.account.account_system_ref!,
-      account_ref: currentObservation.account.account_ref!,
-      idempotency_key: "bind:v2-page",
-      holder_ref: "principal:one"
-    });
-    assert.ok("account_bindings" in bound && bound.account_bindings.length === 1, JSON.stringify(bound));
+    const bound = await runtime.bindManagedAccount("identity:v2-bind", bindInput(currentObservation, "bind:v2-page"));
+    assert.ok("account_bindings" in bound && bound.account_bindings.length === 1 && "observation" in bound, JSON.stringify(bound));
     assert.deepEqual(observedPages, ["provider:b", "provider:b", "provider:b", "provider:b"], "owner recheck must retain the selected Page after a fresh observation");
     const persisted = new HarborRuntime(launcher, options).getManagedLocalIdentityEnvironment("identity:v2-bind");
     assert.ok(persisted?.account_bindings.some(binding => binding.account_ref === currentObservation.account.account_ref));

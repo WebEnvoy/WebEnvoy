@@ -11,4 +11,7 @@ assert.match(source, /requestOwner\('\/agent-access\/v2\/grants'/);
 assert.match(source, /requestOwner\('\/agent-access\/v2\/profile-policies'/);
 assert.doesNotMatch(source, /action === 'v2-grant'/);
 assert.doesNotMatch(source, /action === 'v2-policy'/);
+assert.equal((source.match(/'account_system_scope', 'account_binding_scopes'/g) ?? []).length, 2, 'owner grant and V2 grant both accept AccountSystem template and binding scope selections');
+assert.match(source, /requestOwner\('\/agent-access\/grants', value\)/);
+assert.match(source, /requestOwner\('\/agent-access\/v2\/grants', value\)/);
 console.log("Validated explicit v2 owner CLI confirmation and routes.");

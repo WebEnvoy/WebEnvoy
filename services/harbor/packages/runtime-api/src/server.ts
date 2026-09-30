@@ -257,6 +257,12 @@ async function route(
     const result = await runtime.bindManagedAccount(parts[2], await readJson<unknown>(request));
     writeJson(response, "failure_class" in result ? 409 : 200, result); return;
   }
+  if (method === "GET" && parts[0] === "runtime" && parts[1] === "account-binding-operations" && parts[2] && parts.length === 3) {
+    if (!authorizeCoreControl(manualAuthenticationAuthorizer, request, response)) return;
+    if (parts[2].length > 256 || /[\u0000-\u001f\u007f]/.test(parts[2])) throw new BadRequest("Invalid account binding operation reference.");
+    const result = runtime.getManagedAccountBindingOperation(parts[2]);
+    writeJson(response, result ? 200 : 404, result ?? { error: "account_binding_operation_not_found" }); return;
+  }
 
   if (method === "GET" && url.pathname === "/runtime/identity-environments") {
     writeJson(response, 200, {

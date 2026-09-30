@@ -90,7 +90,7 @@ export interface StoredLocalIdentityEnvironmentRecord {
   };
   imported_from: string | null;
   account_bindings?: ManagedAccountBinding[];
-  account_binding_receipts?: { key_hash: string; request_hash: string }[];
+  account_binding_receipts?: { key_hash: string; request_hash: string; result?: LocalIdentityEnvironmentPublicRecord & { observation: ManagedObservation } }[];
   authentication_provenance?: "unknown" | "user_confirmed_managed_session";
   user_confirmed_session_ref: string | null;
   repair_state: "clean" | "repair_required";
@@ -496,27 +496,46 @@ export class LocalIdentityEnvironmentManager {
     });
   }
 
-  bindObservedAccount(identity_environment_ref: string, binding: ManagedAccountBinding, idempotency_key: string, request_hash: string): LocalIdentityEnvironmentPublicRecord {
+  findAccountBindingReceipt(identity_environment_ref: string, idempotency_key: string, request_hash: string, legacy_request_hash?: string): { status: "completed"; result: LocalIdentityEnvironmentPublicRecord & { observation: ManagedObservation } } | { status: "unknown_outcome" } | undefined {
+    const key_hash = createHash("sha256").update(idempotency_key).digest("hex");
+    for (const [ref, record] of this.records) {
+      const receipt = record.account_binding_receipts?.find(item => item.key_hash === key_hash);
+      if (!receipt) continue;
+      if (ref !== identity_environment_ref) throw new Error("idempotency_conflict");
+      if (receipt.request_hash !== request_hash && (receipt.result !== undefined || receipt.request_hash !== legacy_request_hash)) throw new Error("idempotency_conflict");
+      return receipt.result ? { status: "completed", result: snapshot(receipt.result) } : { status: "unknown_outcome" };
+    }
+    return undefined;
+  }
+
+  getAccountBindingReceipt(idempotency_key: string): { status: "completed"; result: LocalIdentityEnvironmentPublicRecord & { observation: ManagedObservation } } | { status: "unknown_outcome" } | undefined {
+    const key_hash = createHash("sha256").update(idempotency_key).digest("hex");
+    for (const record of this.records.values()) {
+      const receipt = record.account_binding_receipts?.find(item => item.key_hash === key_hash);
+      if (receipt) return receipt.result ? { status: "completed", result: snapshot(receipt.result) } : { status: "unknown_outcome" };
+    }
+    return undefined;
+  }
+
+  bindObservedAccount(identity_environment_ref: string, binding: ManagedAccountBinding, idempotency_key: string, request_hash: string, observation?: ManagedObservation): LocalIdentityEnvironmentPublicRecord & { observation?: ManagedObservation } {
     return this.withStoreMutation(() => {
       const current = this.records.get(identity_environment_ref);
       if (!current) throw new Error("identity_environment_missing");
       const key_hash = createHash("sha256").update(idempotency_key).digest("hex");
-      for (const record of this.records.values()) {
-        const receipt = record.account_binding_receipts?.find(item => item.key_hash === key_hash);
-        if (receipt) {
-          if (record !== current || receipt.request_hash !== request_hash) throw new Error("idempotency_conflict");
-          return publicRecord(current);
-        }
-      }
+      const previous = this.findAccountBindingReceipt(identity_environment_ref, idempotency_key, request_hash);
+      if (previous?.status === "completed") return previous.result;
+      if (previous?.status === "unknown_outcome") throw new Error("account_binding_outcome_unknown");
       const bindings = current.account_bindings ?? [];
       const existing = bindings.find(item => item.account_system_ref === binding.account_system_ref);
       if (existing && existing.account_ref !== binding.account_ref) throw new Error("account_binding_conflict");
-      const next = { ...current, updated_at: new Date().toISOString(), account_bindings: existing ? bindings : [...bindings, binding],
-        account_binding_receipts: [...(current.account_binding_receipts ?? []), { key_hash, request_hash }] };
+      const next = { ...current, updated_at: new Date().toISOString(), account_bindings: existing ? bindings : [...bindings, binding] };
       if (hasManagedBindingConflict(this.records.values(), next)) throw new Error("account_binding_conflict");
+      const record = publicRecord(next);
+      const result = observation === undefined ? undefined : { ...record, observation: snapshot(observation) };
+      next.account_binding_receipts = [...(current.account_binding_receipts ?? []), { key_hash, request_hash, ...(result === undefined ? {} : { result }) }];
       const records = new Map(this.records).set(identity_environment_ref, next);
       this.persist(records); this.records.set(identity_environment_ref, next);
-      return publicRecord(next);
+      return result ?? record;
     });
   }
 

@@ -1,0 +1,29 @@
+{
+  "$schema": "capability-description-request.schema.json",
+  "operation": "account.bind",
+  "connection_id": "connection:example",
+  "context": {
+    "grant_id": "grant:account-bind",
+    "profile_ref": "profile:github",
+    "task_scope": {
+      "operations": ["account.bind"],
+      "profile_refs": ["profile:github"],
+      "origins": ["https://github.com"],
+      "account_binding_scopes": [{
+        "profile_ref": "profile:github",
+        "account_system_ref": "account-system:github",
+        "account_ref": "account:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }]
+    }
+  },
+  "arguments": {
+    "origin": "https://github.com",
+    "account_system_ref": "account-system:github",
+    "account_ref": "account:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "runtime_session_ref": "session:github",
+    "page_id": "page:github",
+    "page_ref": "page-ref:github",
+    "document_generation": 1,
+    "observation_ref": "observation:github"
+  }
+}

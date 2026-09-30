@@ -47,7 +47,7 @@ export type ManagedCapabilityDefinition = {
   definition: "defined" | "unknown" | "out_of_scope";
   exposure: "exposed" | "not_exposed";
   capability: string | null;
-  context: "profile" | "unsupported";
+  context: "profile" | "core" | "unsupported";
   allowed: string[];
   required: string[];
   summary: string;
@@ -120,6 +120,9 @@ function operationFieldSchema(definition: ManagedCapabilityDefinition | undefine
   const base = document.fields[field];
   if (!base) throw new Error(`unknown managed capability field: ${field}`);
   const schema: ManagedCapabilityField = { ...base };
+  if (definition?.id === "account_system.import_template" && field === "template_ref") {
+    schema.pattern = "^lode://account-system/[a-z0-9][a-z0-9._-]*@[0-9]+\\.[0-9]+\\.[0-9]+$";
+  }
   for (const condition of definition?.conditions ?? []) {
     if (condition.kind === "conditional_fields" && condition.constraints?.[field]) Object.assign(schema, condition.constraints[field]);
   }
@@ -250,6 +253,10 @@ function collectManagedCapabilityInputShapeIssues(value: JsonObject, partial: bo
     if (!scope || typeof scope !== "object" || Array.isArray(scope)) issues.invalid.push({ field: "task_scope", code: "invalid_value" });
     else {
       const scopeObject = scope as JsonObject;
+      const scopeFields = definition.id === "account_system.import_template" ? ["operations", "template_refs"]
+        : definition.id === "account.bind" ? ["operations", "profile_refs", "origins", "account_binding_scopes"]
+          : ["operations", "profile_refs", "origins", ...(definition.file_scope === undefined ? [] : ["file_refs"] )];
+      if (Object.keys(scopeObject).some(key => !scopeFields.includes(key))) issues.invalid.push({ field: "task_scope", code: "invalid_value" });
       if (definition.file_scope === undefined && scopeObject.file_refs !== undefined) issues.invalid.push({ field: "task_scope.file_refs", code: "forbidden_field" });
       if (definition.file_scope === "download" && (!Array.isArray(scopeObject.file_refs) || scopeObject.file_refs.length !== 0)) issues.invalid.push({ field: "task_scope.file_refs", code: "invalid_value" });
       if (definition.file_scope === "upload" && scopeObject.file_refs !== undefined && (!Array.isArray(scopeObject.file_refs) || scopeObject.file_refs.length !== 1)) issues.invalid.push({ field: "task_scope.file_refs", code: "invalid_value" });
@@ -310,18 +317,25 @@ export function managedCapabilityInputSchema(operation?: string): JsonObject {
   return schema;
 }
 
-function taskScopeSchema(fileScope?: "upload" | "download"): JsonObject {
+function taskScopeSchema(definition?: ManagedCapabilityDefinition): JsonObject {
+  if (definition?.id === "account_system.import_template") return { type: "object",
+    properties: { operations: { type: "array", items: { const: definition.id } }, template_refs: { type: "array", items: { type: "string", pattern: "^lode://account-system/[a-z0-9][a-z0-9._-]*@[0-9]+\\.[0-9]+\\.[0-9]+$" } } },
+    required: ["operations", "template_refs"], additionalProperties: false };
   const properties: JsonObject = {
     operations: { type: "array", items: { type: "string" }, description: "The operations granted for this one submitted request." },
     profile_refs: { type: "array", items: { type: "string" }, description: "The Profile references in this one submitted request." },
     origins: { type: "array", items: { type: "string", format: "webenvoy-public-origin" }, description: "The exact origins in this one submitted request." }
   };
-  if (fileScope !== undefined) properties.file_refs = {
-    type: "array", items: { type: "string", pattern: "^attachment:runtime/[0-9a-f-]{36}$" },
-    ...(fileScope === "upload" ? { minItems: 1, maxItems: 1 } : { maxItems: 0 }),
-    description: fileScope === "upload" ? "Exactly the top-level file_ref." : "An explicit empty array."
+  if (definition?.id === "account.bind") properties.account_binding_scopes = {
+    type: "array", minItems: 1, items: { type: "object", required: ["profile_ref", "account_system_ref", "account_ref"],
+      properties: { profile_ref: { type: "string", minLength: 1 }, account_system_ref: { type: "string", pattern: "^account-system:[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" }, account_ref: { type: "string", pattern: "^account:sha256:[a-f0-9]{64}$" } }, additionalProperties: false }
   };
-  return { type: "object", properties, required: ["operations", "profile_refs", "origins", ...(fileScope === undefined ? [] : ["file_refs"])], additionalProperties: false };
+  if (definition?.file_scope !== undefined) properties.file_refs = {
+    type: "array", items: { type: "string", pattern: "^attachment:runtime/[0-9a-f-]{36}$" },
+    ...(definition.file_scope === "upload" ? { minItems: 1, maxItems: 1 } : { maxItems: 0 }),
+    description: definition.file_scope === "upload" ? "Exactly the top-level file_ref." : "An explicit empty array."
+  };
+  return { type: "object", properties, required: ["operations", "profile_refs", "origins", ...(definition?.id === "account.bind" ? ["account_binding_scopes"] : []), ...(definition?.file_scope === undefined ? [] : ["file_refs"])], additionalProperties: false };
 }
 
 function fieldConstraints(field: ManagedCapabilityField): string[] {
@@ -344,7 +358,7 @@ export function managedCapabilityExecutionInputSchema(operation?: string): JsonO
     idempotency_key: { type: "string", minLength: 1, maxLength: 512, description: "A new idempotency key for this submitted operation." },
     grant_id: { type: "string", description: "The one owner-issued Grant for this submitted operation." },
     operation: { type: "string", ...(definition ? { enum: [definition.id] } : { pattern: document.operation_pattern }), description: "One exposed operation name." },
-    task_scope: taskScopeSchema(definition?.file_scope),
+    task_scope: taskScopeSchema(definition),
     ...Object.fromEntries((definition ? definition.allowed : Object.keys(document.fields)).map(field => [field, operationFieldSchema(definition, field)]))
   };
   const schema: JsonObject = {
@@ -355,10 +369,12 @@ export function managedCapabilityExecutionInputSchema(operation?: string): JsonO
   const forbidden = Object.keys(document.fields).filter(field => !definition.allowed.includes(field));
   if (forbidden.length > 0) schema.not = { anyOf: forbidden.map(field => ({ required: [field] })) };
   const allOf: JsonObject[] = [];
-  if (definition.file_scope === undefined) {
+  if (definition.id === "account_system.import_template" || definition.id === "account.bind") {
+    allOf.push({ properties: { task_scope: taskScopeSchema(definition) } });
+  } else if (definition.file_scope === undefined) {
     allOf.push({ properties: { task_scope: { not: { required: ["file_refs"] } } } });
   } else {
-    allOf.push({ properties: { task_scope: taskScopeSchema(definition.file_scope) } });
+    allOf.push({ properties: { task_scope: taskScopeSchema(definition) } });
   }
   for (const condition of definition.conditions ?? []) {
     if (condition.kind === "conditional_fields" && condition.when && typeof condition.when === "object" && typeof (condition.when as JsonObject).field === "string") {

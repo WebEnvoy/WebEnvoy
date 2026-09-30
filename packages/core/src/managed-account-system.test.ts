@@ -64,7 +64,8 @@ test("installed Agent AccountSystem read checks the existing skill Grant and pro
               credential_selector: "private-should-not-escape"
             }
           };
-        }
+        },
+        async importTemplate(input: { template_ref: string }) { return await definitionStore.importTemplate(input); }
       }
     });
     const request = { connection_id: connection.connection_id, grant_id: grant.grant_id, template_ref: templateRef };
@@ -79,6 +80,13 @@ test("installed Agent AccountSystem read checks the existing skill Grant and pro
     assert.equal(Object.hasOwn(initial, "identity_method"), false);
     assert.equal(Object.hasOwn(initial.site, "identity_method"), false);
     assert.equal(Object.hasOwn(initial.site, "known_shared_login_relationships"), false);
+
+    const importedProjection = await service.importTemplate(templateRef);
+    assert.equal(importedProjection.local_definition_ref, imported.local_definition_ref);
+    assert.equal(importedProjection.local_revision_ref, imported.revision_ref);
+    assert.equal(importedProjection.template_sha256, imported.source.template_sha256,
+      "the Agent import projection consumes the actual importer result's source pin");
+    assert.equal(importedProjection.site.display_name, "GitHub");
 
     const draft = await definitionStore.createDraft({ local_definition_ref: imported.local_definition_ref, base_revision_ref: imported.revision_ref }) as Json;
     const changed = structuredClone(draft.definition) as Json;
@@ -96,6 +104,9 @@ test("installed Agent AccountSystem read checks the existing skill Grant and pro
     const repeatedImport = await definitionStore.importTemplate({ template_ref: templateRef }) as Json;
     assert.equal(repeatedImport.local_definition_ref, imported.local_definition_ref);
     assert.equal((await service.read(credentialHash, request)).site.display_name, "GitHub (local)", "re-importing the fixed upstream template preserves and consumes the enabled local definition");
+    const importedUpdatedProjection = await service.importTemplate(templateRef);
+    assert.equal(importedUpdatedProjection.local_revision_ref, pinned.revision_ref);
+    assert.equal(importedUpdatedProjection.site.display_name, "GitHub (local)", "re-import projection uses the importer-selected local revision and preserves owner edits");
 
     const wrongScope = await accessStore.createGrant({
       idempotency_key: "account-read-wrong-scope", principal_id: principal.principal_id, profile_refs: [],

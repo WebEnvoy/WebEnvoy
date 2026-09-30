@@ -144,6 +144,7 @@ test("updates Profile organization metadata through the owner receipt without lo
       manager.bindObservedAccount(identity_environment_ref, binding, "metadata-binding", "metadata-binding-request-hash").account_bindings,
       [binding]
     );
+    assert.deepEqual(manager.getAccountBindingReceipt("metadata-binding"), { status: "unknown_outcome" }, "legacy receipt without an immutable result remains unknown");
     const peer = new LocalIdentityEnvironmentManager({ persistence_path, provider_detection: testProviderDetection });
     const peerEdit = peer.mutate({
       operation: "edit",

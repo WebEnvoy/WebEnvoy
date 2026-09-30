@@ -17,13 +17,13 @@ Agent 在已安装 Plugin 内问“这个操作在这个环境能否使用、缺
 
 ## 2. 首批范围与非目标
 
-完整覆盖基线 `f37f88c770939bef7e9a5294898f7d6884d10748` 的 `webenvoy_operation` 操作说明：
+完整覆盖基线 `f37f88c770939bef7e9a5294898f7d6884d10748` 的 `webenvoy_operation` 操作说明，并同步描述 #605 新增的 `account_system.import_template` 与 `account.bind`：
 
 `profile.create/list/read`；`provider.preference.read/set/clear`；`instance.start/observe/diagnostics/navigate/read/snapshot/click/input/press/scroll/wait/handoff/stop`；`environment.read/update`；`page.list/open/activate/close/navigate/reload/back/forward`；`file.upload/download`。
 
 其中绑定既有 Profile 的操作提供第 4 节的上下文评估。`profile.create`、不指定 Profile 的 `profile.list` 和 `provider.preference.*` 本批提供完整静态调用规则；本描述接口不增加创建/全局偏好动态预检。Agent 若需在新建前读取当前 Provider 推荐、支持、availability 与用户默认，应显式调用既有 `provider.preference.read` operation 并查询其只读 Run 结果，具体投影见 [Provider Selection V1](provider-selection-v1.md)；不得把描述请求隐式升级为 owner 事实查询。给这些操作提供 Profile 上下文返回 `discovery_context_not_supported`，不得谎称原操作不可用。
 
-`account.bind` 是已有公共定义但未暴露给本批 Plugin 的明确样本：返回 `definition.state=defined`、`invocation.exposure=not_exposed`，不提供内部调用地址或替代入口。本批不增加该能力。其他未知 operation 返回 `definition.state=unknown`，不把猜测名称当作未来支持承诺。`webenvoy_recovery`、`webenvoy_skills` 与 owner 管理操作不扩入本批 `webenvoy_describe` 覆盖；其原工具和合同保持可用，返回范围说明而非假报这些工具不存在。#563 的 site task 元数据由既有 `webenvoy_skills.skill.inspect` 的可选 `webenvoy.site-task-summary/v1` 投影承载，执行由独立的 `webenvoy_task` managed projection 承载；本帮助工具不扩展 task submit/query/stop 合同，也不为 site task 发明 discovery token。
+`account_system.import_template` 与 `account.bind` 是 #605 明确授权并暴露的 Agent managed operation。模板导入使用 Core metadata context；Core 检查单个精确模板 Grant/task-scope 交集并返回 `provider=not_evaluated`，不读取 Harbor。Account bind 使用 Profile context，完整输入时 Core 用同一个精确 Grant/Profile/AccountSystem/Account 决定授权并读取该 Profile 的 Harbor facts；缺少完整 tuple 时只返回缺项，不探测现场。没有 context 时，两者都返回静态定义与正式 `webenvoy_operation`/`webenvoy_query` 入口。未知 operation 返回 `definition.state=unknown`，不把猜测名称当作未来支持承诺。`webenvoy_recovery`、`webenvoy_skills` 与其他 owner 管理操作不扩入本批 `webenvoy_describe` 覆盖；其原工具和合同保持可用，返回范围说明而非假报这些工具不存在。#563 的 site task 元数据由既有 `webenvoy_skills.skill.inspect` 的可选 `webenvoy.site-task-summary/v1` 投影承载，执行由独立的 `webenvoy_task` managed projection 承载；本帮助工具不扩展 task submit/query/stop 合同，也不为 site task 发明 discovery token。
 
 不做 #540 的观察续读/名称识别，不新增页面内容、截图、网络正文、执行能力、Provider 资格、Grant 维度或完整 App UI；不修复或调查另案 stop/restart 失败。不要求先完成所有 V1 能力才能交付本工具。
 
@@ -64,10 +64,10 @@ HTTP 请求为 MCP 参数加 `connection_id`；所有顶层及 context/task_scop
 | 字段 | 必填/语义 |
 | --- | --- |
 | `operation` | 必填；1–96 字符，`^[a-z][a-z0-9_.-]*$`。输入 schema 不将其锁为已暴露枚举，才能准确解释未暴露/未知名称。 |
-| `context` | 可选；有则三项全部必填，只适用于本批既有 Profile 上下文。没有它时仅返回定义与调用规则，不读取任何资源事实。 |
+| `context` | 可选；Profile 操作需要 `grant_id/profile_ref/task_scope`，`account_system.import_template` 需要 `grant_id/task_scope` 且不接受 `profile_ref`。没有它时仅返回定义与调用规则，不读取任何资源事实。 |
 | `context.grant_id` | 单一 Grant，属于当前 Principal。不会合并其他授权。沿既有引用校验与长度限制。 |
-| `context.profile_ref` | 精确选定的一个 Profile。task scope 可以包含更多已授予 ref，但本次只评估这一项、不枚举其他项。 |
-| `context.task_scope` | 沿既有 browser task scope：`operations/profile_refs/origins`，文件操作才可带 `file_refs`。用于收窄可见性与目标操作；本次是描述，不是把所有数组项分别执行。 |
+| `context.profile_ref` | Profile 上下文时为精确选定的一个 Profile。`account.bind` 的完整 tuple 授权本身建立此 context 的可见范围；其他操作继续要求现有 Profile read/list 可见性。 |
+| `context.task_scope` | 沿既有 operation 专属范围：一般 browser scope 为 `operations/profile_refs/origins`，文件操作才可带 `file_refs`；AccountSystem import 只有 `operations/template_refs`；Account bind 另外要求精确单项 `account_binding_scopes`。用于收窄可见性与目标操作；本次是描述，不是把数组项分别执行。 |
 | `arguments` | 可选，目标 operation 的部分参数草稿；允许缺必要参数，以便返回缺项。其字段来自第 6 节的同一操作定义，不另造输入集。 |
 
 `arguments` 不得包含 `operation/connection_id/grant_id/task_scope/profile_ref/idempotency_key`，这些取自 envelope 或真正执行时产生；重复字段按 invalid input 返回，不解决“哪个更优先”。目标操作的文本、URL、配置等可以仅做类型/格式校验，不执行、不原样回显、不写日志/历史；不通过描述接口接受原执行接口禁止的路径、脚本、凭据或 raw 端点。未知的 operation-specific 参数返回 `inputs.state=invalid` 和字段路径，不返回参数值。
@@ -118,7 +118,7 @@ HTTP 请求为 MCP 参数加 `connection_id`；所有顶层及 context/task_scop
 }
 ```
 
-上例展示字段形状，不是完整可执行 fixture：实际 `input_schema/field_guidance` 必须完整生成；revision 为真实摘要，facts_at 为实际已知时间或 null，不能用本次请求时间伪造现场观测时间。实现合同对应的 [Core→Agent request schema](../../packages/schemas/schemas/capability-description-request.schema.json)、[Core→Agent response schema](../../packages/schemas/schemas/capability-description.schema.json)、[Core→Harbor schema](../../packages/schemas/schemas/harbor-capability-description.schema.json)、[请求正例](../../packages/schemas/fixtures/capability-description-request.fixture.json)、[响应正例](../../packages/schemas/fixtures/capability-description.fixture.json)、[请求反例](../../packages/schemas/invalid-fixtures/capability-description-request.invalid.fixture.json) 和 [响应反例](../../packages/schemas/invalid-fixtures/capability-description.invalid.fixture.json) 由 #539 实现 PR 固定并由 schema self-check 验证。
+上例展示字段形状，不是完整可执行 fixture：实际 `input_schema/field_guidance` 必须完整生成；revision 为真实摘要，facts_at 为实际已知时间或 null，不能用本次请求时间伪造现场观测时间。实现合同对应的 [Core→Agent request schema](../../packages/schemas/schemas/capability-description-request.schema.json)、[Core→Agent response schema](../../packages/schemas/schemas/capability-description.schema.json)、[Core→Harbor schema](../../packages/schemas/schemas/harbor-capability-description.schema.json)、[普通请求正例](../../packages/schemas/fixtures/capability-description-request.fixture.json)、[AccountSystem import 请求正例](../../packages/schemas/fixtures/capability-description-account-system-import.fixture.json)、[Account bind 请求正例](../../packages/schemas/fixtures/capability-description-account-bind.fixture.json)、[响应正例](../../packages/schemas/fixtures/capability-description.fixture.json)、[请求反例](../../packages/schemas/invalid-fixtures/capability-description-request.invalid.fixture.json) 和 [响应反例](../../packages/schemas/invalid-fixtures/capability-description.invalid.fixture.json) 由 schema self-check 验证。请求 schema 按 operation 接受 Core import context、精确 binding tuple 与对应参数，同时拒绝跨 operation 的 scope 形状。
 
 | 字段 | 固定取值与解释 |
 | --- | --- |

@@ -13,7 +13,7 @@
     "name": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001f\\u007f]*$", "description": "Organization-facing Profile name, distinct from the site's display name." },
     "tags": { "type": "array", "maxItems": 16, "items": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001f\\u007f]*$", "description": "A Profile tag." }, "description": "Profile tags; an empty array clears all tags." },
     "origin": { "type": "string", "format": "webenvoy-public-origin", "maxLength": 512, "description": "The exact authorized target origin; task_scope.origins is only the allowed set and is not a substitute." },
-    "template_ref": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001f\\u007f]*$", "description": "The owner-registered Profile creation template reference." },
+    "template_ref": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001f\\u007f]*$", "description": "The owner-registered Profile creation template reference or exact public AccountSystem template ref, depending on operation." },
     "confirmation": { "type": "string", "enum": ["delete_local_data"], "description": "Explicit intent to delete this Profile's local data; it does not grant permission." },
     "url": { "type": "string", "format": "webenvoy-public-http-target", "minLength": 1, "maxLength": 512, "description": "An HTTP(S) target on the selected authorized origin." },
     "runtime_session_ref": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001f\\u007f]*$", "description": "The current Runtime Session reference; file.upload/file.download must use the original Instance." },
@@ -49,6 +49,7 @@
     { "id": "provider.preference.read", "definition": "defined", "exposure": "exposed", "capability": "provider_preference", "context": "unsupported", "allowed": [], "required": [], "summary": "Read Harbor's current Provider recommendation, support, availability, and user creation default; profile.create rechecks authorization and availability." },
     { "id": "provider.preference.set", "definition": "defined", "exposure": "exposed", "capability": "provider_preference", "context": "unsupported", "allowed": ["provider_id"], "required": ["provider_id"], "summary": "Set the owner-managed Provider preference." },
     { "id": "provider.preference.clear", "definition": "defined", "exposure": "exposed", "capability": "provider_preference", "context": "unsupported", "allowed": [], "required": [], "summary": "Clear the owner-managed Provider preference." },
+    { "id": "account_system.import_template", "definition": "defined", "exposure": "exposed", "capability": "account_management", "context": "core", "allowed": ["template_ref"], "required": ["template_ref"], "summary": "Import one owner-approved, byte-pinned public AccountSystem template into the Core local definition store. Import does not establish identity or bind a Profile." },
     { "id": "instance.start", "definition": "defined", "exposure": "exposed", "capability": "instance_management", "context": "profile", "allowed": ["profile_ref", "origin", "url"], "required": ["profile_ref", "origin"], "conditions": [{ "kind": "same_origin", "field": "url", "with": "origin", "when": "provided", "summary": "An optional URL must stay on the authorized origin." }], "summary": "Start or reuse the Profile Runtime Session; runtime_session_ref is not required first." },
     { "id": "instance.observe", "definition": "defined", "exposure": "exposed", "capability": "observation", "context": "profile", "allowed": ["profile_ref", "origin", "runtime_session_ref", "page_id", "page_ref", "document_generation"], "required": ["profile_ref", "origin", "runtime_session_ref"], "conditions": [{ "kind": "page_selector", "fields": ["page_id", "page_ref"], "when": "multiple_pages", "summary": "Select page_id or page_ref when more than one Page is available." }], "summary": "Read the current session and selected Page facts." },
     { "id": "instance.diagnostics", "definition": "defined", "exposure": "exposed", "capability": "observation", "context": "profile", "allowed": ["profile_ref", "origin", "runtime_session_ref", "page_ref", "document_generation", "cursor", "limit"], "required": ["profile_ref", "origin", "runtime_session_ref"], "conditions": [{ "kind": "conditional_fields", "when": { "field": "limit", "present": true }, "constraints": { "limit": { "maximum": 64 } }, "summary": "Diagnostics limit remains bounded to 1–64." }], "summary": "Read bounded diagnostic metadata without browser mutation." },
@@ -74,11 +75,15 @@
     { "id": "page.forward", "definition": "defined", "exposure": "exposed", "capability": "page_management", "context": "profile", "allowed": ["profile_ref", "runtime_session_ref", "page_id", "page_ref", "document_generation"], "required": ["profile_ref", "runtime_session_ref"], "conditions": [{ "kind": "page_selector", "fields": ["page_id", "page_ref"], "when": "always", "required_any": ["page_id", "page_ref"], "summary": "Select the Page explicitly with page_id or page_ref." }], "summary": "Navigate the selected Page forward in history." },
     { "id": "file.upload", "definition": "defined", "exposure": "exposed", "capability": "managed_file", "context": "profile", "allowed": ["profile_ref", "origin", "runtime_session_ref", "page_id", "page_ref", "document_generation", "observation_ref", "target_ref", "file_ref"], "required": ["profile_ref", "origin", "runtime_session_ref", "page_id", "page_ref", "document_generation", "observation_ref", "target_ref", "file_ref"], "file_scope": "upload", "conditions": [{ "kind": "file_scope", "path": "task_scope.file_refs", "exact_length": 1, "equals": "file_ref", "summary": "Upload task_scope.file_refs must contain exactly the top-level file_ref." }], "summary": "Upload one owner-registered file to a fresh Page target." },
     { "id": "file.download", "definition": "defined", "exposure": "exposed", "capability": "managed_file", "context": "profile", "allowed": ["profile_ref", "origin", "runtime_session_ref", "page_id", "page_ref", "document_generation", "observation_ref", "target_ref"], "required": ["profile_ref", "origin", "runtime_session_ref", "page_id", "page_ref", "document_generation", "observation_ref", "target_ref"], "file_scope": "download", "conditions": [{ "kind": "file_scope", "path": "task_scope.file_refs", "exact": [], "summary": "Download task_scope.file_refs must be an explicit empty array." }], "summary": "Download from a fresh Page target; no file_ref is accepted." },
-    { "id": "account.bind", "definition": "defined", "exposure": "not_exposed", "capability": "account_management", "context": "unsupported", "allowed": [], "required": [], "summary": "An existing Core definition that is not exposed by this Plugin." }
+    { "id": "account.bind", "definition": "defined", "exposure": "exposed", "capability": "account_management", "context": "profile", "allowed": ["profile_ref", "origin", "runtime_session_ref", "page_id", "page_ref", "document_generation", "observation_ref", "account_system_ref", "account_ref"], "required": ["profile_ref", "origin", "runtime_session_ref", "page_id", "page_ref", "document_generation", "observation_ref", "account_system_ref", "account_ref"], "summary": "Explicitly bind the exact AccountSystem and Account observed on the selected current Page, within the owner's exact Grant allowance." }
   ],
   "out_of_scope_prefixes": ["recovery.", "skill.", "owner."],
-  "out_of_scope_operations": ["account.bind"],
+  "out_of_scope_operations": [],
   "illustrative_example": {
+    "account_system.import_template": {
+      "template_ref": "lode://account-system/github@1.0.0",
+      "illustrative_only": true
+    },
     "profile.create": {
       "template_ref": "template:example",
       "provider_id": "camoufox",
@@ -340,6 +345,18 @@
       "document_generation": 1,
       "observation_ref": "observation:example",
       "target_ref": "target:example",
+      "illustrative_only": true
+    },
+    "account.bind": {
+      "profile_ref": "profile:example",
+      "origin": "https://example.com",
+      "runtime_session_ref": "session:example",
+      "page_id": "page:example",
+      "page_ref": "page-ref:example",
+      "document_generation": 1,
+      "observation_ref": "observation:example",
+      "account_system_ref": "account-system:github",
+      "account_ref": "account:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "illustrative_only": true
     }
   }
