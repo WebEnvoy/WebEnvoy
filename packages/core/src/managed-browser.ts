@@ -453,6 +453,19 @@ function parseDescribe(value: unknown): DescribeInput {
       if (key === "origin" && typeof item !== "string" || key === "origin" && !publicOrigin(item)) return fail("managed_browser_invalid_input");
     }
   }
+  if (input.operation === "environment.proxy.update" && context) {
+    const scope = context.task_scope as ObjectValue;
+    const operations = scope.operations as string[];
+    const profileRefs = scope.profile_refs as string[];
+    const origins = scope.origins as string[];
+    const refs = scope.proxy_refs as string[];
+    const clear = scope.allow_proxy_clear === true;
+    const args = input.arguments as ObjectValue | undefined;
+    if (operations.length !== 1 || operations[0] !== input.operation || profileRefs.length !== 1 || profileRefs[0] !== context.profile_ref ||
+        origins.length !== 1 || !publicOrigin(origins[0]) || refs.length > 1 || refs.some(ref => !/^proxy-ref:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(ref)) ||
+        (refs.length === 0) !== clear || args?.origin !== undefined && origins[0] !== args.origin ||
+        args?.proxy_ref !== undefined && (args.proxy_ref === null ? !clear || refs.length !== 0 : refs.length !== 1 || refs[0] !== args.proxy_ref || clear)) return fail("managed_browser_invalid_input");
+  }
   return { operation: input.operation, connection_id: text(input.connection_id), ...(context === undefined ? {} : { context }), ...(args === undefined ? {} : { arguments: args }) };
 }
 function describeInputAssessment(input: DescribeInput, context: DescribeContext | undefined, definition: ReturnType<typeof managedCapabilityDefinition>): { state: "not_provided" | "incomplete" | "invalid" | "complete"; missing: string[]; invalid: { path: string; code: string }[] } {
@@ -461,7 +474,12 @@ function describeInputAssessment(input: DescribeInput, context: DescribeContext 
   if (!definition) return { state: "invalid", missing, invalid: [{ path: "/operation", code: "operation_not_defined" }] };
   if (context === undefined) missing.push("/context/grant_id", "/context/task_scope");
   if (definition.context === "profile" && context === undefined) missing.push("/context/profile_ref");
-  const draft = { ...input.arguments, operation: input.operation, ...(context === undefined ? {} : { grant_id: context.grant_id, ...(context.profile_ref === undefined ? {} : { profile_ref: context.profile_ref }), task_scope: context.task_scope }) } as ObjectValue;
+  const contextProxyRefs = context?.task_scope.proxy_refs;
+  const inferredProxyRef = input.operation === "environment.proxy.update" && context
+    ? Array.isArray(contextProxyRefs) ? contextProxyRefs[0] ?? null : null : undefined;
+  const draft = { ...input.arguments, operation: input.operation,
+    ...(context === undefined ? {} : { grant_id: context.grant_id, ...(context.profile_ref === undefined ? {} : { profile_ref: context.profile_ref }), task_scope: context.task_scope }),
+    ...(inferredProxyRef === undefined ? {} : { proxy_ref: inferredProxyRef }) } as ObjectValue;
   const pathFor = (field: string) => field.startsWith("task_scope.")
     ? `/context/${field.replace(".", "/")}`
     : context === undefined && field === "profile_ref" ? "/context/profile_ref" : `/arguments/${field}`;
@@ -1504,14 +1522,15 @@ export function createManagedBrowserService(options: {
     }
     const profileContext = { ...context, profile_ref: context.profile_ref, task_scope: context.task_scope as unknown as ManagedAccessRequest["task_scope"] };
     const target = { idempotency_key: "describe", connection_id: connection.connection.connection_id, operation: input.operation,
-      grant_id: context.grant_id, profile_ref: context.profile_ref, task_scope: context.task_scope, ...(input.arguments ?? {}) } as Request;
+      grant_id: context.grant_id, profile_ref: context.profile_ref, task_scope: context.task_scope,
+      ...(input.operation === "environment.proxy.update" ? { proxy_ref: Array.isArray(context.task_scope.proxy_refs) ? context.task_scope.proxy_refs[0] ?? null : null } : {}), ...(input.arguments ?? {}) } as Request;
     const readContextAccess = (connectionId: string) => input.operation === "profile.migrate.request" && assessment.state === "complete"
       ? options.accessStore.checkAccess(credentialHash, accessRequest({ ...target, connection_id: connectionId }))
       : readProfileVisibility(credentialHash, connectionId, profileContext);
     let targetAccess: Awaited<ReturnType<FileManagedAccessStore["checkAccess"]>> | undefined;
     let targetAuthorizationAssessed = false;
     let targetAuthorizationState: "allowed" | "denied" | "unknown" | undefined;
-    const bindingDescription = input.operation === "account.bind";
+    const bindingDescription = input.operation === "account.bind" || input.operation === "environment.proxy.update";
     if (bindingDescription && assessment.state !== "complete") {
       result.provider = { state: "not_evaluated", provider_id: null, reason_codes: [], limitations: [], facts_at: null };
       result.authorization = { state: "not_evaluated", reason_codes: [] };

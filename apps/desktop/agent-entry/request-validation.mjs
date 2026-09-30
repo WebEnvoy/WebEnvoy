@@ -346,6 +346,8 @@ export function validateDescribeRequest(value, definitions) {
   assertExactObject(value, ['operation', 'context', 'arguments'], code);
   assertString(value.operation, code);
   if (!(new RegExp(definitions.operation_pattern).test(value.operation))) throw new Error(code);
+  let contextProfileRef;
+  let contextTaskScope;
   if (value.context !== undefined) {
     const definition = definitions.operations.find(item => item.id === value.operation);
     const core = definition?.context === 'core';
@@ -353,6 +355,8 @@ export function validateDescribeRequest(value, definitions) {
     assertString(context.grant_id, code);
     if (!core) assertString(context.profile_ref, code);
     assertTaskScope(context.task_scope, definition, code);
+    contextProfileRef = context.profile_ref;
+    contextTaskScope = context.task_scope;
     if (value.operation === 'profile.migrate.request' && context.task_scope.profile_source_refs.length !== 0) throw new Error(code);
   }
   if (value.arguments !== undefined) {
@@ -360,6 +364,15 @@ export function validateDescribeRequest(value, definitions) {
     const allowed = new Set(Object.keys(definitions.fields).filter(name => name !== 'profile_ref'));
     if (Object.keys(draft).some(key => !allowed.has(key))) throw new Error(code);
     for (const [key, field] of Object.entries(definitions.fields)) if (key !== 'profile_ref' && Object.hasOwn(draft, key)) assertField(draft[key], field, code);
+  }
+  if (value.operation === 'environment.proxy.update' && contextTaskScope !== undefined) {
+    const scope = contextTaskScope;
+    const args = value.arguments ?? {};
+    if (scope.profile_refs.length !== 1 || scope.profile_refs[0] !== contextProfileRef || scope.origins.length !== 1 ||
+      (scope.proxy_refs.length === 0) !== scope.allow_proxy_clear ||
+      args.origin !== undefined && args.origin !== scope.origins[0] ||
+      args.proxy_ref === null && (scope.proxy_refs.length !== 0 || scope.allow_proxy_clear !== true) ||
+      typeof args.proxy_ref === 'string' && (scope.proxy_refs.length !== 1 || scope.proxy_refs[0] !== args.proxy_ref || scope.allow_proxy_clear !== false)) throw new Error(code);
   }
   return value;
 }

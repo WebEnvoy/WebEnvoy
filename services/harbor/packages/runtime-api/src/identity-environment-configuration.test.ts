@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  applyIdentityEnvironmentConfiguration,
   resolveIdentityEnvironmentLaunchConfiguration,
   validateIdentityEnvironmentConfiguration
 } from "./identity-environment-configuration.js";
@@ -52,8 +53,10 @@ test("keeps explicit viewport launch validation strict", () => {
 
 test("registered proxy references validate configuration without claiming network reachability", () => {
   const facts = identityWithViewport("1280x720");
+  const proxyRef = "proxy-ref:11111111-1111-4111-8111-111111111111";
+  applyIdentityEnvironmentConfiguration(facts, { proxy_ref: proxyRef });
   let registrationsChecked = 0;
-  const result = validateIdentityEnvironmentConfiguration({ proxy_ref: "proxy-ref:11111111-1111-4111-8111-111111111111" }, facts, {
+  const result = validateIdentityEnvironmentConfiguration({ proxy_ref: proxyRef }, facts, {
     validate_proxy: () => { registrationsChecked++; return "registered"; },
     resolve_proxy: () => "socks5://127.0.0.1:1080"
   });

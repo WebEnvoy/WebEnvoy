@@ -1744,6 +1744,34 @@ try {
   const proxyTaskScope = { operations: ["environment.proxy.update"], profile_refs: ["profile:1"], origins: ["https://example.com"], proxy_refs: [approvedProxyRef], allow_proxy_clear: false };
   const proxyUpdate = { idempotency_key: "proxy-select", connection_id: proxyConnection.connection_id, grant_id: proxyGrant.grant_id,
     operation: "environment.proxy.update", profile_ref: "profile:1", origin: "https://example.com", proxy_ref: approvedProxyRef, task_scope: proxyTaskScope };
+  const beforeProxyDescribeMutations = proxyUpdates;
+  const selectedProxyDescription = await proxyService.describe(proxyCredentialHash, {
+    connection_id: proxyConnection.connection_id, operation: "environment.proxy.update",
+    context: { grant_id: proxyGrant.grant_id, profile_ref: "profile:1", task_scope: proxyTaskScope },
+    arguments: { origin: "https://example.com" }
+  });
+  assert.equal((selectedProxyDescription.inputs as Record<string, unknown>).state, "complete", "an exact selected proxy ref is inferred from contextual TaskScope");
+  assert.equal((selectedProxyDescription.authorization as Record<string, unknown>).state, "allowed", "describe checks the exact selected-ref Grant scope");
+  const clearProxyScope = { ...proxyTaskScope, proxy_refs: [], allow_proxy_clear: true };
+  const clearProxyDescription = await proxyService.describe(proxyCredentialHash, {
+    connection_id: proxyConnection.connection_id, operation: "environment.proxy.update",
+    context: { grant_id: proxyGrant.grant_id, profile_ref: "profile:1", task_scope: clearProxyScope },
+    arguments: { origin: "https://example.com" }
+  });
+  assert.equal((clearProxyDescription.inputs as Record<string, unknown>).state, "complete", "an explicit clear allowance is inferred from contextual TaskScope");
+  assert.equal((clearProxyDescription.authorization as Record<string, unknown>).state, "allowed", "describe checks the explicit clear Grant scope");
+  const oldGrantProxyDescription = await proxyService.describe(proxyCredentialHash, {
+    connection_id: proxyConnection.connection_id, operation: "environment.proxy.update",
+    context: { grant_id: proxyLegacyGrant.grant_id, profile_ref: "profile:1", task_scope: proxyTaskScope },
+    arguments: { origin: "https://example.com" }
+  });
+  assert.equal((oldGrantProxyDescription.authorization as Record<string, unknown>).state, "denied", "an old Grant without proxy scope remains denied");
+  await assert.rejects(proxyService.describe(proxyCredentialHash, {
+    connection_id: proxyConnection.connection_id, operation: "environment.proxy.update",
+    context: { grant_id: proxyGrant.grant_id, profile_ref: "profile:1", task_scope: proxyTaskScope },
+    arguments: { origin: "https://example.com", proxy_ref: "proxy-ref:44444444-4444-4444-8444-444444444444" }
+  }), /managed_browser_invalid_input/, "describe rejects an explicit ref that differs from exact TaskScope");
+  assert.equal(proxyUpdates, beforeProxyDescribeMutations, "contextual descriptions authorize without applying a proxy mutation");
   const beforeProxySessionReads = sessionReads;
   const selectedProxy = await proxyService.submit(proxyCredentialHash, proxyUpdate);
   assert.equal(selectedProxy.status, "succeeded", JSON.stringify(selectedProxy));

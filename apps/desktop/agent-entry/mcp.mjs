@@ -278,7 +278,9 @@ const tools = [
           profile_ref: { type: 'string' },
           task_scope: { type: 'object', properties: { ...managedTaskScopeProperties, profile_source_refs: managedProfileSourceRefs,
             template_refs: { type: 'array', items: { type: 'string', pattern: '^lode://account-system/[a-z0-9][a-z0-9._-]*@[0-9]+\\.[0-9]+\\.[0-9]+$' } },
-            account_binding_scopes: { type: 'array', items: { type: 'object', required: ['profile_ref', 'account_system_ref', 'account_ref'], properties: { profile_ref: { type: 'string' }, account_system_ref: { type: 'string' }, account_ref: { type: 'string' } }, additionalProperties: false } },
+          account_binding_scopes: { type: 'array', items: { type: 'object', required: ['profile_ref', 'account_system_ref', 'account_ref'], properties: { profile_ref: { type: 'string' }, account_system_ref: { type: 'string' }, account_ref: { type: 'string' } }, additionalProperties: false } },
+            proxy_refs: { type: 'array', maxItems: 1, items: { type: 'string', pattern: '^proxy-ref:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' } },
+            allow_proxy_clear: { type: 'boolean' },
             file_refs: { type: 'array', items: { type: 'string', pattern: '^attachment:runtime/[0-9a-f-]{36}$' }, description: 'Only for file operations; upload carries one ref and download carries an empty array.' } }, required: ['operations'], additionalProperties: false }
         },
         required: ['grant_id', 'task_scope'],
@@ -289,6 +291,35 @@ const tools = [
     required: ['operation'],
     additionalProperties: false,
     allOf: [
+      {
+        if: { required: ['operation'], properties: { operation: { const: 'environment.proxy.update' } } },
+        then: {
+          properties: {
+            context: {
+              required: ['profile_ref'],
+              properties: { task_scope: managedTaskScopeSchema(undefined, 'environment.proxy.update') }
+            }
+          },
+          allOf: [
+            {
+              if: { required: ['arguments'], properties: { arguments: { required: ['proxy_ref'], properties: { proxy_ref: { type: 'null' } } } } },
+              then: {
+                properties: {
+                  context: { properties: { task_scope: { properties: { proxy_refs: { maxItems: 0 }, allow_proxy_clear: { const: true } } } } }
+                }
+              }
+            },
+            {
+              if: { required: ['arguments'], properties: { arguments: { required: ['proxy_ref'], properties: { proxy_ref: { type: 'string' } } } } },
+              then: {
+                properties: {
+                  context: { properties: { task_scope: { properties: { proxy_refs: { minItems: 1, maxItems: 1 }, allow_proxy_clear: { const: false } } } } }
+                }
+              }
+            }
+          ]
+        }
+      },
       {
         if: { required: ['operation'], properties: { operation: { const: 'profile.migrate.request' } } },
         then: {
