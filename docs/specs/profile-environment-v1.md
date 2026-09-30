@@ -1,8 +1,8 @@
 # Profile Environment V1
 
 > 状态：V1 规范性语义规格
-> 版本：1.1
-> 日期：2026-09-14
+> 版本：1.2
+> 日期：2026-10-01
 > 产品依据：[canonical v1.6](https://github.com/WebEnvoy/.github/blob/main/docs/product-architecture-v1.md)；S0 接受不自动改变本规格既有环境语义、wire 或已取得证据
 > 架构依据：[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)、[Runtime Capability Plane](../architecture/runtime-capability-plane.md)
 > 产品归口：[Provider／环境 FR #471](https://github.com/WebEnvoy/WebEnvoy/issues/471)
@@ -12,7 +12,7 @@
 
 本文不承诺不可检测、不封号，也不要求开启 Provider 的所有可选“隐身”功能。
 
-> **2026-09-14 当前 Provider 事实**：#519／PR #522 的官方固定 Camoufox／Playwright 路径已形成受管环境入口，但按 `limited` 使用：仅接受 owner 核验的 Camoufox `0.5.6`、browser `152.0.4-beta.30`、Playwright `1.60.0`、`properties.json` 和三份来源 hash，Driver 通过公开 `launch_options`/persistent context 消费完整启动材料并精确复用。popup 首请求若无法在派发前建立可信 Page 归属，局部拒绝且不重放；#523 文件 slice 的安装/真实消费者证据不扩写为整个环境连续性或完整 V1。旧私有 launch binding、patched/native artifact 和对应 live 记录仅作历史/恢复事实，不恢复旧 launchability。本规格的公共环境事实和既有 wire 核心字段保持原义。
+> **当前 Provider 事实**：#519／PR #522 的官方固定 Camoufox／Playwright 路径已形成受管环境入口，但按 `limited` 使用：仅接受 owner 核验的 Camoufox `0.5.6`、browser `152.0.4-beta.30`、Playwright `1.60.0`、`properties.json` 和三份来源 hash，Driver 通过公开 `launch_options`/persistent context 消费完整身份材料并重放 owner 当前的 locale/timezone/viewport；proxy 只作 transient launch option，不进入私有 bundle。popup 首请求若无法在派发前建立可信 Page 归属，局部拒绝且不重放；#523 文件 slice 的安装/真实消费者证据不扩写为整个环境连续性或完整 V1。旧私有 launch binding、patched/native artifact 和对应 live 记录仅作历史/恢复事实，不恢复旧 launchability。本规格的公共环境事实和既有 wire 核心字段保持原义。
 
 ## 1. 核心原则
 
@@ -341,20 +341,11 @@ Camoufox 是 #499 的第一验证 Provider；#519／PR #522 已按声明范围�
 | Playwright Python | `1.60.0`; source SHA-256 `39b5420ba6145045b69ced4c5c47d4d9fe5bddfc8ff816c518913afcb25ec7a5` |
 | Browser properties | `properties.json` SHA-256 `10d5cfb6c8eb3824485734362a3920e07b36c3801770fffcc14a3546e56f81f4` |
 
-固定 public Driver 只调用供应方 `launch_options`、`sync_playwright`、
-`launch_persistent_context` 和 Page API。第一次在空的受管 Profile 生成后，
-必须保存完整的 `launch_options` JSON（含 `args`、`env`、
-`executable_path`、`firefox_user_prefs`、`headless`）以及受管
-`context_options`；后续启动直接精确 replay 这两个对象，不只保存几个
-config 字段、不随机补身份、不改写上游 app/site-packages/Driver bundle。
-非空 Profile 缺少完整 bundle 时 fail closed；旧 bundle 仍可按 recovery
-规则校验，但不授予当前启动资格。
-
-`configured`、`effective`、`pending` 的公共状态继续由 §18 表达：活动
-Instance 不热改，timezone/language/viewport 的 owner 更新进入 pending，
-安全停止并按同 Profile 重启后才成为 effective；实际 Page readback 与
-bundle/Provider 摘要另列 observed/support。上述静态来源与固定材料是
-validation facts；installed/live/Plugin 证据必须继续按实际消费者和范围单独回读，不能仅由材料存在推导。
+固定 public Driver 使用完整 owner `launch_options` 与 `context_options` 保持
+身份材料；重放仅更新 bounded timezone／locale／viewport，并将当前 proxy 作为
+transient launch field，bundle 不保存 URL。私有字段、旧 bundle 兼容与 rollback
+规则见 [Camoufox Environment Continuity V1.3](camoufox-environment-continuity-v1.md)。
+`configured`／`effective`／`pending` 与 Page readback 继续按 §18 表达。
 
 ### 11.1.1 官方 Chrome 安装配对与严格持久 reader（#528）
 
@@ -504,7 +495,7 @@ SHA-256；不一致、缺少共同资产或新旧组件混装均在 spawn 前拒
 
 创建 Profile 只能使用用户批准的 environment／permission template，不能通过模板提高自身权限。
 
-SKILL 不允许更换 Provider、重生成 fingerprint、修改 UA、换 proxy 或改变 Account 绑定。
+SKILL 不得更换 Provider、重生成 fingerprint、修改 UA 或改变 Account 绑定。只有当前 Grant 和 task scope 精确允许 `environment.proxy.update`，且所选 ref／clear 同时落在 Profile policy ceiling 内时，才能请求代理引用配置；不能提交 endpoint、凭据或自选未批准 ref。
 
 ## 15. 数据与隐私
 
@@ -603,9 +594,11 @@ Network／Console／controlled evaluation／viewer 等首批能力必须证明�
 
 Installed Plugin 的 `environment.read` 和 `environment.update` 复用现有 `webenvoy_operation`；输入必须包括 `idempotency_key`、`grant_id`、`task_scope`、`profile_ref`、精确 `origin`，Connector 绑定 Connection。两项分别需要既有 `allowed_operations` 中的同名操作，继续取 Profile ceiling ∩ Grant ∩ task scope 的交集。没有新 Grant field、scope dimension 或隐含权限；创建新 Profile 不能提高模板上限。
 
-`environment.update` 额外且仅接受 `configuration: {timezone?: string, language?: string, viewport?: string}`，至少一个字段，每项为 1–128 字符且无控制字符的字符串。时区为有效 IANA 名称，language 为有效 locale，viewport 为既有 `宽x高` 表示（每边 200–16384）；拒绝空值、未知字段和不支持值。此切片不允许 Agent 改 Provider、proxy、hardware、GPU、seed 或 fingerprint。
+`environment.update` 额外且仅接受 `configuration: {timezone?: string, language?: string, viewport?: string}`，至少一个字段，每项为 1–128 字符且无控制字符的字符串。时区为有效 IANA 名称，language 为有效 locale，viewport 为既有 `宽x高` 表示（每边 200–16384）；拒绝空值、未知字段和不支持值。Provider、hardware、GPU、seed 和 fingerprint 不由 Agent 环境操作修改。
 
-Core 通过受保护的 Harbor `GET /runtime/identity-environments/{ref}/environment` 读取；`POST` 同路径以 `{idempotency_key, configuration}` 保存。POST 复用既有 `edit` mutation 和持久 receipt，不在浏览器上执行热变更。响应丢失时，Core 查询原 Run／mutation receipt，不再发送更新；新 read 只反映当前事实。停止和重启使用已授权的 `instance.stop/start`，不自动执行。
+`environment.proxy.update` 是独立的 v2 managed operation，只接受 `{proxy_ref: "proxy-ref:<UUID>"}` 或 `{proxy_ref: null}` 明确清除；它不通过 `environment.update` 推导或扩展。Core 需同时核验同一 Profile、原 origin、Profile policy、Grant 与当前 task scope 中精确选中的 ref；清除要求顶层 `proxy_ref: null`，且 Profile policy、Grant、task scope 各自明确 `allow_proxy_clear: true`。详细 wire 交集和旧 Grant 兼容见 [Grant Wire Contract V1.11](grant-wire-contract-v1.md#profile-proxy-reference-scope-v111)。
+
+Core 通过受保护的 Harbor `GET /runtime/identity-environments/{ref}/environment` 读取；`POST` 同路径以 `{idempotency_key, configuration}` 保存 `environment.update` 的 locale／viewport 字段。Proxy 选择/清除使用受保护的 Harbor `POST /runtime/identity-environment-mutations` 和 `{operation: "edit", idempotency_key, identity_environment_ref, configuration: {proxy_ref}}`，复用同一 Profile edit receipt 与配置存储。两条写路径都不在浏览器上热变更。响应丢失时，Core 查询原 Run／mutation receipt，不再发送更新；新 read 只反映当前事实。停止和重启使用已授权的 `instance.stop/start`，不自动执行。
 
 ### 18.2 公共 envelope
 
@@ -638,6 +631,14 @@ Drift 比较实际应用配置与回读的 timezone/language，以及 Provider-p
 缺失 Profile、非法输入、配置拒绝或持久化失败返回 `{status:"unavailable",failure_class,message,retryable}`，failure_class 复用既有 mutation code；message 为固定有界摘要。活动 Provider 暂不可读时仍可返回已保存 configured 和已知启动快照，但 observation_status=unavailable、observed=null、drift=unknown；不能声称保存失败或启动配置已回读。
 
 本合同新增的是固定操作值和公共读模型。配置仍使用既有 Profile store 和 edit receipt，无重复持久配置状态或第二调度器。旧 Grant 不自动获得新操作；旧 Runtime／Plugin 缺少此版本时明确不可用。兼容升级、迁移及 private bundle 修复仍需 owner 决定，本项不提供任意环境编辑器。
+
+### 18.4 Owner proxy references
+
+owner registry 使用独立 `harbor-proxy-reference-store/v1` 持久文件。代理 endpoint 只保存在此 owner 私有记录中，文件通过既有 Harbor secure JSON writer 以 `0600` 写入；公共 wire、MCP 投影与 CLI 查询只投影白名单字段，不返回 endpoint。
+
+可信本地 owner 使用 Harbor `POST /owner/proxy-references` 登记 `{endpoint, label?}`、`GET` 查询或 `POST /owner/proxy-references/revoke` 撤销；这些方法只经 owner control transport 暴露。endpoint 只在 Harbor owner registry 持久化，采用同一 `validProxyServer` URL grammar：仅支持现行 HTTP(S)/SOCKS URL，禁止用户名、密码、非根路径、query 与 fragment。CLI 只接受 owner 登记时的 endpoint；Agent operation、task scope、Grant、MCP 工具和公共 Profile 环境结果都只携带 opaque ref。
+
+登记返回 `harbor-proxy-reference/v1` 的 `proxy_ref`、可选 label、创建/撤销时间和 `availability`。ref 仅在 owner 显式撤销后失效；`registered` 仅表示该 owner ref 存在、未撤销且当前可解析，不探测代理、不证明网络可达，也不代表已授权 Agent。撤销会使针对该 ref 的新 mutation 局部拒绝。Profile 配置成功后，现有环境读模型仍只返回 proxy_ref；代理 endpoint 与凭据永不出现在读回、结果、日志或能力发现中。
 
 ## 19. Provider 选择与新建默认（#516）
 

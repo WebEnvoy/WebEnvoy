@@ -1,0 +1,28 @@
+{
+  "schema": "harbor-proxy-reference.schema.json",
+  "cases": [
+    {
+      "name": "endpoint is not part of the public projection",
+      "instance": {
+        "schema_version": "harbor-proxy-reference/v1",
+        "proxy_ref": "proxy-ref:69ff3032-95ae-47ef-8446-64ad03e2d6f7",
+        "label": "Local test",
+        "registered_at": "2026-10-01T00:00:00.000Z",
+        "revoked_at": null,
+        "availability": "registered",
+        "endpoint": "http://127.0.0.1:58202"
+      }
+    },
+    {
+      "name": "proxy reference requires a version four UUID",
+      "instance": {
+        "schema_version": "harbor-proxy-reference/v1",
+        "proxy_ref": "proxy-ref:secret",
+        "label": null,
+        "registered_at": "2026-10-01T00:00:00.000Z",
+        "revoked_at": null,
+        "availability": "registered"
+      }
+    }
+  ]
+}

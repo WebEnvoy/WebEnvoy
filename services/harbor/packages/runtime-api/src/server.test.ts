@@ -126,6 +126,67 @@ test("Profile transfer routes keep owner source registration separate from Core 
   }
 });
 
+test("proxy references use authenticated owner HTTP routes and stay opaque to readers", async () => {
+  const persistencePath = join(testProfileRoot, `proxy-reference-${Date.now()}.json`);
+  const endpoint = "http://127.0.0.1:3128";
+  const runtime = new HarborRuntime(createFixtureLauncher("ready"), { persistence_path: persistencePath });
+  const running = await startHarborRuntimeServer({ port: 0, runtime });
+  try {
+    const ownerReadDenied = await fetch(`${running.url}/owner/proxy-references`);
+    assert.equal(ownerReadDenied.status, 403);
+    const ownerWriteDenied = await fetch(`${running.url}/owner/proxy-references`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ endpoint })
+    });
+    assert.equal(ownerWriteDenied.status, 403);
+
+    const registration = await fetch(`${running.url}/owner/proxy-references`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...manualAuthHeaders() },
+      body: JSON.stringify({ endpoint, label: "review proxy" })
+    });
+    assert.equal(registration.status, 201);
+    const registeredBody = await registration.json() as { proxy_reference: { proxy_ref: string; label: string; availability: string; endpoint?: string; expires_at?: string } };
+    const registered = registeredBody.proxy_reference;
+    assert.match(registered.proxy_ref, /^proxy-ref:/);
+    assert.equal(registered.label, "review proxy");
+    assert.equal(registered.availability, "registered");
+    assert.equal(registered.endpoint, undefined);
+    assert.equal(registered.expires_at, undefined);
+    assert.equal(runtime.validateProxyReference(registered.proxy_ref), "registered");
+    assert.equal(runtime.resolveProxyReference(registered.proxy_ref), endpoint);
+
+    const ownerList = await fetch(`${running.url}/owner/proxy-references`, { headers: manualAuthHeaders() });
+    assert.equal(ownerList.status, 200);
+    const listed = await ownerList.json() as { proxy_references: Array<{ proxy_ref: string; endpoint?: string }> };
+    assert.equal(listed.proxy_references.length, 1);
+    assert.equal(listed.proxy_references[0]?.proxy_ref, registered.proxy_ref);
+    assert.equal(listed.proxy_references[0]?.endpoint, undefined);
+    const persisted = readFileSync(`${persistencePath}.proxy-references.json`, "utf8");
+    assert.equal(persisted.includes(endpoint), true, "the endpoint is stored in Harbor's private reference registry");
+
+    const reloaded = new HarborRuntime(createFixtureLauncher("ready"), { persistence_path: persistencePath });
+    assert.equal(reloaded.validateProxyReference(registered.proxy_ref), "registered", "the default runtime constructor restores its registry");
+    assert.equal(reloaded.resolveProxyReference(registered.proxy_ref), endpoint);
+
+    const revokedResponse = await fetch(`${running.url}/owner/proxy-references/revoke`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...manualAuthHeaders() },
+      body: JSON.stringify({ proxy_ref: registered.proxy_ref })
+    });
+    assert.equal(revokedResponse.status, 200);
+    const revokedBody = await revokedResponse.json() as { proxy_reference: { proxy_ref: string; availability: string; endpoint?: string } };
+    assert.equal(revokedBody.proxy_reference.proxy_ref, registered.proxy_ref);
+    assert.equal(revokedBody.proxy_reference.availability, "revoked");
+    assert.equal(revokedBody.proxy_reference.endpoint, undefined);
+    assert.equal(runtime.validateProxyReference(registered.proxy_ref), "unavailable");
+    assert.equal(runtime.resolveProxyReference(registered.proxy_ref), null);
+  } finally {
+    await running.close();
+  }
+});
+
 test("serves canonical owner runtime facts separately from legacy business adapters", async () => {
   const runtime = new HarborRuntime(createFixtureLauncher("ready"));
   const running = await startHarborRuntimeServer({ port: 0, runtime });

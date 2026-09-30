@@ -15,6 +15,20 @@ try {
   const principal = await store.registerPrincipal(principalInput);
   assert.deepEqual(await store.registerPrincipal({ credential_hash: digest, display_name: "host", idempotency_key: "principal" }), principal);
   const rejected = async (action: Promise<unknown>, code: string) => assert.rejects(action, (error: unknown) => error instanceof ManagedAccessError && error.code === code);
+  const proxyTemplateDirectory = await mkdtemp(join(tmpdir(), "managed-access-proxy-template-check-"));
+  try {
+    const proxyTemplateStore = createFileManagedAccessStore({ directory: proxyTemplateDirectory });
+    const proxyTemplatePrincipal = await proxyTemplateStore.registerPrincipal({ idempotency_key: "proxy-template-owner", display_name: "host", credential_hash: createHash("sha256").update("proxy-template-owner").digest("hex") });
+    await rejected(proxyTemplateStore.createGrant({
+      idempotency_key: "proxy-template-grant", principal_id: proxyTemplatePrincipal.principal_id, profile_refs: [],
+      allowed_operations: ["profile.create"], allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(),
+      creation_template: { template_ref: "template:proxy", provider_id: "camoufox", site: { site_id: "example", origin: "https://example.com", display_name: "Example" }, language: "en-US", timezone: "UTC",
+        permission_ceiling: { allowed_operations: ["environment.proxy.update"], allowed_origins: ["https://example.com"], proxy_refs: ["proxy-ref:11111111-1111-4111-8111-111111111111"], allow_proxy_clear: true } },
+      max_created_profiles: 1
+    }), "managed_access_invalid_input");
+    assert.equal((await proxyTemplateStore.list()).grants.length, 0, "rejected proxy creation ceiling must not poison the persistent store");
+    assert.equal(JSON.parse(await readFile(join(proxyTemplateDirectory, "managed-access.json"), "utf8")).grants.length, 0);
+  } finally { await rm(proxyTemplateDirectory, { recursive: true, force: true }); }
   await rejected(store.registerPrincipal({ ...principalInput, display_name: "changed" }), "managed_access_idempotency_conflict");
   await rejected(store.authenticateCredential("0".repeat(64)), "managed_access_authentication_required");
   const connection = await store.connect(digest);
@@ -409,6 +423,89 @@ try {
     assert.equal(concurrentPolicyUpdates.filter(item => item.status === "rejected" && item.reason.code === "managed_access_policy_conflict").length, 1);
     const winningPolicy = concurrentPolicyUpdates.find(item => item.status === "fulfilled")!.value;
     assert.deepEqual((await stopped.list()).profile_policies.find(item => item.profile_ref === "profile:v2")?.allowed_operations, winningPolicy.allowed_operations);
+    const approvedProxyRef = "proxy-ref:77777777-7777-4777-8777-777777777777";
+    await stopped.updateAgentOperationsV2ProfilePolicy({
+      idempotency_key: "v2-proxy-policy",
+      profile_ref: "profile:v2",
+      current_policy_digest: (await stopped.list()).profile_policies.find(item => item.profile_ref === "profile:v2")!.policy_digest,
+      allowed_operations: [...winningPolicy.allowed_operations, "environment.proxy.update"],
+      allowed_origins: ["https://example.com"],
+      controlled_interaction_origins: [],
+      proxy_refs: [approvedProxyRef],
+      allow_proxy_clear: true
+    });
+    const proxyGrant = await stopped.issueAgentOperationsV2Grant({
+      idempotency_key: "v2-proxy-grant",
+      principal_id: v2Principal.principal_id,
+      profile_refs: ["profile:v2"],
+      policy_digest: (await stopped.list()).profile_policies.find(item => item.profile_ref === "profile:v2")!.policy_digest,
+      allowed_operations: ["environment.proxy.update"],
+      allowed_origins: ["https://example.com"],
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      proxy_refs: [approvedProxyRef],
+      allow_proxy_clear: true
+    });
+    assert.deepEqual(proxyGrant.proxy_refs, [approvedProxyRef]);
+    const v2Connection = (await stopped.list()).connections.find(item => item.principal_id === v2Principal.principal_id)!;
+    const proxyRequest = {
+      connection_id: v2Connection.connection_id,
+      grant_id: proxyGrant.grant_id,
+      operation: "environment.proxy.update" as const,
+      profile_ref: "profile:v2",
+      origin: "https://example.com",
+      proxy_ref: approvedProxyRef,
+      task_scope: { operations: ["environment.proxy.update" as const], profile_refs: ["profile:v2"], origins: ["https://example.com"], proxy_refs: [approvedProxyRef], allow_proxy_clear: false }
+    };
+    assert.equal((await stopped.checkAccess(v2Digest, proxyRequest)).profile_policy?.profile_ref, "profile:v2");
+    await rejected(stopped.checkAccess(v2Digest, { ...proxyRequest, proxy_ref: "proxy-ref:88888888-8888-4888-8888-888888888888" }), "managed_access_denied");
+    const clearRequest = { ...proxyRequest, proxy_ref: null, task_scope: { ...proxyRequest.task_scope, proxy_refs: [], allow_proxy_clear: true } };
+    assert.equal((await stopped.checkAccess(v2Digest, clearRequest)).profile_policy?.profile_ref, "profile:v2");
+    await rejected(stopped.checkAccess(v2Digest, { ...clearRequest, task_scope: { ...clearRequest.task_scope, allow_proxy_clear: false } }), "managed_access_denied");
+    const businessTargetAccountRef = `account:sha256:${"b".repeat(64)}`;
+    const proxyPolicy = (await stopped.list()).profile_policies.find(item => item.profile_ref === "profile:v2")!;
+    await stopped.updateAgentOperationsV2ProfilePolicy({
+      idempotency_key: "v2-business-target-after-proxy-policy",
+      profile_ref: "profile:v2",
+      current_policy_digest: proxyPolicy.policy_digest,
+      allowed_operations: [...proxyPolicy.allowed_operations, "business_target.list"],
+      allowed_origins: proxyPolicy.allowed_origins,
+      controlled_interaction_origins: proxyPolicy.controlled_interaction_origins ?? [],
+      proxy_refs: [approvedProxyRef],
+      allow_proxy_clear: true
+    });
+    const businessTargetGrant = await stopped.issueAgentOperationsV2Grant({
+      idempotency_key: "v2-business-target-grant-after-proxy-v3",
+      principal_id: v2Principal.principal_id,
+      profile_refs: ["profile:v2"],
+      policy_digest: (await stopped.list()).profile_policies.find(item => item.profile_ref === "profile:v2")!.policy_digest,
+      allowed_operations: ["business_target.list"],
+      allowed_origins: [],
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      account_scope_selections: [{ account_system_ref: "account-system:example", account_ref: businessTargetAccountRef }]
+    }, async (profileRef, selections) => selections.map(selection => ({ profile_ref: profileRef, ...selection })));
+    assert.equal(businessTargetGrant.proxy_refs, undefined);
+    assert.equal(businessTargetGrant.allow_proxy_clear, undefined);
+    const businessTargetRequest = {
+      connection_id: v2Connection.connection_id,
+      grant_id: businessTargetGrant.grant_id,
+      operation: "business_target.list" as const,
+      profile_ref: "profile:v2",
+      account_system_ref: "account-system:example",
+      account_ref: businessTargetAccountRef,
+      task_scope: { operations: ["business_target.list" as const], profile_refs: ["profile:v2"], origins: [] }
+    };
+    assert.equal((await active.checkAccess(v2Digest, businessTargetRequest)).grant.grant_id, businessTargetGrant.grant_id);
+    await rejected(stopped.issueAgentOperationsV2Grant({
+      idempotency_key: "v2-proxy-grant-clear-expansion",
+      principal_id: v2Principal.principal_id,
+      profile_refs: ["profile:v2"],
+      policy_digest: (await stopped.list()).profile_policies.find(item => item.profile_ref === "profile:v2")!.policy_digest,
+      allowed_operations: ["environment.proxy.update"],
+      allowed_origins: ["https://example.com"],
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      allow_proxy_clear: false,
+      proxy_refs: ["proxy-ref:99999999-9999-4999-8999-999999999999"]
+    }), "managed_access_scope_confirmation_expands_scope");
     const legacyScope = { operations: ["profile.list"], profile_refs: ["profile:v2"], origins: ["https://example.com"] };
     const legacyList = await stopped.checkAccess(v2Digest, { connection_id: (await stopped.list()).connections.find(item => item.principal_id === v2Principal.principal_id)!.connection_id, grant_id: source.grant_id, operation: "profile.list", task_scope: legacyScope });
     assert.deepEqual(legacyList.grant.profile_refs, ["profile:v2"]);
@@ -424,6 +521,40 @@ try {
     assert.equal((await stopped.list()).profile_policies.find(item => item.profile_ref === "profile:v2")?.scope_semantics, "agent_operations_v2");
     await rejected(stopped.setProfilePolicy({ idempotency_key: "v2-direct", profile_ref: "profile:v2", allowed_operations: ["instance.start"], allowed_origins: ["https://example.com"], scope_semantics: "agent_operations_v2" }), "managed_access_invalid_input");
   } finally { await rm(v2Directory, { recursive: true, force: true }); }
+
+  const legacyProxyDirectory = await mkdtemp(join(tmpdir(), "managed-access-v2-proxy-default-deny-check-"));
+  try {
+    const legacyProxyStore = createFileManagedAccessStore({ directory: legacyProxyDirectory });
+    const legacyProxyDigest = createHash("sha256").update("v2-proxy-default-deny-credential").digest("hex");
+    const legacyProxyPrincipal = await legacyProxyStore.registerPrincipal({ idempotency_key: "legacy-proxy-principal", display_name: "legacy proxy host", credential_hash: legacyProxyDigest });
+    const legacyProxyConnection = await legacyProxyStore.connect(legacyProxyDigest);
+    const legacyProxyProfileRef = "profile:legacy-proxy";
+    await legacyProxyStore.setProfilePolicy({ idempotency_key: "legacy-proxy-policy", profile_ref: legacyProxyProfileRef, allowed_operations: ["instance.start"], allowed_origins: ["https://example.com"] });
+    const legacyProxyStatePath = join(legacyProxyDirectory, "managed-access.json");
+    const legacyProxyState = JSON.parse(await readFile(legacyProxyStatePath, "utf8"));
+    legacyProxyState.schema_version = "webenvoy.managed-access.v2";
+    legacyProxyState.profile_policies[0].allowed_operations = ["environment.proxy.update"];
+    legacyProxyState.profile_policies[0].scope_semantics = "agent_operations_v2";
+    await writeFile(legacyProxyStatePath, JSON.stringify(legacyProxyState));
+    const legacyPolicy = (await legacyProxyStore.list()).profile_policies.find(item => item.profile_ref === legacyProxyProfileRef)!;
+    const defaultDenyGrant = await legacyProxyStore.issueAgentOperationsV2Grant({
+      idempotency_key: "legacy-proxy-default-deny-grant",
+      principal_id: legacyProxyPrincipal.principal_id,
+      profile_refs: [legacyProxyProfileRef],
+      policy_digest: legacyPolicy.policy_digest,
+      allowed_operations: ["environment.proxy.update"],
+      allowed_origins: ["https://example.com"],
+      expires_at: new Date(Date.now() + 60_000).toISOString()
+    });
+    assert.equal(defaultDenyGrant.proxy_refs, undefined);
+    assert.equal(defaultDenyGrant.allow_proxy_clear, undefined);
+    assert.equal((await legacyProxyStore.list()).grants.find(item => item.grant_id === defaultDenyGrant.grant_id)?.grant_id, defaultDenyGrant.grant_id);
+    const claimedProxyRef = "proxy-ref:77777777-7777-4777-8777-777777777777";
+    const deniedProxyTaskScope = { operations: ["environment.proxy.update" as const], profile_refs: [legacyProxyProfileRef], origins: ["https://example.com"], proxy_refs: [claimedProxyRef], allow_proxy_clear: false };
+    const defaultDenyRequest = { connection_id: legacyProxyConnection.connection_id, grant_id: defaultDenyGrant.grant_id, operation: "environment.proxy.update" as const, profile_ref: legacyProxyProfileRef, origin: "https://example.com", proxy_ref: claimedProxyRef, task_scope: deniedProxyTaskScope };
+    await rejected(legacyProxyStore.checkAccess(legacyProxyDigest, defaultDenyRequest), "managed_access_denied");
+    await rejected(legacyProxyStore.checkAccess(legacyProxyDigest, { ...defaultDenyRequest, proxy_ref: null, task_scope: { ...deniedProxyTaskScope, proxy_refs: [], allow_proxy_clear: true } }), "managed_access_denied");
+  } finally { await rm(legacyProxyDirectory, { recursive: true, force: true }); }
 
   const strictDirectory = await mkdtemp(join(tmpdir(), "managed-access-v0-strict-check-"));
   try {

@@ -13,6 +13,7 @@ const fixtureAccount = `account:sha256:${"a".repeat(64)}`;
 const fixtureTarget = "target:fixture";
 const fixtureFile = "attachment:runtime/11111111-1111-4111-8111-111111111111";
 const fixtureProfileSource = "profile-source:11111111-1111-4111-8111-111111111111";
+const fixtureProxyRef = "proxy-ref:11111111-1111-4111-8111-111111111111";
 
 function fixtureField(field: string, operation: string): unknown {
   if (field === "profile_ref") return fixtureProfile;
@@ -29,6 +30,7 @@ function fixtureField(field: string, operation: string): unknown {
   if (field === "account_ref") return fixtureAccount;
   if (field === "confirmation") return "delete_local_data";
   if (field === "profile_source_ref") return fixtureProfileSource;
+  if (field === "proxy_ref") return fixtureProxyRef;
   if (field === "target_provider_id") return "camoufox";
   if (field === "url") return "https://example.com/next";
   if (field === "runtime_session_ref") return fixtureSession;
@@ -54,6 +56,7 @@ function fixtureTaskScope(definition: (typeof managedCapabilityDefinitions.opera
   if (definition.id === "account_system.import_template") return { operations: [definition.id], template_refs: ["lode://account-system/github@1.0.0"] };
   if (definition.id === "account.bind") return { operations: [definition.id], profile_refs: [fixtureProfile], origins: [fixtureOrigin],
     account_binding_scopes: [{ profile_ref: fixtureProfile, account_system_ref: fixtureAccountSystem, account_ref: fixtureAccount }] };
+  if (definition.id === "environment.proxy.update") return { operations: [definition.id], profile_refs: [fixtureProfile], origins: [fixtureOrigin], proxy_refs: [fixtureProxyRef], allow_proxy_clear: false };
   const scope: Record<string, unknown> = {
     operations: [definition.id],
     profile_refs: definition.context === "profile" ? [fixtureProfile] : [],
@@ -93,7 +96,7 @@ const observation = {
   runtime_session_ref: "session:fixture"
 };
 
-assert.equal(managedCapabilityDefinitions.operations.length, 44);
+assert.equal(managedCapabilityDefinitions.operations.length, 45);
 assert.match(managedCapabilityDefinition("profile.read")?.summary ?? "", /current identity, binding history and Harbor ownership/);
 assert.match(managedCapabilityDefinition("profile.list")?.summary ?? "", /conflicting or unknown identity does not block the read/);
 assert.deepEqual(managedCapabilityInputFields("instance.observe"), [
@@ -205,6 +208,7 @@ for (const definition of managedCapabilityDefinitions.operations.filter(item => 
   for (const [field, value] of Object.entries(example!)) if (field !== "illustrative_only") exampleEnvelope[field] = value;
   if (definition.id === "profile.import") exampleEnvelope.task_scope = { ...(exampleEnvelope.task_scope as Record<string, unknown>), profile_source_refs: [example!.profile_source_ref] };
   if (definition.id === "profile.migrate.request") exampleEnvelope.task_scope = { ...(exampleEnvelope.task_scope as Record<string, unknown>), profile_refs: [example!.profile_ref] };
+  if (definition.id === "environment.proxy.update") exampleEnvelope.task_scope = { ...(exampleEnvelope.task_scope as Record<string, unknown>), profile_refs: [example!.profile_ref] };
   assert.doesNotThrow(() => parseManagedBrowserRequest(exampleEnvelope), `${definition.id} assembled illustrative envelope`);
   const inputSchema = managedCapabilityExecutionInputSchema(definition.id) as Record<string, any>;
   assert.deepEqual(inputSchema.properties.operation.enum, [definition.id]);
@@ -259,6 +263,19 @@ assert.equal(managedCapabilityFieldMatches(0, managedCapabilityDefinitions.field
 const environment = parserFixture(managedCapabilityDefinition("environment.update")!);
 assert.throws(() => parseManagedBrowserRequest({ ...environment, configuration: { timezone: "UTC", unexpected: "value" } }), /managed_browser_invalid_input/);
 assert.equal(managedCapabilityFieldMatches({ timezone: "UTC", unexpected: "value" }, managedCapabilityDefinitions.fields.configuration!), false);
+const proxyUpdate = parserFixture(managedCapabilityDefinition("environment.proxy.update")!);
+const proxyInputSchema = managedCapabilityExecutionInputSchema("environment.proxy.update") as Record<string, any>;
+assert.ok(proxyInputSchema.allOf.some((condition: any) => condition.if?.properties?.proxy_ref?.type === "null"
+  && condition.then?.properties?.task_scope?.properties?.proxy_refs?.maxItems === 0
+  && condition.then?.properties?.task_scope?.properties?.allow_proxy_clear?.const === true
+  && condition.else?.properties?.task_scope?.properties?.proxy_refs?.minItems === 1
+  && condition.else?.properties?.task_scope?.properties?.allow_proxy_clear?.const === false));
+assert.doesNotThrow(() => parseManagedBrowserRequest(proxyUpdate));
+const proxyClear = { ...proxyUpdate, idempotency_key: "capability-proxy-clear", proxy_ref: null,
+  task_scope: { ...(proxyUpdate.task_scope as Record<string, unknown>), proxy_refs: [], allow_proxy_clear: true } };
+assert.doesNotThrow(() => parseManagedBrowserRequest(proxyClear));
+assert.throws(() => parseManagedBrowserRequest({ ...proxyUpdate, task_scope: { ...(proxyUpdate.task_scope as Record<string, unknown>), proxy_refs: [] } }), /managed_browser_invalid_input/);
+assert.throws(() => parseManagedBrowserRequest({ ...proxyUpdate, proxy_endpoint: "http://127.0.0.1:8080" }), /managed_browser_invalid_input/);
 const navigate = parserFixture(managedCapabilityDefinition("page.navigate")!);
 assert.throws(() => parseManagedBrowserRequest({ ...navigate, url: "https://other.example/" }), /managed_browser_invalid_input/);
 const longWait = { ...wait, wait_for: "text", text: "x".repeat(257), target_ref: undefined };

@@ -39,6 +39,7 @@ import {
 } from "./provider-lifecycle-http.js";
 import type { ProfileRecoveryApplyInput, ProfileRecoveryPlanInput } from "./profile-recovery.js";
 import { ProfileSourceError } from "./profile-import.js";
+import { ProxyReferenceError } from "./proxy-reference.js";
 
 export const HARBOR_RUNTIME_API_READINESS_SCHEMA = "harbor-runtime-api-readiness/v0";
 
@@ -72,6 +73,7 @@ export function createHarborRuntimeHttpServer(
         ? error
         : error instanceof BadRequest ? new ProviderLifecycleHttpError(400, "bad_request", error.message)
           : error instanceof ManagedFileError ? new ProviderLifecycleHttpError(["file_source_missing", "file_ref_unavailable", "file_expired"].includes(error.code) ? 404 : ["file_limit_exceeded", "file_type_unsupported", "file_type_mismatch", "file_name_invalid", "file_source_invalid", "file_destination_invalid", "file_destination_exists", "file_symlink_rejected"].includes(error.code) ? 400 : 409, error.code, error.code)
+            : error instanceof ProxyReferenceError ? new ProviderLifecycleHttpError(error.code === "proxy_reference_unavailable" ? 404 : error.code === "proxy_reference_persistence_failed" ? 500 : 400, error.code, error.message)
           : null;
       writeJson(response, requestError?.statusCode ?? 500, {
         error: requestError?.code ?? "internal_error",
@@ -303,6 +305,31 @@ async function route(
     } catch (error) {
       throw profileSourceHttpError(error);
     }
+    return;
+  }
+
+  if (method === "POST" && url.pathname === "/owner/proxy-references") {
+    if (!authorizeIdentityEnvironmentMutationRequest(manualAuthenticationAuthorizer, request, response)) return;
+    const body = await readJson<unknown>(request);
+    if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).some(key => !["endpoint", "label"].includes(key)) ||
+        typeof (body as Record<string, unknown>).endpoint !== "string" || (body as Record<string, unknown>).label !== undefined && typeof (body as Record<string, unknown>).label !== "string") {
+      throw new BadRequest("Invalid proxy reference registration request.");
+    }
+    writeJson(response, 201, { proxy_reference: runtime.registerProxyReference((body as { endpoint: string }).endpoint, (body as { label?: string }).label) });
+    return;
+  }
+  if (method === "GET" && url.pathname === "/owner/proxy-references") {
+    if (!authorizeOwnerRequest(manualAuthenticationAuthorizer, request, response)) return;
+    writeJson(response, 200, { proxy_references: runtime.listProxyReferences() });
+    return;
+  }
+  if (method === "POST" && url.pathname === "/owner/proxy-references/revoke") {
+    if (!authorizeIdentityEnvironmentMutationRequest(manualAuthenticationAuthorizer, request, response)) return;
+    const body = await readJson<unknown>(request);
+    if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length !== 1 || typeof (body as Record<string, unknown>).proxy_ref !== "string") {
+      throw new BadRequest("Invalid proxy reference revocation request.");
+    }
+    writeJson(response, 200, { proxy_reference: runtime.revokeProxyReference((body as { proxy_ref: string }).proxy_ref) });
     return;
   }
 

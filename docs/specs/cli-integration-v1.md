@@ -65,9 +65,9 @@ Owner：Core／Harbor Runtime／安装入口共同实现，CLI 合同由本规�
 
 当前候选中的 apps/desktop/agent-entry/cli.mjs 已有以下 owner 入口：
 
-- setup、access list|register|grant|grant-v2|policy-v2|revoke|operation、files import|inspect|export|revoke|delete、recovery inspect|backup|plan|apply|status、start、diagnose、stop、uninstall、instance 和 agent。
+- setup、access list|register|grant|grant-v2|policy-v2|revoke|operation、proxy-reference register|list|revoke、files import|inspect|export|revoke|delete、recovery inspect|backup|plan|apply|status、start、diagnose、stop、uninstall、instance 和 agent。
 - 正式 setup 以 owner 的 --data-dir 和可选 --agent-uid 记录安装身份、Agent endpoint 与 OS boundary，只输出不含 secret 的公开 bootstrap；独立 Agent UID 再以 agent setup 创建自己的 client 文件、host MCP 配置、SKILL 和 installation receipt。两阶段均保持 data／host 目录为 0700、client 文件为 0600；owner setup 不写 Agent host 文件。
-- owner 路径通过本地 Runtime service 的 owner control channel；Agent MCP 读取 host 中的 webenvoy-client.json，通过独立 client credential 进入 /agent-connections 和 managed operation 路径。0600 和目录分开不构成同 UID 进程隔离；目标合同要求 Agent route 按 credential、Principal、Grant 与角色执行，且不经 Agent plane 暴露 owner／supervisor secret。
+- owner 路径通过本地 Runtime service 的 owner control channel；Agent MCP 读取 host 中的 webenvoy-client.json，通过独立 client credential 进入 /agent-connections 和 managed operation 路径。0600 和目录分开不构成同 UID 进程隔离；目标合同要求 Agent route 按 credential、Principal、Grant 与角色执行，且不经 Agent plane 暴露 owner／supervisor secret。owner 的 `proxy-reference` 命令只管理 Harbor endpoint alias；Agent 只获得 Core 明确批准的 opaque proxy ref，不获得 alias endpoint。
 - access grant、grant-v2、policy-v2 的输入文件有明确允许字段并透传准确 AccountSystem／binding 授权选择；files 与 recovery 已有 owner-only 路由；Agent 工具不能执行 owner grant、backup、plan、apply。
 - Core 的 managed-access receipt 以 `idempotency_key` 的 hash 和请求 hash 去重；当前 CLI 的 `access register` 会在省略 key 时随机生成 owner-local key，`recovery inspect` 也会在省略 key 时生成 owner-local key。owner files 的 `/owner/files/import` 可记录可选 `operation_ref`，但现有 `importFile` 只保存该关联值，不以它去重；`export`、`revoke` 和 `delete` 也没有 caller key。
 - Agent MCP 已有 webenvoy_status、webenvoy_skill、webenvoy_connect、webenvoy_describe、webenvoy_operation、webenvoy_query、webenvoy_recovery、webenvoy_skills，并将 browser operation 映射到 /managed-browser/operations。
@@ -228,12 +228,17 @@ setup 的 Provider 参数保持现有实现的命名和校验，不另建 Provid
     webenvoy access list --data-dir DIR
     webenvoy access register --data-dir DIR --display-name NAME --credential-hash SHA256 --idempotency-key KEY
     webenvoy access grant --data-dir DIR --grant-file FILE
+    webenvoy proxy-reference register --data-dir DIR --proxy-endpoint URL [--label LABEL]
+    webenvoy proxy-reference list --data-dir DIR
+    webenvoy proxy-reference revoke --data-dir DIR --proxy-ref REF
     webenvoy access grant-v2 --data-dir DIR --grant-file FILE --confirm
     webenvoy access policy-v2 --data-dir DIR --policy-file FILE --confirm
     webenvoy access revoke --data-dir DIR --kind principals|connections|grants --id ID --idempotency-key KEY
     webenvoy access operation --data-dir DIR --operation-ref REF
 
-grant JSON 只允许以下字段：idempotency_key、principal_id、profile_refs、allowed_operations、allowed_origins、expires_at、creation_template、max_created_profiles、skill_scope、file_scope、account_system_scope、account_binding_scopes；其中 `idempotency_key` 是必填的 caller key。grant-v2 另外使用已有 v2 字段：source_grant_id、source_grant_digest、policy_digest、replaces_grant_id、replaces_grant_digest，以及同一 scope／expiry 字段，`idempotency_key` 同样必填。`account_system_scope.template_refs` 是获准导入的完整模板引用；`account_binding_scopes` 是 `{profile_ref,account_system_ref,account_ref}` 精确 tuple 列表。字段即使透传成功，也由 Core 按 owner policy 和 Grant 合同校验；省略 scope 不授予相应 Agent operation。policy-v2 只允许 idempotency_key、profile_ref、current_policy_digest、allowed_operations、allowed_origins、controlled_interaction_origins，`idempotency_key` 必填。缺 key 或空 key 是本地 usage error；额外字段必须在发送前拒绝。
+`proxy-reference` 是可信本地 owner 命令，经 owner control channel 调用 Harbor `POST/GET /owner/proxy-references` 或 `POST /owner/proxy-references/revoke`。register 仅接受现行 Harbor proxy URL grammar，禁止用户名、密码、非根路径、query 和 fragment；输入 endpoint 只写入 Harbor owner registry。list/revoke 和成功的 register 结果只返回 opaque `proxy_ref`、label、创建/撤销时间与可用状态，不返回 endpoint。`registered` 表示引用当前存在并可解析，不是网络可达性或 Agent 授权证据。ref 撤销只影响该 ref 的新配置写入，不改写历史 Run。
+
+grant JSON 只允许以下字段：idempotency_key、principal_id、profile_refs、allowed_operations、allowed_origins、expires_at、creation_template、max_created_profiles、skill_scope、file_scope、account_system_scope、account_binding_scopes；其中 `idempotency_key` 是必填的 caller key。grant-v2 另外使用已有 v2 字段：source_grant_id、source_grant_digest、policy_digest、replaces_grant_id、replaces_grant_digest，以及同一 scope／expiry 字段和可选 `proxy_refs`／`allow_proxy_clear`，`idempotency_key` 同样必填。`account_system_scope.template_refs` 是获准导入的完整模板引用；`account_binding_scopes` 是 `{profile_ref,account_system_ref,account_ref}` 精确 tuple 列表。字段即使透传成功，也由 Core 按 owner policy 和 Grant 合同校验；省略 scope 不授予相应 Agent operation。policy-v2 只允许 idempotency_key、profile_ref、current_policy_digest、allowed_operations、allowed_origins、controlled_interaction_origins，以及可选 `proxy_refs`／`allow_proxy_clear`，`idempotency_key` 必填。缺 key 或空 key 是本地 usage error；额外字段必须在发送前拒绝。
 
 以下恢复命令沿用现有 [installed profile recovery](installed-profile-recovery-v1.md) owner 合同：
 

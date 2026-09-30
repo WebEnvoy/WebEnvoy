@@ -277,6 +277,39 @@ test('owner profile-source list uses the Harbor owner route without starting Run
   }
 });
 
+test('owner proxy-reference CLI list uses the Harbor owner transport without exposing endpoints', async () => {
+  const dir = await (await import('node:fs/promises')).mkdtemp(join(tmpdir(), 'webenvoy-cli-proxy-reference-'));
+  const socketPath = join(dir, 'owner-control.sock');
+  const requests = [];
+  const proxyReference = {
+    schema_version: 'harbor-proxy-reference/v1', proxy_ref: 'proxy-ref:766261cf-b05c-431f-a6c2-4e6efa723d5d', label: 'local test',
+    registered_at: '2026-09-30T12:00:00.000Z', revoked_at: null, availability: 'registered'
+  };
+  const server = createServer(async (request, response) => {
+    const chunks = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const rawBody = Buffer.concat(chunks).toString('utf8');
+    const body = rawBody ? JSON.parse(rawBody) : undefined;
+    requests.push({ path: request.url, method: request.method, body });
+    const payload = request.url === '/owner/proxy-references' && request.method === 'GET'
+      ? { proxy_references: [proxyReference] }
+      : { error: 'not_found' };
+    response.setHeader('content-type', 'application/json');
+    response.end(JSON.stringify(payload));
+  });
+  try {
+    await new Promise((resolve, reject) => { server.once('error', reject); server.listen(socketPath, resolve); });
+    await chmod(socketPath, 0o600);
+    const listed = await runCli(['proxy-reference', 'list', '--data-dir', dir]);
+    assert.equal(listed.code, 0, listed.stderr);
+    assert.deepEqual(JSON.parse(listed.stdout), { proxy_references: [proxyReference] });
+    assert.deepEqual(requests, [{ path: '/owner/proxy-references', method: 'GET', body: undefined }]);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('owner stop preserves unavailable session outcomes with a nonzero exit', async () => {
   const dir = await (await import('node:fs/promises')).mkdtemp(join(tmpdir(), 'webenvoy-cli-owner-stop-'));
   const socketPath = join(dir, 'owner-control.sock');

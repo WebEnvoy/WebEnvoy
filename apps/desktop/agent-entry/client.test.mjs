@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { createInterface } from 'node:readline';
 import { Ajv2020 } from '../../../packages/schemas/node_modules/ajv/dist/2020.js';
 import { localRequest, runManagedSiteWorker } from './client.mjs';
-import { validateOperationRequest } from './request-validation.mjs';
+import { validateDescribeRequest, validateOperationRequest } from './request-validation.mjs';
 import { INSTALLED_SKILL_VERSION, REQUIRED_AGENT_ASSETS, REQUIRED_DRIVER_ASSETS, root, sha } from './bundle.mjs';
 
 async function stopChild(child) {
@@ -214,6 +214,44 @@ test('MCP guidance exposes instance.start origin admission', async () => {
     assert.equal(describe.inputSchema.properties.operation.enum, undefined);
     assert.equal(describe.inputSchema.properties.arguments.properties.operation, undefined);
     assert.equal(describe.inputSchema.properties.arguments.properties.connection_id, undefined);
+    const validateDescribe = new Ajv2020({ allErrors: true, strict: false }).compile(describe.inputSchema);
+    const proxyRef = 'proxy-ref:11111111-1111-4111-8111-111111111111';
+    const proxyDescribeBase = {
+      operation: 'environment.proxy.update',
+      context: { grant_id: 'grant:fixture', profile_ref: 'profile:fixture', task_scope: {
+        operations: ['environment.proxy.update'], profile_refs: ['profile:fixture'], origins: ['https://example.com'],
+        proxy_refs: [proxyRef], allow_proxy_clear: false
+      } },
+      arguments: { origin: 'https://example.com' }
+    };
+    const proxyDescribeClear = { ...proxyDescribeBase,
+      context: { ...proxyDescribeBase.context, task_scope: { ...proxyDescribeBase.context.task_scope, proxy_refs: [], allow_proxy_clear: true } } };
+    assert.equal(validateDescribe(proxyDescribeBase), true, JSON.stringify(validateDescribe.errors));
+    assert.equal(validateDescribe(proxyDescribeClear), true, JSON.stringify(validateDescribe.errors));
+    assert.equal(validateDescribe({ ...proxyDescribeBase, context: { ...proxyDescribeBase.context,
+      task_scope: { ...proxyDescribeBase.context.task_scope, operations: ['environment.update'] } } }), false,
+      'proxy contextual description requires its exact operation in TaskScope');
+    assert.equal(validateDescribe({ ...proxyDescribeBase, context: { ...proxyDescribeBase.context,
+      task_scope: { ...proxyDescribeBase.context.task_scope, profile_refs: ['profile:fixture', 'profile:other'] } } }), false,
+      'proxy contextual description requires one exact Profile in TaskScope');
+    assert.equal(validateDescribe({ ...proxyDescribeBase, context: { ...proxyDescribeBase.context,
+      task_scope: { ...proxyDescribeBase.context.task_scope, origins: ['https://example.com', 'https://other.example'] } } }), false,
+      'proxy contextual description requires one exact origin in TaskScope');
+    assert.equal(validateDescribe({ ...proxyDescribeBase, arguments: { origin: 'https://example.com', proxy_ref: proxyRef },
+      context: { ...proxyDescribeBase.context, task_scope: { ...proxyDescribeBase.context.task_scope, proxy_refs: [], allow_proxy_clear: true } } }), false,
+      'an explicit selected ref cannot be paired with a clear scope');
+    const mismatchedProxyDescribe = { ...proxyDescribeBase, arguments: { origin: 'https://example.com', proxy_ref: 'proxy-ref:22222222-2222-4222-8222-222222222222' } };
+    assert.equal(validateDescribe(mismatchedProxyDescribe), true, JSON.stringify(validateDescribe.errors));
+    assert.throws(() => validateDescribeRequest(mismatchedProxyDescribe, definitions), /describe_input_refused/,
+      'the host validation boundary binds an explicitly supplied proxy ref to TaskScope');
+    assert.throws(() => validateDescribeRequest({ ...proxyDescribeBase, context: { ...proxyDescribeBase.context,
+      task_scope: { ...proxyDescribeBase.context.task_scope, profile_refs: ['profile:other'] } } }, definitions), /describe_input_refused/,
+      'the host validation boundary binds the Profile to TaskScope');
+    assert.throws(() => validateDescribeRequest({ ...proxyDescribeBase, context: { ...proxyDescribeBase.context,
+      task_scope: { ...proxyDescribeBase.context.task_scope, origins: ['https://other.example'] } } }, definitions), /describe_input_refused/,
+      'the host validation boundary binds the origin to TaskScope');
+    assert.doesNotThrow(() => validateDescribeRequest(proxyDescribeBase, definitions));
+    assert.doesNotThrow(() => validateDescribeRequest(proxyDescribeClear, definitions));
     assert.equal(task.inputSchema.properties.connection_id, undefined);
     assert.deepEqual(Object.keys(task.inputSchema.properties.task_scope.properties).sort(), ['operations', 'origins', 'profile_refs', 'skill_refs', 'source_refs']);
     const validateTask = new Ajv2020({ allErrors: true, strict: false }).compile(task.inputSchema);
@@ -260,6 +298,24 @@ test('MCP guidance exposes instance.start origin admission', async () => {
     assert.equal(validateOperation(bindSchemaFixture), true, JSON.stringify(validateOperation.errors));
     assert.equal(validateOperation({ ...bindSchemaFixture, task_scope: { operations: ['account.bind'], profile_refs: ['profile:github'], origins: ['https://github.com'] } }), false,
       'Account binding requires the exact task binding tuple');
+    assert.deepEqual(operation.inputSchema.properties.proxy_ref.type, ['string', 'null']);
+    const proxyUpdateFixture = {
+      idempotency_key: 'proxy-select', grant_id: 'grant:fixture', operation: 'environment.proxy.update',
+      task_scope: { operations: ['environment.proxy.update'], profile_refs: ['profile:fixture'], origins: ['https://example.com'], proxy_refs: [proxyRef], allow_proxy_clear: false },
+      profile_ref: 'profile:fixture', origin: 'https://example.com', proxy_ref: proxyRef
+    };
+    const proxyClearFixture = { ...proxyUpdateFixture, idempotency_key: 'proxy-clear', proxy_ref: null,
+      task_scope: { ...proxyUpdateFixture.task_scope, proxy_refs: [], allow_proxy_clear: true } };
+    assert.equal(validateOperation(proxyUpdateFixture), true, JSON.stringify(validateOperation.errors));
+    assert.equal(validateOperation(proxyClearFixture), true, JSON.stringify(validateOperation.errors));
+    assert.equal(validateOperation({ ...proxyUpdateFixture, proxy_endpoint: 'socks5://127.0.0.1:1080' }), false);
+    assert.equal(validateOperation({ ...proxyUpdateFixture, task_scope: { ...proxyUpdateFixture.task_scope, proxy_refs: [] } }), false);
+    assert.equal(validateOperation({ ...proxyUpdateFixture, task_scope: { ...proxyUpdateFixture.task_scope, proxy_refs: [], allow_proxy_clear: true } }), false);
+    assert.equal(validateOperation({ ...proxyClearFixture, task_scope: { ...proxyClearFixture.task_scope, proxy_refs: [proxyRef] } }), false);
+    assert.equal(validateOperation({ ...proxyClearFixture, task_scope: { ...proxyClearFixture.task_scope, allow_proxy_clear: false } }), false);
+    assert.doesNotThrow(() => validateOperationRequest(proxyUpdateFixture, definitions));
+    assert.doesNotThrow(() => validateOperationRequest(proxyClearFixture, definitions));
+    assert.throws(() => validateOperationRequest({ ...proxyUpdateFixture, task_scope: { ...proxyUpdateFixture.task_scope, allow_proxy_clear: true } }, definitions), /operation_input_refused/);
     const profileSourceRef = 'profile-source:11111111-1111-4111-8111-111111111111';
     const profileImportFixture = { idempotency_key: 'schema-profile-import', grant_id: 'grant:profile-import', operation: 'profile.import',
       template_ref: 'template:approved', profile_source_ref: profileSourceRef,
@@ -325,8 +381,11 @@ test('MCP guidance exposes instance.start origin admission', async () => {
     assert.deepEqual(transferScopeCondition.if.properties.operation.enum, ['profile.import', 'profile.migrate.request']);
     assert.deepEqual(transferScopeCondition.then.properties.task_scope.required, ['operations', 'profile_refs', 'origins', 'profile_source_refs']);
     assert.equal(transferScopeCondition.then.properties.task_scope.additionalProperties, false);
-    assert.equal(transferScopeCondition.else.properties.task_scope.properties.file_refs, undefined);
-    assert.equal(transferScopeCondition.else.properties.task_scope.additionalProperties, false);
+    const proxyScopeCondition = transferScopeCondition.else;
+    assert.equal(proxyScopeCondition.if.properties.operation.const, 'environment.proxy.update');
+    assert.ok(proxyScopeCondition.then.properties.task_scope.properties.proxy_refs);
+    assert.equal(proxyScopeCondition.else.properties.task_scope.properties.file_refs, undefined);
+    assert.equal(proxyScopeCondition.else.properties.task_scope.additionalProperties, false);
     assert.ok(fileScopeCondition.then.properties.task_scope.properties.file_refs);
     assert.match(fileScopeCondition.then.properties.task_scope.properties.file_refs.description, /Omit this field for every non-file operation/);
     assert.equal(fileScopeCondition.then.properties.task_scope.additionalProperties, false);

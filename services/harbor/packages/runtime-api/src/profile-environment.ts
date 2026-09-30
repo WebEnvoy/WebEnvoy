@@ -63,6 +63,14 @@ export function boundedEnvironmentUpdate(value: unknown): IdentityEnvironmentCon
   return { ...input } as IdentityEnvironmentConfigurationUpdate;
 }
 
+export function boundedProxyEnvironmentUpdate(value: unknown): IdentityEnvironmentConfigurationUpdate | null {
+  const input = object(value);
+  if (!input || Object.keys(input).length !== 1 || !Object.hasOwn(input, "proxy_ref")) return null;
+  const proxyRef = input.proxy_ref;
+  if (proxyRef !== null && (typeof proxyRef !== "string" || !/^proxy-ref:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(proxyRef))) return null;
+  return { proxy_ref: proxyRef };
+}
+
 export function normalizeEnvironmentObservation(value: unknown): EnvironmentObservation | null {
   const raw = object(value), provider = object(raw?.provider), observed = object(raw?.observed);
   if (!raw || raw.status !== "completed" || !provider || !observed ||

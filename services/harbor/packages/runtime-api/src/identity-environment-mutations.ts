@@ -1,5 +1,5 @@
 import { hasManagedBindingConflict } from "./managed-observation.js";
-import { boundedEnvironmentUpdate } from "./profile-environment.js";
+import { boundedEnvironmentUpdate, boundedProxyEnvironmentUpdate } from "./profile-environment.js";
 import { createHash } from "node:crypto";
 import { createIdentityConsistencyFacts } from "./identity-consistency.js";
 import {
@@ -111,7 +111,7 @@ export function executeIdentityEnvironmentMutation(
   }
   if (conflict) return rejected(request.operation, requestRef(request), conflict.code, true, conflict.recovery_actions);
   // Metadata-only configuration does not touch the active browser's storage.
-  if (activeConfigurationOnly && !receipt && request.operation === "edit" && boundedEnvironmentUpdate(request.configuration)) return edit(request, hash, store, options);
+  if (activeConfigurationOnly && !receipt && request.operation === "edit" && (boundedEnvironmentUpdate(request.configuration) || boundedProxyEnvironmentUpdate(request.configuration))) return edit(request, hash, store, options);
   const userCreationDefaultProviderId = request.operation === "create"
     ? options.resolve_user_creation_default_provider_id?.()
     : undefined;

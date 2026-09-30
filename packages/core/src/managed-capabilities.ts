@@ -8,6 +8,7 @@ type JsonObject = Record<string, unknown>;
 
 export type ManagedCapabilityField = {
   type: string;
+  nullable?: boolean;
   description: string;
   format?: string;
   pattern?: string;
@@ -130,6 +131,15 @@ function operationFieldSchema(definition: ManagedCapabilityDefinition | undefine
   return schema;
 }
 
+function publicFieldSchema(field: ManagedCapabilityField): JsonObject {
+  const schema = { ...field } as JsonObject;
+  if (field.nullable) {
+    schema.type = [field.type, "null"];
+    delete schema.nullable;
+  }
+  return schema;
+}
+
 function conditionRequiredWhen(condition: ManagedCapabilityCondition): string {
   const when = condition.when;
   if (!when || typeof when !== "object") return String(when ?? "when applicable");
@@ -151,6 +161,7 @@ function publicOrigin(value: string): boolean {
 
 /** The one static field matcher used by execution parsing and describe drafts. */
 export function managedCapabilityFieldMatches(value: unknown, schema: ManagedCapabilityField): boolean {
+  if (schema.nullable && value === null) return true;
   if (schema.not?.const !== undefined && value === schema.not.const) return false;
   if (schema.type === "string") {
     if (typeof value !== "string") return false;
@@ -257,6 +268,7 @@ function collectManagedCapabilityInputShapeIssues(value: JsonObject, partial: bo
       const profileTransfer = definition.id === "profile.import" || definition.id === "profile.migrate.request";
       const scopeFields = definition.id === "account_system.import_template" ? ["operations", "template_refs"]
         : definition.id === "account.bind" ? ["operations", "profile_refs", "origins", "account_binding_scopes"]
+          : definition.id === "environment.proxy.update" ? ["operations", "profile_refs", "origins", "proxy_refs", "allow_proxy_clear"]
           : ["operations", "profile_refs", "origins", ...(profileTransfer ? ["profile_source_refs"] : []), ...(definition.file_scope === undefined ? [] : ["file_refs"] )];
       if (Object.keys(scopeObject).some(key => !scopeFields.includes(key))) issues.invalid.push({ field: "task_scope", code: "invalid_value" });
       if (profileTransfer) {
@@ -269,6 +281,23 @@ function collectManagedCapabilityInputShapeIssues(value: JsonObject, partial: bo
         if (!Array.isArray(profileRefs) || (definition.id === "profile.import" ? profileRefs.length !== 0 : profileRefs.length !== 1 || profileRefs[0] !== value.profile_ref)) invalidScope("task_scope.profile_refs");
         if (!Array.isArray(origins) || (definition.id === "profile.import" ? origins.length !== 1 : origins.length !== 0) || origins.some(item => typeof item !== "string" || !publicOrigin(item))) invalidScope("task_scope.origins");
         if (!Array.isArray(sourceRefs) || (definition.id === "profile.import" ? sourceRefs.length !== 1 || sourceRefs[0] !== value.profile_source_ref : sourceRefs.length !== 0) || sourceRefs.some(item => typeof item !== "string" || !profileSourceRefPattern.test(item))) invalidScope("task_scope.profile_source_refs");
+      }
+      if (definition.id === "environment.proxy.update") {
+        const operations = scopeObject.operations, profileRefs = scopeObject.profile_refs, origins = scopeObject.origins, proxyRefs = scopeObject.proxy_refs;
+        if (!Array.isArray(operations) || operations.length !== 1 || operations[0] !== definition.id) issues.invalid.push({ field: "task_scope.operations", code: "invalid_value" });
+        if (!Array.isArray(profileRefs) || profileRefs.length !== 1 || value.profile_ref !== undefined && profileRefs[0] !== value.profile_ref) issues.invalid.push({ field: "task_scope.profile_refs", code: "invalid_value" });
+        if (!Array.isArray(origins) || origins.length !== 1 || value.origin !== undefined && origins[0] !== value.origin || origins.some(item => typeof item !== "string" || !publicOrigin(item))) issues.invalid.push({ field: "task_scope.origins", code: "invalid_value" });
+        if (!Array.isArray(proxyRefs) || proxyRefs.length > 1 || proxyRefs.some(item => typeof item !== "string" || !/^proxy-ref:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(item))) issues.invalid.push({ field: "task_scope.proxy_refs", code: "invalid_value" });
+        if (typeof scopeObject.allow_proxy_clear !== "boolean") issues.invalid.push({ field: "task_scope.allow_proxy_clear", code: "invalid_value" });
+        else if (value.proxy_ref !== undefined) {
+          const proxyRefCount = Array.isArray(proxyRefs) ? proxyRefs.length : undefined;
+          const taskProxyRef = Array.isArray(proxyRefs) ? proxyRefs[0] : undefined;
+          if (value.proxy_ref === null
+            ? proxyRefCount !== 0 || scopeObject.allow_proxy_clear !== true
+            : proxyRefCount !== 1 || taskProxyRef !== value.proxy_ref || scopeObject.allow_proxy_clear !== false) {
+            issues.invalid.push({ field: "task_scope", code: "invalid_value" });
+          }
+        }
       }
       if (definition.file_scope === undefined && scopeObject.file_refs !== undefined) issues.invalid.push({ field: "task_scope.file_refs", code: "forbidden_field" });
       if (definition.file_scope === "download" && (!Array.isArray(scopeObject.file_refs) || scopeObject.file_refs.length !== 0)) issues.invalid.push({ field: "task_scope.file_refs", code: "invalid_value" });
@@ -303,7 +332,7 @@ export function managedCapabilityExample(operation: string): JsonObject | null {
 export function managedCapabilityInputSchema(operation?: string): JsonObject {
   const fields = document.fields;
   const definition = managedCapabilityDefinition(operation);
-  const properties: JsonObject = Object.fromEntries(Object.entries(fields).map(([key]) => [key, { ...operationFieldSchema(definition, key) }]));
+  const properties: JsonObject = Object.fromEntries(Object.entries(fields).map(([key]) => [key, publicFieldSchema(operationFieldSchema(definition, key))]));
   const schema: JsonObject = {
     type: "object",
     properties,
@@ -317,7 +346,7 @@ export function managedCapabilityInputSchema(operation?: string): JsonObject {
     for (const condition of definition.conditions ?? []) {
       const ifSchema = conditionIf(condition);
       if (!ifSchema) continue;
-      const constrainedProperties = Object.fromEntries(Object.entries(condition.constraints ?? {}).map(([field, constraints]) => [field, { ...operationFieldSchema(definition, field), ...constraints }]));
+      const constrainedProperties = Object.fromEntries(Object.entries(condition.constraints ?? {}).map(([field, constraints]) => [field, { ...publicFieldSchema(operationFieldSchema(definition, field)), ...constraints }]));
       allOf.push({ if: ifSchema, then: {
         ...(condition.required?.length ? { required: condition.required } : {}),
         ...(condition.forbidden?.length ? { not: { anyOf: condition.forbidden.map(field => ({ required: [field] })) } } : {}),
@@ -343,6 +372,13 @@ function taskScopeSchema(definition?: ManagedCapabilityDefinition): JsonObject {
     type: "array", minItems: 1, items: { type: "object", required: ["profile_ref", "account_system_ref", "account_ref"],
       properties: { profile_ref: { type: "string", minLength: 1 }, account_system_ref: { type: "string", pattern: "^account-system:[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" }, account_ref: { type: "string", pattern: "^account:sha256:[a-f0-9]{64}$" } }, additionalProperties: false }
   };
+  if (definition?.id === "environment.proxy.update") {
+    properties.operations = { type: "array", minItems: 1, maxItems: 1, items: { const: definition.id } };
+    properties.profile_refs = { type: "array", minItems: 1, maxItems: 1, items: { type: "string", minLength: 1 } };
+    properties.origins = { type: "array", minItems: 1, maxItems: 1, items: { type: "string", format: "webenvoy-public-origin" } };
+    properties.proxy_refs = { type: "array", maxItems: 1, items: { type: "string", pattern: "^proxy-ref:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" } };
+    properties.allow_proxy_clear = { type: "boolean" };
+  }
   if (definition?.id === "profile.import" || definition?.id === "profile.migrate.request") {
     const importing = definition.id === "profile.import";
     properties.operations = { type: "array", minItems: 1, maxItems: 1, items: { const: definition.id } };
@@ -355,7 +391,7 @@ function taskScopeSchema(definition?: ManagedCapabilityDefinition): JsonObject {
     ...(definition.file_scope === "upload" ? { minItems: 1, maxItems: 1 } : { maxItems: 0 }),
     description: definition.file_scope === "upload" ? "Exactly the top-level file_ref." : "An explicit empty array."
   };
-  return { type: "object", properties, required: ["operations", "profile_refs", "origins", ...(definition?.id === "account.bind" ? ["account_binding_scopes"] : []), ...(definition?.id === "profile.import" || definition?.id === "profile.migrate.request" ? ["profile_source_refs"] : []), ...(definition?.file_scope === undefined ? [] : ["file_refs"])], additionalProperties: false };
+  return { type: "object", properties, required: ["operations", "profile_refs", "origins", ...(definition?.id === "account.bind" ? ["account_binding_scopes"] : []), ...(definition?.id === "environment.proxy.update" ? ["proxy_refs", "allow_proxy_clear"] : []), ...(definition?.id === "profile.import" || definition?.id === "profile.migrate.request" ? ["profile_source_refs"] : []), ...(definition?.file_scope === undefined ? [] : ["file_refs"])], additionalProperties: false };
 }
 
 function fieldConstraints(field: ManagedCapabilityField): string[] {
@@ -379,7 +415,7 @@ export function managedCapabilityExecutionInputSchema(operation?: string): JsonO
     grant_id: { type: "string", description: "The one owner-issued Grant for this submitted operation." },
     operation: { type: "string", ...(definition ? { enum: [definition.id] } : { pattern: document.operation_pattern }), description: "One exposed operation name." },
     task_scope: taskScopeSchema(definition),
-    ...Object.fromEntries((definition ? definition.allowed : Object.keys(document.fields)).map(field => [field, operationFieldSchema(definition, field)]))
+    ...Object.fromEntries((definition ? definition.allowed : Object.keys(document.fields)).map(field => [field, publicFieldSchema(operationFieldSchema(definition, field))]))
   };
   const schema: JsonObject = {
     type: "object", properties, required: ["idempotency_key", "grant_id", "operation", "task_scope"], additionalProperties: false
@@ -389,19 +425,26 @@ export function managedCapabilityExecutionInputSchema(operation?: string): JsonO
   const forbidden = Object.keys(document.fields).filter(field => !definition.allowed.includes(field));
   if (forbidden.length > 0) schema.not = { anyOf: forbidden.map(field => ({ required: [field] })) };
   const allOf: JsonObject[] = [];
-  if (definition.id === "account_system.import_template" || definition.id === "account.bind") {
+  if (definition.id === "account_system.import_template" || definition.id === "account.bind" || definition.id === "environment.proxy.update") {
     allOf.push({ properties: { task_scope: taskScopeSchema(definition) } });
   } else if (definition.file_scope === undefined) {
     allOf.push({ properties: { task_scope: { not: { required: ["file_refs"] } } } });
   } else {
     allOf.push({ properties: { task_scope: taskScopeSchema(definition) } });
   }
+  if (definition.id === "environment.proxy.update") {
+    allOf.push({
+      if: { required: ["proxy_ref"], properties: { proxy_ref: { type: "null" } } },
+      then: { properties: { task_scope: { properties: { proxy_refs: { maxItems: 0 }, allow_proxy_clear: { const: true } } } } },
+      else: { properties: { task_scope: { properties: { proxy_refs: { minItems: 1, maxItems: 1 }, allow_proxy_clear: { const: false } } } } }
+    });
+  }
   for (const condition of definition.conditions ?? []) {
     if (condition.kind === "conditional_fields" && condition.when && typeof condition.when === "object" && typeof (condition.when as JsonObject).field === "string") {
       const when = condition.when as JsonObject;
       const ifSchema = conditionIf(condition);
       if (!ifSchema) continue;
-      const constrainedProperties = Object.fromEntries(Object.entries(condition.constraints ?? {}).map(([field, constraints]) => [field, { ...operationFieldSchema(definition, field), ...constraints }]));
+      const constrainedProperties = Object.fromEntries(Object.entries(condition.constraints ?? {}).map(([field, constraints]) => [field, { ...publicFieldSchema(operationFieldSchema(definition, field)), ...constraints }]));
       allOf.push({ if: ifSchema, then: {
         ...(condition.required?.length ? { required: condition.required } : {}),
         ...(condition.forbidden?.length ? { not: { anyOf: condition.forbidden.map(field => ({ required: [field] })) } } : {}),

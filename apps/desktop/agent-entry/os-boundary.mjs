@@ -546,6 +546,8 @@ export function isOwnerHarborRoute(req) {
   if (url.origin !== 'http://owner.local' || url.username || url.password || url.hash) return false;
   if (url.pathname === '/owner/profile-sources') return !url.search && (req.method === 'GET' || req.method === 'POST');
   if (url.pathname === '/owner/profile-sources/revoke') return !url.search && req.method === 'POST';
+  if (url.pathname === '/owner/proxy-references') return !url.search && (req.method === 'GET' || req.method === 'POST');
+  if (url.pathname === '/owner/proxy-references/revoke') return !url.search && req.method === 'POST';
   if (url.pathname === '/runtime/sessions') {
     if (req.method !== 'GET') return false;
     const keys = [...url.searchParams.keys()];

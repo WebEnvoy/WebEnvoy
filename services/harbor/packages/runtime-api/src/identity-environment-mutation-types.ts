@@ -144,6 +144,7 @@ export type IdentityEnvironmentMutationFailureCode =
   | "provider_unavailable"
   | "provider_mismatch"
   | "proxy_policy_incompatible"
+  | "proxy_reference_unavailable"
   | "proxy_resolution_unavailable"
   | "proxy_unreachable"
   | "proxy_validation_unavailable"
@@ -221,7 +222,7 @@ export interface IdentityEnvironmentMutationConflict {
 export interface IdentityEnvironmentMutationOptions {
   provider_detection?: BrowserProviderDetectionInput;
   resolve_user_creation_default_provider_id?: () => string | undefined;
-  validate_proxy?: (proxy_ref: string) => "reachable" | "unreachable" | "incompatible";
+  validate_proxy?: (proxy_ref: string) => "registered" | "unavailable" | "reachable" | "unreachable" | "incompatible";
   resolve_proxy?: (proxy_ref: string) => string | null;
   delete_local_material?: (refs: IdentityEnvironmentLocalMaterialRefs) => "deleted" | "unknown" | "failed";
   stage_local_material_copy?: (

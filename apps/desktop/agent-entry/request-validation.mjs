@@ -15,6 +15,7 @@ function assertString(value, code, { min = 1, max = 512 } = {}) {
 }
 
 function assertField(value, schema, code) {
+  if (schema.nullable === true && value === null) return;
   if (Array.isArray(schema.type)) {
     if (schema.type.some(type => type === 'null' && value === null)) return;
     if (schema.type.some(type => type === 'string' && typeof value === 'string')) return assertField(value, { ...schema, type: 'string' }, code);
@@ -71,6 +72,15 @@ function assertTaskScope(scope, definition, code) {
       assertExactObject(tuple, ['profile_ref', 'account_system_ref', 'account_ref'], code);
       if (typeof tuple.profile_ref !== 'string' || !/^account-system:[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(tuple.account_system_ref) || !/^account:sha256:[a-f0-9]{64}$/.test(tuple.account_ref)) throw new Error(code);
     }
+    return;
+  }
+  if (definition?.id === 'environment.proxy.update') {
+    assertExactObject(scope, ['operations', 'profile_refs', 'origins', 'proxy_refs', 'allow_proxy_clear'], code);
+    taskArray(scope.operations, code, { min: 1, max: 1 });
+    taskArray(scope.profile_refs, code, { min: 1, max: 1 });
+    taskArray(scope.origins, code, { min: 1, max: 1, origin: true });
+    taskArray(scope.proxy_refs, code, { max: 1 });
+    if (scope.operations[0] !== definition.id || scope.proxy_refs.some(value => !/^proxy-ref:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) || typeof scope.allow_proxy_clear !== 'boolean') throw new Error(code);
     return;
   }
   const fileScope = definition?.file_scope;
@@ -301,6 +311,13 @@ export function validateOperationRequest(value, definitions) {
       value.task_scope.account_binding_scopes.length !== 1 || tuple.profile_ref !== value.profile_ref ||
       tuple.account_system_ref !== value.account_system_ref || tuple.account_ref !== value.account_ref) throw new Error(code);
   }
+  if (definition.id === 'environment.proxy.update') {
+    const scopeMatchesTarget = value.task_scope.profile_refs[0] === value.profile_ref && value.task_scope.origins[0] === value.origin;
+    const scopeMatchesProxy = value.proxy_ref === null
+      ? value.task_scope.proxy_refs.length === 0 && value.task_scope.allow_proxy_clear === true
+      : value.task_scope.proxy_refs.length === 1 && value.task_scope.proxy_refs[0] === value.proxy_ref && value.task_scope.allow_proxy_clear === false;
+    if (!scopeMatchesTarget || !scopeMatchesProxy) throw new Error(code);
+  }
   if (definition.file_scope === 'upload' && !/^attachment:runtime\/[0-9a-f-]{36}$/.test(value.task_scope.file_refs[0])) throw new Error(code);
   for (const [key, field] of Object.entries(fields)) if (Object.hasOwn(value, key)) assertField(value[key], field, code);
   if (Object.keys(value).some(key => fields[key] && !definition.allowed.includes(key))) throw new Error(code);
@@ -329,6 +346,8 @@ export function validateDescribeRequest(value, definitions) {
   assertExactObject(value, ['operation', 'context', 'arguments'], code);
   assertString(value.operation, code);
   if (!(new RegExp(definitions.operation_pattern).test(value.operation))) throw new Error(code);
+  let contextProfileRef;
+  let contextTaskScope;
   if (value.context !== undefined) {
     const definition = definitions.operations.find(item => item.id === value.operation);
     const core = definition?.context === 'core';
@@ -336,6 +355,8 @@ export function validateDescribeRequest(value, definitions) {
     assertString(context.grant_id, code);
     if (!core) assertString(context.profile_ref, code);
     assertTaskScope(context.task_scope, definition, code);
+    contextProfileRef = context.profile_ref;
+    contextTaskScope = context.task_scope;
     if (value.operation === 'profile.migrate.request' && context.task_scope.profile_source_refs.length !== 0) throw new Error(code);
   }
   if (value.arguments !== undefined) {
@@ -343,6 +364,15 @@ export function validateDescribeRequest(value, definitions) {
     const allowed = new Set(Object.keys(definitions.fields).filter(name => name !== 'profile_ref'));
     if (Object.keys(draft).some(key => !allowed.has(key))) throw new Error(code);
     for (const [key, field] of Object.entries(definitions.fields)) if (key !== 'profile_ref' && Object.hasOwn(draft, key)) assertField(draft[key], field, code);
+  }
+  if (value.operation === 'environment.proxy.update' && contextTaskScope !== undefined) {
+    const scope = contextTaskScope;
+    const args = value.arguments ?? {};
+    if (scope.profile_refs.length !== 1 || scope.profile_refs[0] !== contextProfileRef || scope.origins.length !== 1 ||
+      (scope.proxy_refs.length === 0) !== scope.allow_proxy_clear ||
+      args.origin !== undefined && args.origin !== scope.origins[0] ||
+      args.proxy_ref === null && (scope.proxy_refs.length !== 0 || scope.allow_proxy_clear !== true) ||
+      typeof args.proxy_ref === 'string' && (scope.proxy_refs.length !== 1 || scope.proxy_refs[0] !== args.proxy_ref || scope.allow_proxy_clear !== false)) throw new Error(code);
   }
   return value;
 }

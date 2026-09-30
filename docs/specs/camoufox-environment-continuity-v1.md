@@ -1,12 +1,12 @@
 # Camoufox Environment Continuity V1
 
-> 状态：Accepted（当前 #519 官方上游 launch bundle；#499 历史 continuity 事实保留；2026-09-12）
-> 版本：1.2（完整 `launch_options`/`context_options` exact replay；RGBA Canvas observation baseline 保留）
-> 日期：2026-09-12
+> 状态：Accepted（#519 官方上游 launch bundle；#499 历史 continuity 保留；#610 受限环境重放补充）
+> 版本：1.3（受限 locale/timezone/viewport replay；transient proxy；RGBA Canvas observation baseline 保留）
+> 日期：2026-10-01
 > 归口：[Camoufox 环境连续性 #499](https://github.com/WebEnvoy/WebEnvoy/issues/499)
 > 上位语义：[Profile Environment V1](profile-environment-v1.md)
 
-本文冻结 #519 官方上游 Camoufox 的受管环境材料持久化和 Driver readback，并保留 #499 的历史 continuity 事实作为兼容/recovery 校验依据。它不是公共 fingerprint API，也不承诺不可检测、固定网络出口或所有 Camoufox optional features。当前只接受 owner 核验的固定官方来源和版本；popup 首请求无法在派发前建立可信 Page 归属时按 `limited` 边界局部拒绝，不猜测或重放。#519／PR #522 的正式安装、人工交还、环境与存储连续和真实 Agent 证据只按其声明范围成立，不外推完整 Runtime。旧 patched/native Driver、私有 launch binding 和对应 live 证据仍为历史记录，不恢复旧 launchability。
+本文冻结 #519 官方上游 Camoufox 的受管环境材料持久化和 Driver readback，并保留 #499 的历史 continuity 事实作为兼容/recovery 校验依据。#610 在同一严格私有 bundle 上增加当前 owner timezone/locale/viewport 的有界重放，并让 proxy 只在每次 native launch 调用时短暂出现。它不是公共 fingerprint API，也不承诺不可检测、固定网络出口或所有 Camoufox optional features。当前只接受 owner 核验的固定官方来源和版本；popup 首请求无法在派发前建立可信 Page 归属时按 `limited` 边界局部拒绝，不猜测或重放。安装、人工交还、环境与存储连续和真实 Agent 证据只按各自已验证范围成立，不外推完整 Runtime。旧 patched/native Driver、私有 launch binding 和对应 live 证据仍为历史记录，不恢复旧 launchability。
 
 ## Current #519 upstream path
 
@@ -27,19 +27,37 @@ executable/package versions, `properties.json` and all three source archives.
 No latest lookup, download, app rewrite, site-packages rewrite, patched
 bundle, private transport or automatic upgrade is allowed.
 
-### Complete native options and replay
+### Native launch options and bounded replay
 
 For a new empty managed Profile, the public Camoufox `launch_options()` API
-is called once with the fixed official browser version and the configured
-timezone/locale/proxy values. The returned JSON object is persisted in
-`.webenvoy-camoufox-environment.v1.json` together with the complete
-`context_options` object (currently the bounded viewport option). The
-`launch_options` object must retain `args`, `env`, `executable_path`,
-`firefox_user_prefs` and `headless`; replay passes this exact object and the
-exact context object to the public Playwright persistent-context API, adding
-only the managed `user_data_dir` for that Profile. A non-empty Profile without
-the complete bundle fails closed; the driver never regenerates identity
-material or silently fills omitted fields.
+is called with the fixed official browser version, current timezone/locale and
+the currently resolved proxy. Harbor passes the current locale, timezone and
+bounded viewport as public Playwright persistent-context options as well. The
+private bundle retains the five allowlisted launch fields `args`, `env`,
+`executable_path`, `firefox_user_prefs` and `headless`; it deliberately omits
+the native `proxy` option and its URL. `context_options` accepts only
+`locale`, `timezone_id` and bounded `viewport` fields. Each launch assembles
+native options from this bundle and current owner configuration plus the
+managed `user_data_dir`; the persisted objects are not replayed as an
+unmodified pair.
+
+On replay, Harbor updates only supported dynamic values that differ from the
+saved projection. When the requested locale changes, it applies the pinned
+upstream locale helper to the existing Camoufox config, re-encodes that config
+through the pinned public encoder, and sets the matching Playwright `locale`.
+An unchanged locale reuses the saved config keys so a language-only request
+does not randomly choose a different region on each restart. An older bundle
+without `context_options.locale` is still readable; its first replay projects
+the current owner locale once and saves that value. Harbor updates or removes
+the `timezone` config key and `timezone_id` option together, and updates or
+removes the bounded viewport option. Other config fields, including
+fingerprint values and seeds, the launch arguments, user preferences and
+non-config environment entries stay unchanged. `identity_hash` remains based
+on the existing dynamic-key exclusion set. The proxy is rebuilt from the
+current resolved environment value for each launch and is removed when that
+value is absent; it is never recovered from the bundle. A non-empty Profile
+without the complete bundle fails closed; the driver never regenerates
+identity material or silently fills omitted fields.
 
 The bundle's private `config` remains the canonical environment projection for
 the existing identity/config hashes. The public Profile Environment contract
@@ -62,8 +80,8 @@ not disable the original task Page, other Pages, or other Profiles.
 
 ## 1. Design Obligation disposition
 
-- `DO-PROVIDER-PRIVATE-SCHEMA = triggered`（当前 #519 + 历史 #499）：固定 public `launch_options()` 生成的完整启动对象和 `context_options` 由 Harbor 持久化并精确 replay；其中 BrowserForge fingerprint、fonts、voices、WebGL 参数和 seed 仍是 private material。#499 的 config-only 生成/replay 只作为历史兼容事实，不能替代当前完整 options bundle。
-- `DO-GRANT-WIRE = not-triggered`：公共授权只在既有 `allowed_operations` 增加 `environment.read/update` 固定值；继续使用 Profile ceiling、Principal Grant 和 task scope，不新增 Grant 字段、scope dimension 或持久授权对象。
+- `DO-PROVIDER-PRIVATE-SCHEMA = triggered`（#519 固定来源、#610 环境 replay + 历史 #499）：固定 public `launch_options()` 生成的 allowlisted 启动对象和 `context_options` 由 Harbor 持久化；timezone/locale/viewport 只在既有 dynamic keys 与明确 context allowlist 内更新，proxy 只作 transient native launch option，bundle 不持久化 URL。BrowserForge fingerprint、fonts、voices、WebGL 参数和 seed 仍是 private material。#499 的 config-only 生成/replay 只作为历史兼容事实，不能替代当前完整 options bundle。
+- `DO-GRANT-WIRE = triggered`（#610）：proxy operation 的精确 refs 与明确清除权限以 [Grant Wire Contract V1.11](grant-wire-contract-v1.md) 为准。本文件只定义 Provider-private replay；旧 Grant 不推出新 proxy operation。
 - `DO-PLUGIN-EXPOSURE = triggered`：environment.read/update 已成为 Installed Plugin 的稳定 operation projection；公共配置、授权和 envelope 见 [Profile Environment V1](profile-environment-v1.md)，本文件只负责 Driver-private readback。
 - Network/Console contract：`not-triggered`。本文件不形成 Network/Console 公共 payload。
 - App IA：`not-triggered`。本切片不新增 App 工作台或导航。
@@ -73,13 +91,13 @@ not disable the original task Page, other Pages, or other Profiles.
 ### 2.1 Location and owner
 
 - Location: `<PROFILE_DIR>/.webenvoy-camoufox-environment.v1.json`。
-- Owner: Harbor/Driver owns the file and the containing managed Profile; the current Driver consumes the persisted complete `launch_options`/`context_options` objects through public Playwright, while Camoufox receives only the resulting public launch inputs.
+- Owner: Harbor/Driver owns the file and the containing managed Profile; the current Driver validates the persisted allowlisted launch fields and `context_options`, then adds only the current managed Profile directory and current transient proxy before invoking public Playwright.
 - The file is private provider state. It must never be printed, returned in a Driver result, copied into public facts, or included in an error message. File mode is `0600`; temporary files are created in the same Profile directory.
 - The bundle contains no proxy URL, Cookie, account state, request/response body, raw HAR, or external network observation.
 
 ### 2.2 JSON shape
 
-The exact v1 object is:
+The exact top-level v1 object is:
 
 ```json
 {
@@ -100,14 +118,26 @@ The exact v1 object is:
     "firefox_user_prefs": {},
     "headless": false
   },
-  "context_options": { "viewport": null }
+  "context_options": {
+    "locale": "en-US",
+    "timezone_id": "UTC",
+    "viewport": { "width": 1280, "height": 720 }
+  }
 }
 ```
 
-`launch_options` and `context_options` are required for a current #519
-upstream launch bundle. Legacy #499 bundles may omit them and remain readable
-by the recovery validator, but they are not sufficient to start the current
-Driver and are never silently completed or migrated.
+`launch_options` and `context_options` are required for a current upstream
+launch bundle. The strict launch allowlist is exactly the five fields shown
+above; `proxy` is forbidden in persisted options. `context_options` may
+contain any subset of `locale`, `timezone_id` and `viewport`; older bundles
+without `locale` remain readable. Locale is a 1–64 character BCP 47 tag
+accepted by the upstream locale helper, timezone is a bounded IANA identifier,
+and viewport is a bounded `{width,height}` object. Legacy #499 bundles may
+omit both option objects and remain readable by the recovery validator, but
+they are not sufficient to start the current Driver and are never silently
+completed or migrated. A prior strict reader rejects the newly added `locale`
+field rather than dropping it; rollback uses its matching bundle/Profile
+backup and never strips fields automatically.
 
 `config` is the complete JSON object reconstructed from the pinned provider's `env.CAMOU_CONFIG_1`, `CAMOU_CONFIG_2`, ... chunks after the first `launch_options()` call. It includes the generated BrowserForge fields, font/voice lists, WebGL fields, media-device defaults and the three seed fields. No hand-curated subset is used: omitted provider keys could be randomly filled again by `launch_options()`.
 
@@ -117,7 +147,7 @@ Canonical JSON for all hashes uses UTF-8, sorted object keys, compact separators
 - `locale:language`, `locale:region`, `locale:script`, `locale:all`, `navigator.language`;
 - `window.outerWidth`, `window.outerHeight`, `window.innerWidth`, `window.innerHeight`, `window.screenX`, `window.screenY`.
 
-The identity hash therefore stays stable when managed timezone/locale/viewport values change. It does not expose the config or any seed value.
+The identity hash therefore stays stable when managed timezone/locale/viewport values change. Locale replay updates `locale:language`, `locale:region`, `locale:script`, `locale:all` and `navigator.language` through the upstream locale helper; omitted current locale removes stale locale keys. Viewport remains a public context option and does not rewrite identity config. The hash does not expose the config or any seed value.
 
 `baseline` is either `null` or the first successful `environment_read` observation reduced to the fixed continuity fields below; it never contains raw font/voice materials, pixels, audio samples, or provider config. Its shape is `{ "observed_at": "<UTC>", "observed": { "<continuity field>": "<value or null>" }, "canvas": { "algorithm": "rgba8-240x60-v1", "instance_ref": "<32 lowercase hex Driver launch ref>", "hash": "<64 lowercase hex SHA-256 or null>" } }`. `baseline_sha256` covers that exact baseline object and is `null` iff `baseline` is `null`. Baseline creation/update uses the same private file and an atomic replacement.
 
@@ -142,8 +172,8 @@ No migration platform is part of v1. An unsupported schema/provider/browser/prop
 - Corrupt or incompatible bundle: fail closed before `NewBrowser`; preserve the file and Profile for owner diagnosis.
 - Missing bundle on a non-empty Profile: fail closed; do not call the generator.
 - First-write collision: fail closed rather than overwrite the other writer's bundle. Harbor's Profile lock remains the concurrency boundary.
-- Browser/provider startup failure after first persistence: retry the same bundle; do not regenerate, switch Provider, switch proxy, or create a replacement Profile.
-- Explicit dynamic override failure: the private bundle remains unchanged, so the prior identity can be retried with the prior effective configuration.
+- Browser/provider startup failure after first persistence: retry the same identity bundle; do not regenerate identity, switch Provider, or create a replacement Profile. The current owner configuration is projected again on retry, including its current proxy selection.
+- Invalid or unencodable dynamic overrides leave the private bundle unchanged. Once a valid bounded configuration is atomically projected, a later browser startup failure keeps it for retry. Proxy is resolved again on each retry and is never persisted.
 - There is no automatic Provider rollback or identity migration. Only the observation-algorithm extension in §2.2 is automatic; a human/owner restores a matching artifact for a reader rollback.
 
 ## 3. Historical `environment_read` private Driver result
@@ -202,13 +232,13 @@ static provenance alone is `live_verified`.
 | Fact | Owner / persistence | Apply or replay path | Readback / V1 status | Boundary |
 | --- | --- | --- | --- | --- |
 | Camoufox/package, browser, `properties.json` (current #519) | Owner-provided fixed install binding; source archives and properties are rehashed | Installed binding preflight, Driver preflight and bundle metadata | Validation facts for `0.5.6` / `152.0.4-beta.30` / given SHA; installed/live evidence pending | Mismatch rejects launch; no latest lookup or upgrade migration |
-| Complete `launch_options` / `context_options` (current #519) | Harbor-owned private bundle in the managed Profile | One public `launch_options()` generation, then exact persistent-context replay | Bundle schema/hash validator and Driver fixture; cross-restart live evidence pending | Missing on non-empty Profile fails closed; no random completion |
+| Allowlisted `launch_options` / `context_options` (#519, extended by #610) | Harbor-owned private bundle in the managed Profile; no proxy option or URL | One public `launch_options()` generation; replay applies current locale/timezone/viewport to bounded config/context fields and adds current proxy transiently | Strict bundle validator and Driver fixture; cross-restart live evidence scoped to its exact candidate | Missing on non-empty Profile fails closed; no random identity completion; prior reader rejects new locale field |
 | Browser family / target OS / UA / platform / oscpu | Provider-generated on first launch, then WebEnvoy private bundle | Full `config` replay; `os` still maps host platform but stored keys win | JS language/device facts plus bundle hash; stable-config verified for pinned path | Host OS itself is not claimed stable; changing it is a qualified compatibility risk |
-| Locale / language list | WebEnvoy configured; dynamic and excluded from identity hash | `locale`/`handle_locales()` override in memory | `language`, `languages`; explicit locale path supported | No locale is inferred from network in this slice |
-| Timezone | WebEnvoy configured; dynamic and excluded from identity hash; Provider-owned derived preference | In-memory config, native `timezone_id` and exact `roverfox.s.timezone_0` preference on the default persistent context | `timezone`; IANA input validation does not replace actual browser readback | GeoIP-derived timezone is not enabled; no multi-container claim |
-| Viewport / window | WebEnvoy configured; window geometry is dynamic and excluded from identity hash | Replay config geometry override; stored screen remains | `viewport` from `innerWidth`/`innerHeight`; explicit outer-window path limited to pinned Camoufox semantics | Does not claim screen/DPR or native-window continuity beyond observed facts |
+| Locale / language list | WebEnvoy configured; locale is dynamic and excluded from identity hash | Pinned `handle_locales()` updates config; matching Playwright `locale` is replayed in context | `language`, `languages`; explicit locale path supported | No locale is inferred from network in this slice |
+| Timezone | WebEnvoy configured; timezone is dynamic and excluded from identity hash | `timezone` config key and Playwright `timezone_id` are updated together | `timezone`; configured/effective facts still require actual readback | No geo or network-exit inference |
+| Viewport | WebEnvoy configured; bounded public context configuration | Playwright context `viewport` is replayed; it does not rewrite identity config | `viewport` from `innerWidth`/`innerHeight` | Does not claim screen/DPR or native-window continuity beyond observed facts |
 | Screen | Provider-generated with BrowserForge and stored in bundle | Full config replay | `screen`; stable-config verified, actual display bounds are observed | Headful display changes can be drift/launch risk; no re-randomization |
-| Proxy reference / server | Harbor/Core configured and resolved outside this bundle | Existing `proxy` Playwright option | Not returned by `environment_read`; not network-verified here | No proxy URL or exit inference is persisted/returned |
+| Proxy reference / server | Harbor/Core configured and resolved outside this bundle | Current `proxy` Playwright option is assembled per launch and cleared when absent | Not returned by `environment_read`; not network-verified here | No proxy URL or exit inference is persisted/returned |
 | Network exit | External network observation only | Not applied by this Driver command | Unsupported / no safe readback (`null` outside requested observed shape) | No external request and no live proxy evidence |
 | Geo | Provider geolocation optional path, not passed by the historical Driver | Unsupported in this slice | Not safely read back | Do not infer geo from locale/timezone |
 | WebRTC | Provider optional `geoip`/prefs path, not enabled by the historical Driver | Limited/unsupported for #499 | Not included in readback; no claim | Do not claim leak prevention or continuity |
@@ -223,7 +253,7 @@ static provenance alone is `live_verified`.
 | Font spacing seed | Provider randomizes once per first config and stores `fonts:spacing_seed` | Full config replay | No direct safe public readback in this result; bundle continuity only | Do not expose seed |
 | Interaction policy | Harbor Driver-owned fixed controlled interaction; not a bundle identity field | Existing `managed_interaction` path | No environment_read field | `mw:` helper is fixed; empty `aria-labelledby` IDs are filtered before `getElementById` |
 | Profile storage / account state | Harbor owns managed `PROFILE_DIR`; Firefox persistent context owns browser storage | `user_data_dir=PROFILE_DIR`, same Profile on restart | No Cookie/account read; storage continuity is lifecycle evidence, not this result | Never use external active Profile or replace it silently |
-| Provider generated state | Harbor Driver captures the complete `CAMOU_CONFIG_*` result | Versioned private bundle and exact replay | `bundle_hash`; config itself remains private | Missing/corrupt state rejects launch |
+| Provider generated state | Harbor Driver captures the complete `CAMOU_CONFIG_*` result | Versioned private bundle; replay changes only the declared dynamic config/context fields and preserves other generated values | `bundle_hash`; config itself remains private | Missing/corrupt state rejects launch |
 | `main_world_eval` | Driver launch policy; pinned provider maps it to `allowMainWorld` | Fixed `mw:` expressions for controlled/site/readback paths | `environment_read` uses one fixed expression; no script input | Enabling main-world evaluation is recorded fact, not a stealth defect by itself |
 | Page evaluation | Harbor fixed helpers use `mw:`; site probe/read operation have fixed expressions | `managed_observe`, site/read probes, environment read | Environment read has no public script parameter | No raw debugger/CDP/Juggler endpoint is exposed |
 | Route/interception | Driver only installs public-navigation/interaction guards for their existing managed scopes | Same-origin GET/redirect blocking; interaction route may fetch with `max_redirects=0` | No route facts in environment_read | These guards can affect managed navigation; environment_read itself does not route or request |

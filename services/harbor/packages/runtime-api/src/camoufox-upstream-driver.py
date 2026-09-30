@@ -24,6 +24,7 @@ from camoufox.utils import get_env_vars, launch_options
 from camoufox_bundle_validator import (
     BROWSER_VERSION_PIN,
     CAMOUFOX_VERSION_PIN,
+    DYNAMIC_ENVIRONMENT_CONFIG_KEYS,
     ENVIRONMENT_BUNDLE_FILENAME,
     PROPERTIES_SHA256_PIN,
     canonical_json,
@@ -176,6 +177,7 @@ def replace_camoufox_config(options: dict[str, Any], config: dict[str, Any], use
 
 def write_bundle(profile_dir: str, options: dict[str, Any], context_options: dict[str, Any]) -> dict[str, Any]:
     config = decode_camoufox_config(options)
+    persisted_options = {key: value for key, value in options.items() if key != "proxy"}
     bundle = {
         "schema_version": 1,
         "provider": "camoufox",
@@ -187,7 +189,7 @@ def write_bundle(profile_dir: str, options: dict[str, Any], context_options: dic
         "identity_hash": json_hash(identity_config(config)),
         "baseline": None,
         "baseline_sha256": None,
-        "launch_options": options,
+        "launch_options": persisted_options,
         "context_options": context_options,
     }
     validate_environment_bundle(bundle)
@@ -207,11 +209,8 @@ def write_bundle(profile_dir: str, options: dict[str, Any], context_options: dic
     return bundle
 
 
-def update_persisted_timezone(profile_dir: str, bundle: dict[str, Any], timezone_id: Any) -> dict[str, Any]:
-    """Atomically update the supported timezone in context and CAMOU config."""
-    if not isinstance(timezone_id, str) or not timezone_id:
-        return bundle
-    timezone_id = validate_timezone_id(timezone_id)
+def update_persisted_environment(profile_dir: str, bundle: dict[str, Any], environment: dict[str, Any]) -> dict[str, Any]:
+    """Project the current bounded environment onto a retained launch bundle."""
     context_options = bundle.get("context_options", {})
     if not isinstance(context_options, dict):
         raise ValueError("Camoufox context options are corrupt.")
@@ -220,33 +219,79 @@ def update_persisted_timezone(profile_dir: str, bundle: dict[str, Any], timezone
         raise ValueError("Camoufox environment bundle has no complete launch options.")
     config = decode_camoufox_config(launch_options)
     config_timezone = config.get("timezone")
-    if not isinstance(config_timezone, str) or not config_timezone:
-        raise ValueError("Camoufox environment config has no supported timezone field.")
-    validate_timezone_id(config_timezone)
+    if config_timezone is not None:
+        if not isinstance(config_timezone, str) or not config_timezone:
+            raise ValueError("Camoufox environment config timezone is corrupt.")
+        validate_timezone_id(config_timezone)
     stored_config = bundle.get("config")
     if not isinstance(stored_config, dict):
         raise ValueError("Camoufox environment bundle config is corrupt.")
     if stored_config != config:
         raise ValueError("Camoufox environment bundle config disagrees with launch options.")
     updated_config = dict(config)
-    updated_config["timezone"] = timezone_id
-    if set(updated_config) != set(config) or any(updated_config[key] != config[key] for key in config if key != "timezone"):
-        raise ValueError("Camoufox timezone update touched immutable config fields.")
-    updated_options = replace_camoufox_config(launch_options, updated_config, "mac") if config_timezone != timezone_id else launch_options
+
+    timezone_id = environment.get("timezone")
+    if timezone_id is not None:
+        if not isinstance(timezone_id, str) or not timezone_id:
+            raise ValueError("Camoufox timezone is corrupt.")
+        timezone_id = validate_timezone_id(timezone_id)
+        updated_config["timezone"] = timezone_id
+    else:
+        updated_config.pop("timezone", None)
+
+    language = environment.get("language")
+    if language is not None:
+        if not isinstance(language, str) or not language:
+            raise ValueError("Camoufox language is corrupt.")
+        if context_options.get("locale") != language:
+            # Let the pinned upstream locale implementation update its own
+            # config keys only when the requested locale changes. Languages
+            # without an explicit region can select one probabilistically.
+            for key in DYNAMIC_ENVIRONMENT_CONFIG_KEYS:
+                if key.startswith("locale:") or key == "navigator.language":
+                    updated_config.pop(key, None)
+            from camoufox.locales import handle_locales
+
+            handle_locales(language, updated_config)
+    else:
+        for key in DYNAMIC_ENVIRONMENT_CONFIG_KEYS:
+            if key.startswith("locale:") or key == "navigator.language":
+                updated_config.pop(key, None)
+
+    viewport_value = environment.get("viewport")
+    viewport = parse_viewport(viewport_value)
+    if viewport_value is not None and viewport is None:
+        raise ValueError("Camoufox viewport is corrupt.")
+    updated_context_options = dict(context_options)
+    if viewport is None:
+        updated_context_options.pop("viewport", None)
+    else:
+        updated_context_options["viewport"] = viewport
+    if language is None:
+        updated_context_options.pop("locale", None)
+    else:
+        updated_context_options["locale"] = language
+    if timezone_id is None:
+        updated_context_options.pop("timezone_id", None)
+    else:
+        updated_context_options["timezone_id"] = timezone_id
+
+    if updated_config == config and updated_context_options == context_options:
+        return bundle
+    if identity_config(updated_config) != identity_config(config):
+        raise ValueError("Camoufox environment update touched immutable identity config.")
+    updated_options = replace_camoufox_config(launch_options, updated_config, "mac") if updated_config != config else launch_options
     if any(updated_options[key] != launch_options[key] for key in ("args", "executable_path", "firefox_user_prefs", "headless")):
-        raise ValueError("Camoufox timezone update touched immutable launch state.")
+        raise ValueError("Camoufox environment update touched immutable launch state.")
     updated_environment = updated_options.get("env")
     original_environment = launch_options.get("env")
     if not isinstance(updated_environment, dict) or not isinstance(original_environment, dict):
         raise ValueError("Camoufox launch options environment is corrupt.")
     for key, value in original_environment.items():
         if not CAMOU_CONFIG_CHUNK.fullmatch(key) and updated_environment.get(key) != value:
-            raise ValueError("Camoufox timezone update touched immutable environment state.")
+            raise ValueError("Camoufox environment update touched immutable environment state.")
     if decode_camoufox_config(updated_options) != updated_config:
-        raise ValueError("Camoufox timezone update did not persist the complete config.")
-    if identity_config(updated_config) != identity_config(config):
-        raise ValueError("Camoufox timezone update touched immutable identity state.")
-    updated_context_options = {**context_options, "timezone_id": timezone_id}
+        raise ValueError("Camoufox environment update did not persist the complete config.")
     updated = {
         **bundle,
         "config": updated_config,
@@ -255,11 +300,9 @@ def update_persisted_timezone(profile_dir: str, bundle: dict[str, Any], timezone
         "launch_options": updated_options,
         "context_options": updated_context_options,
     }
-    if config_timezone == timezone_id and context_options.get("timezone_id") == timezone_id:
-        return bundle
     validate_environment_bundle(updated)
     path = bundle_path(profile_dir)
-    temporary = path.with_name(f".{path.name}.timezone-{os.getpid()}-{time.time_ns()}")
+    temporary = path.with_name(f".{path.name}.environment-{os.getpid()}-{time.time_ns()}")
     temporary.write_bytes(canonical_json(updated) + b"\n")
     os.chmod(temporary, 0o600)
     try:
@@ -267,6 +310,17 @@ def update_persisted_timezone(profile_dir: str, bundle: dict[str, Any], timezone
     finally:
         temporary.unlink(missing_ok=True)
     return updated
+
+
+def apply_transient_proxy(options: dict[str, Any], environment: dict[str, Any]) -> dict[str, Any]:
+    """Add only the current resolved proxy to the native launch invocation."""
+    options.pop("proxy", None)
+    proxy_server = environment.get("proxy_server")
+    if proxy_server is not None:
+        if not isinstance(proxy_server, str) or not proxy_server:
+            raise ValueError("Camoufox proxy server is corrupt.")
+        options["proxy"] = {"server": proxy_server}
+    return options
 
 
 def load_bundle(profile_dir: str) -> dict[str, Any]:
@@ -288,11 +342,12 @@ def options_for(request: dict[str, Any], profile_dir: str) -> tuple[dict[str, An
     if bundle is not None:
         verify_launch_executable(request, bundle["launch_options"])
         environment = request.get("environment") if isinstance(request.get("environment"), dict) else {}
-        bundle = update_persisted_timezone(profile_dir, bundle, environment.get("timezone"))
+        bundle = update_persisted_environment(profile_dir, bundle, environment)
         context_options = bundle.get("context_options", {})
         if not isinstance(context_options, dict):
             raise ValueError("Camoufox context options are corrupt.")
-        return deepcopy(bundle["launch_options"]), bundle, True, deepcopy(context_options)
+        options = apply_transient_proxy(deepcopy(bundle["launch_options"]), environment)
+        return options, bundle, True, deepcopy(context_options)
     if profile_has_state(profile_dir):
         raise ValueError("Managed Profile has state but no exact Camoufox launch bundle.")
     source = request.get("source")
@@ -306,6 +361,8 @@ def options_for(request: dict[str, Any], profile_dir: str) -> tuple[dict[str, An
     locale = environment.get("language") if isinstance(environment.get("language"), str) and environment["language"] else None
     proxy = {"server": environment["proxy_server"]} if isinstance(environment.get("proxy_server"), str) and environment["proxy_server"] else None
     context_options = {}
+    if locale:
+        context_options["locale"] = locale
     if (viewport := parse_viewport(environment.get("viewport"))):
         context_options["viewport"] = viewport
     if timezone_id:
@@ -336,6 +393,7 @@ def options_for(request: dict[str, Any], profile_dir: str) -> tuple[dict[str, An
     options = json_safe_options(options)
     options["executable_path"] = executable
     verify_launch_executable(request, options)
+    options = apply_transient_proxy(options, environment)
     bundle = write_bundle(profile_dir, options, context_options)
     verify_launch_executable(request, bundle["launch_options"])
     return options, bundle, False, context_options
