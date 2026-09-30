@@ -49,7 +49,9 @@ const isProviderPreference = (operation: string) => ["provider.preference.read",
 const isBusinessTargetOperation = (operation: string) => (managedBusinessTargetOperations as readonly string[]).includes(operation);
 function discoveryExecutionChecks(operation: string): string[] {
   const checks = ["reauthorize"];
-  if (isBusinessTargetOperation(operation)) return [...checks, "check_current_account_binding"];
+  // Core owns the exact current Account binding check, represented by the
+  // existing reauthorize check in descriptions and repeated at execution.
+  if (isBusinessTargetOperation(operation)) return checks;
   if (["instance.observe", "instance.read", "instance.snapshot", "instance.click", "instance.input", "instance.press", "instance.scroll", "instance.wait", "instance.diagnostics", "page.list", "page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward", "file.upload", "file.download"].includes(operation)) checks.push("verify_page_and_target");
   if (["file.upload", "file.download"].includes(operation)) checks.push("verify_file_material");
   if (["instance.click", "instance.input", "instance.press", "instance.scroll", "instance.wait", "page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward", "file.upload", "file.download", "instance.stop", "instance.handoff", "environment.update", "provider.preference.set", "provider.preference.clear"].includes(operation)) checks.push("acquire_control_if_required");

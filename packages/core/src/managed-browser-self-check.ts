@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { createHash } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createFileManagedAccessStore, managedFileOperations, managedOperations, managedBusinessTargetOperations, managedInteractionOperations, managedScopeConfirmationSchemaVersion } from "./managed-access.js";
@@ -470,14 +470,32 @@ try {
   const beforeTargetDescribeCatalog = managedOperationCatalogReads, beforeTargetDescribeCapabilities = capabilityDescriptions;
   const beforeTargetDescribeSessionReads = sessionReads, beforeTargetDescribeRuns = (await runRecordStore.listRunRecords()).length;
   const beforeTargetDescribeDecisions = (await authorizationDecisionStore.queryAuthorizationDecisions({ limit: 100 })).authorization_decisions.length;
+  const localTargetStaticDescription = await service.describe(credentialHash, { connection_id: connection.connection_id, operation: "business_target.list" });
+  assert.equal(localTargetStaticDescription.mode, "definition_only");
+  assert.deepEqual(localTargetStaticDescription.execution_checks, ["reauthorize"]);
   sessionStopped = true;
   const localTargetDescription = await service.describe(credentialHash, { connection_id: connection.connection_id, operation: "business_target.list",
     context: targetDescribeContext, arguments: { account_system_ref: accountSystemRef, account_ref: accountRefA } });
   sessionStopped = false;
+  assert.equal(localTargetDescription.mode, "contextual");
+  assert.equal((localTargetDescription.authorization as { state: string }).state, "allowed");
   assert.equal((localTargetDescription.provider as { state: string }).state, "not_applicable", "Core-local metadata has no Provider runtime dependency");
   assert.equal((localTargetDescription.availability as { state: string }).state, "no_known_blocker",
     "a unique selected Account remains available when another binding makes the Profile aggregate conflicted");
-  assert.deepEqual(localTargetDescription.execution_checks, ["reauthorize", "check_current_account_binding"]);
+  assert.deepEqual(localTargetDescription.execution_checks, ["reauthorize"]);
+  const capabilityDescriptionSchema = JSON.parse(await readFile(new URL("../../schemas/schemas/capability-description.schema.json", import.meta.url), "utf8")) as {
+    properties?: { execution_checks?: { items?: { enum?: unknown[] } } }
+  };
+  const formalExecutionChecks = new Set((capabilityDescriptionSchema.properties?.execution_checks?.items?.enum ?? [])
+    .filter((check): check is string => typeof check === "string"));
+  assert(formalExecutionChecks.size > 0, "the formal capability-description schema must declare execution_checks");
+  for (const [label, description] of [["definition-only", localTargetStaticDescription], ["authorized contextual", localTargetDescription]] as const) {
+    assert(Array.isArray(description.execution_checks), `${label} BusinessTarget description must return execution_checks`);
+    for (const check of description.execution_checks) {
+      assert.equal(typeof check, "string", `${label} execution check must be a string`);
+      assert(formalExecutionChecks.has(check), `${label} execution check ${check} must be allowed by the formal response schema`);
+    }
+  }
   assert.equal(managedOperationCatalogReads, beforeTargetDescribeCatalog, "Core-local metadata description does not require Harbor's operation catalog");
   assert.equal(capabilityDescriptions, beforeTargetDescribeCapabilities, "Core-local metadata description does not query Harbor capability availability");
   assert.equal(sessionReads, beforeTargetDescribeSessionReads, "Core-local metadata description does not require a running Instance");
