@@ -203,6 +203,8 @@ for (const definition of managedCapabilityDefinitions.operations.filter(item => 
   assert.ok(example, `${definition.id} illustrative example`);
   const exampleEnvelope = parserFixture(definition);
   for (const [field, value] of Object.entries(example!)) if (field !== "illustrative_only") exampleEnvelope[field] = value;
+  if (definition.id === "profile.import") exampleEnvelope.task_scope = { ...(exampleEnvelope.task_scope as Record<string, unknown>), profile_source_refs: [example!.profile_source_ref] };
+  if (definition.id === "profile.migrate.request") exampleEnvelope.task_scope = { ...(exampleEnvelope.task_scope as Record<string, unknown>), profile_refs: [example!.profile_ref] };
   assert.doesNotThrow(() => parseManagedBrowserRequest(exampleEnvelope), `${definition.id} assembled illustrative envelope`);
   const inputSchema = managedCapabilityExecutionInputSchema(definition.id) as Record<string, any>;
   assert.deepEqual(inputSchema.properties.operation.enum, [definition.id]);

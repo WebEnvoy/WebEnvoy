@@ -87,7 +87,7 @@ const managedTaskScopeProperties = {
   profile_refs: { type: 'array', items: { type: 'string' } },
   origins: { type: 'array', items: { type: 'string' } }
 };
-const managedProfileSourceRefs = { type: 'array', minItems: 0, maxItems: 64, items: { type: 'string', pattern: '^profile-source:[0-9a-f-]{36}$' } };
+const managedProfileSourceRefs = { type: 'array', minItems: 0, maxItems: 64, items: { type: 'string', pattern: '^profile-source:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' } };
 const managedProfileTransferScopeSchema = () => ({
   type: 'object',
   properties: { ...managedTaskScopeProperties, profile_source_refs: managedProfileSourceRefs },
@@ -109,6 +109,19 @@ const managedTaskScopeSchema = (fileScope, operationId) => {
         properties: { profile_ref: { type: 'string', minLength: 1 }, account_system_ref: { type: 'string', pattern: '^account-system:[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' }, account_ref: { type: 'string', pattern: '^account:sha256:[a-f0-9]{64}$' } }, additionalProperties: false } }
     }, required: ['operations', 'profile_refs', 'origins', 'account_binding_scopes'], additionalProperties: false
   };
+  if (operationId === 'profile.import' || operationId === 'profile.migrate.request') {
+    const importing = operationId === 'profile.import';
+    return {
+      type: 'object', properties: {
+        operations: { type: 'array', minItems: 1, maxItems: 1, items: { const: operationId } },
+        profile_refs: { type: 'array', ...(importing ? { maxItems: 0 } : { minItems: 1, maxItems: 1 }), items: { type: 'string', minLength: 1 } },
+        origins: { type: 'array', ...(importing ? { minItems: 1, maxItems: 1 } : { maxItems: 0 }), items: { type: 'string' } },
+        profile_source_refs: { type: 'array', ...(importing ? { minItems: 1, maxItems: 1 } : { maxItems: 0 }), items: managedProfileSourceRefs.items }
+      }, required: ['operations', 'profile_refs', 'origins', 'profile_source_refs'], additionalProperties: false,
+      'x-webenvoy-equals': importing ? { left: 'task_scope.profile_source_refs[0]', right: 'profile_source_ref' }
+        : { left: 'task_scope.profile_refs[0]', right: 'profile_ref' }
+    };
+  }
   return ({
   type: 'object',
   description: 'Authorization scope for this single submitted operation, not an entire multi-step workflow. File refs belong only to the current file operation.',
@@ -174,7 +187,8 @@ const operationConditions = capabilityOperations.map(definition => ({
   if: { required: ['operation'], properties: { operation: { const: definition.id } } },
   then: {
     ...conditionThen(definition),
-    ...(definition.id === 'account_system.import_template' || definition.id === 'account.bind' ? { properties: { task_scope: managedTaskScopeSchema(undefined, definition.id) } } : {})
+    ...(['account_system.import_template', 'account.bind', 'profile.import', 'profile.migrate.request'].includes(definition.id)
+      ? { properties: { task_scope: managedTaskScopeSchema(undefined, definition.id) } } : {})
   }
 }));
 const managedOperationSchema = {

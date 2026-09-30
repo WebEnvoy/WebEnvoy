@@ -29,7 +29,20 @@ try {
   const importAccess = await store.checkAccess(digest, { connection_id: connection.connection_id, grant_id: importGrant.grant_id, operation: "profile.import", profile_source_ref: sourceRef, template_ref: template.template_ref, task_scope: { operations: ["profile.import"], profile_refs: [], origins: ["https://example.com"], profile_source_refs: [sourceRef] } });
   assert.deepEqual(importAccess.creation_template, template);
   assert.deepEqual((await reloaded.list()).grants.find(item => item.grant_id === importGrant.grant_id)?.profile_source_refs, [sourceRef]);
-  await rejected(store.checkAccess(digest, { connection_id: connection.connection_id, grant_id: importGrant.grant_id, operation: "profile.import", profile_source_ref: "profile-source:00000000-0000-4000-8000-000000000002", template_ref: template.template_ref, task_scope: { operations: ["profile.import"], profile_refs: [], origins: ["https://example.com"], profile_source_refs: [sourceRef] } }), "managed_access_denied");
+  await rejected(store.checkAccess(digest, { connection_id: connection.connection_id, grant_id: importGrant.grant_id, operation: "profile.import", profile_source_ref: sourceRef, target_provider_id: "camoufox", template_ref: template.template_ref, task_scope: { operations: ["profile.import"], profile_refs: [], origins: ["https://example.com"], profile_source_refs: [sourceRef] } }), "managed_access_invalid_input");
+  const importedProfilePolicy = await store.recordCreatedProfile({ idempotency_key: "import-created-target", grant_id: importGrant.grant_id,
+    operation: "profile.import", profile_source_ref: sourceRef, profile_ref: "profile:imported" });
+  assert.equal(importedProfilePolicy.profile_ref, "profile:imported");
+  const reservedImportAccess = await store.checkAccess(digest, { connection_id: connection.connection_id, grant_id: importGrant.grant_id, operation: "profile.import",
+    profile_ref: "profile:imported", created_profile_ref: "profile:imported", creation_reservation_ref: "import-created-target", profile_source_ref: sourceRef,
+    template_ref: template.template_ref, task_scope: { operations: ["profile.import"], profile_refs: [], origins: ["https://example.com"], profile_source_refs: [sourceRef] } });
+  assert.deepEqual(reservedImportAccess.creation_template, template, "the target's recorded quota does not block its own reauthorization");
+  assert.ok(reservedImportAccess.grant.profile_refs.includes("profile:imported"));
+  await rejected(store.checkAccess(digest, { connection_id: connection.connection_id, grant_id: importGrant.grant_id, operation: "profile.import",
+    profile_ref: "profile:imported", created_profile_ref: "profile:imported", creation_reservation_ref: "import-created-target", profile_source_ref: "profile-source:00000000-0000-4000-8000-000000000002",
+    template_ref: template.template_ref, task_scope: { operations: ["profile.import"], profile_refs: [], origins: ["https://example.com"], profile_source_refs: [sourceRef] } }), "managed_access_denied");
+  const otherImportGrant = await store.createGrant({ idempotency_key: "other-import-grant", principal_id: principal.principal_id, profile_refs: [], allowed_operations: ["profile.import"], allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), creation_template: template, max_created_profiles: 1, profile_source_refs: [sourceRef] });
+  await rejected(store.checkAccess(digest, { connection_id: connection.connection_id, grant_id: otherImportGrant.grant_id, operation: "profile.import", profile_source_ref: "profile-source:00000000-0000-4000-8000-000000000002", template_ref: template.template_ref, task_scope: { operations: ["profile.import"], profile_refs: [], origins: ["https://example.com"], profile_source_refs: [sourceRef] } }), "managed_access_denied");
   await rejected(store.checkAccess(digest, { ...request, template_ref: "template:wider" }), "managed_access_creation_denied");
   await rejected(store.checkAccess(digest, { ...request, permission_ceiling: { allowed_operations: ["instance.stop"] } }), "managed_access_invalid_input");
   await rejected(store.checkAccess(digest, { ...request, connection_id: "connection:forged" }), "managed_access_connection_unavailable");

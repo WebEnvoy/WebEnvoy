@@ -79,6 +79,7 @@ const document = JSON.parse(readFileSync(definitionPath, "utf8")) as ManagedCapa
 const byOperation = new Map(document.operations.map(definition => [definition.id, definition]));
 const envelopeFields = ["idempotency_key", "connection_id", "grant_id", "operation", "task_scope"] as const;
 const operationFields = new Set(Object.keys(document.fields));
+const profileSourceRefPattern = /^profile-source:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 // Existing out-of-scope operations still pass through the legacy parser.
 const outOfScopeExecutionFields = ["account_system_ref", "account_ref", "backup_ref", "operation_ref"] as const;
 
@@ -253,10 +254,22 @@ function collectManagedCapabilityInputShapeIssues(value: JsonObject, partial: bo
     if (!scope || typeof scope !== "object" || Array.isArray(scope)) issues.invalid.push({ field: "task_scope", code: "invalid_value" });
     else {
       const scopeObject = scope as JsonObject;
+      const profileTransfer = definition.id === "profile.import" || definition.id === "profile.migrate.request";
       const scopeFields = definition.id === "account_system.import_template" ? ["operations", "template_refs"]
         : definition.id === "account.bind" ? ["operations", "profile_refs", "origins", "account_binding_scopes"]
-          : ["operations", "profile_refs", "origins", ...(definition.file_scope === undefined ? [] : ["file_refs"] )];
+          : ["operations", "profile_refs", "origins", ...(profileTransfer ? ["profile_source_refs"] : []), ...(definition.file_scope === undefined ? [] : ["file_refs"] )];
       if (Object.keys(scopeObject).some(key => !scopeFields.includes(key))) issues.invalid.push({ field: "task_scope", code: "invalid_value" });
+      if (profileTransfer) {
+        const invalidScope = (field: string) => issues.invalid.push({ field, code: "invalid_value" });
+        const operations = scopeObject.operations;
+        const profileRefs = scopeObject.profile_refs;
+        const origins = scopeObject.origins;
+        const sourceRefs = scopeObject.profile_source_refs;
+        if (!Array.isArray(operations) || operations.length !== 1 || operations[0] !== definition.id) invalidScope("task_scope.operations");
+        if (!Array.isArray(profileRefs) || (definition.id === "profile.import" ? profileRefs.length !== 0 : profileRefs.length !== 1 || profileRefs[0] !== value.profile_ref)) invalidScope("task_scope.profile_refs");
+        if (!Array.isArray(origins) || (definition.id === "profile.import" ? origins.length !== 1 : origins.length !== 0) || origins.some(item => typeof item !== "string" || !publicOrigin(item))) invalidScope("task_scope.origins");
+        if (!Array.isArray(sourceRefs) || (definition.id === "profile.import" ? sourceRefs.length !== 1 || sourceRefs[0] !== value.profile_source_ref : sourceRefs.length !== 0) || sourceRefs.some(item => typeof item !== "string" || !profileSourceRefPattern.test(item))) invalidScope("task_scope.profile_source_refs");
+      }
       if (definition.file_scope === undefined && scopeObject.file_refs !== undefined) issues.invalid.push({ field: "task_scope.file_refs", code: "forbidden_field" });
       if (definition.file_scope === "download" && (!Array.isArray(scopeObject.file_refs) || scopeObject.file_refs.length !== 0)) issues.invalid.push({ field: "task_scope.file_refs", code: "invalid_value" });
       if (definition.file_scope === "upload" && scopeObject.file_refs !== undefined && (!Array.isArray(scopeObject.file_refs) || scopeObject.file_refs.length !== 1)) issues.invalid.push({ field: "task_scope.file_refs", code: "invalid_value" });
@@ -330,12 +343,19 @@ function taskScopeSchema(definition?: ManagedCapabilityDefinition): JsonObject {
     type: "array", minItems: 1, items: { type: "object", required: ["profile_ref", "account_system_ref", "account_ref"],
       properties: { profile_ref: { type: "string", minLength: 1 }, account_system_ref: { type: "string", pattern: "^account-system:[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" }, account_ref: { type: "string", pattern: "^account:sha256:[a-f0-9]{64}$" } }, additionalProperties: false }
   };
+  if (definition?.id === "profile.import" || definition?.id === "profile.migrate.request") {
+    const importing = definition.id === "profile.import";
+    properties.operations = { type: "array", minItems: 1, maxItems: 1, items: { const: definition.id } };
+    properties.profile_refs = { type: "array", ...(importing ? { maxItems: 0 } : { minItems: 1, maxItems: 1 }), items: { type: "string", minLength: 1 } };
+    properties.origins = { type: "array", ...(importing ? { minItems: 1, maxItems: 1 } : { maxItems: 0 }), items: { type: "string", format: "webenvoy-public-origin" } };
+    properties.profile_source_refs = { type: "array", ...(importing ? { minItems: 1, maxItems: 1 } : { maxItems: 0 }), items: { type: "string", pattern: "^profile-source:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" } };
+  }
   if (definition?.file_scope !== undefined) properties.file_refs = {
     type: "array", items: { type: "string", pattern: "^attachment:runtime/[0-9a-f-]{36}$" },
     ...(definition.file_scope === "upload" ? { minItems: 1, maxItems: 1 } : { maxItems: 0 }),
     description: definition.file_scope === "upload" ? "Exactly the top-level file_ref." : "An explicit empty array."
   };
-  return { type: "object", properties, required: ["operations", "profile_refs", "origins", ...(definition?.id === "account.bind" ? ["account_binding_scopes"] : []), ...(definition?.file_scope === undefined ? [] : ["file_refs"])], additionalProperties: false };
+  return { type: "object", properties, required: ["operations", "profile_refs", "origins", ...(definition?.id === "account.bind" ? ["account_binding_scopes"] : []), ...(definition?.id === "profile.import" || definition?.id === "profile.migrate.request" ? ["profile_source_refs"] : []), ...(definition?.file_scope === undefined ? [] : ["file_refs"])], additionalProperties: false };
 }
 
 function fieldConstraints(field: ManagedCapabilityField): string[] {

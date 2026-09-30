@@ -4,7 +4,7 @@
 
 ## 版本与兼容规则
 
-v1.0 的 recovery 与 v1.1 的 `skill_scope` 语义保持不变。v1.2 新增 preference operation 值，并允许新创建模板把 `provider_id` 明确设为 null；v1.3 新增可选 `file_scope` 与 browser task `file_refs`；v1.4 新增可选 `scope_semantics`，并以本节的 owner v2 lifecycle 兼容修订补齐正式 API/CLI；v1.5 新增 site task 的 `task.submit`、`task.query`、`task.stop` operation；v1.6 新增 `profile.metadata.update` operation 值，不增加 Grant 字段；v1.7 新增只由可信 owner 签发并经 Harbor 解析的 BusinessTarget Account tuple snapshots；v1.8 新增 `profile.copy_environment`、`profile.archive`、`profile.delete` operation 值，不增加 Grant 字段或 scope dimension；v1.9 新增 `account_system.import_template` 与 `account.bind` operation，以及各自独立的精确 `account_system_scope`、`account_binding_scopes`。site task 的普通结构化参数由版本化 managed-task request 携带并按 Lode pinned input schema 校验，不增加第二个材料注册表或 Grant scope。上述扩展不改变既有网页 `profile_refs`、`allowed_origins`、`allowed_operations` 的交集含义。未携带 `scope_semantics` 的 Grant/Profile policy 解释为 `legacy_request_guard_v1`；首次 legacy→v2 仍只能沿用原 owner 确认路径，Agent/task 请求不能指定或升级语义。之后的续发、重签、替换和 v2 policy 调整只走本节的 owner API/CLI/App 入口。
+v1.0 的 recovery 与 v1.1 的 `skill_scope` 语义保持不变。v1.2 新增 preference operation 值，并允许新创建模板把 `provider_id` 明确设为 null；v1.3 新增可选 `file_scope` 与 browser task `file_refs`；v1.4 新增可选 `scope_semantics`，并以本节的 owner v2 lifecycle 兼容修订补齐正式 API/CLI；v1.5 新增 site task 的 `task.submit`、`task.query`、`task.stop` operation；v1.6 新增 `profile.metadata.update` operation 值，不增加 Grant 字段；v1.7 新增只由可信 owner 签发并经 Harbor 解析的 BusinessTarget Account tuple snapshots；v1.8 新增 `profile.copy_environment`、`profile.archive`、`profile.delete` operation 值，不增加 Grant 字段或 scope dimension；v1.9 新增 `account_system.import_template` 与 `account.bind` operation，以及各自独立的精确 `account_system_scope`、`account_binding_scopes`；v1.10 增加 owner-registered Profile source 的精确 `profile_source_refs` scope。site task 的普通结构化参数由版本化 managed-task request 携带并按 Lode pinned input schema 校验，不增加第二个材料注册表或 Grant scope。上述扩展不改变既有网页 `profile_refs`、`allowed_origins`、`allowed_operations` 的交集含义。未携带 `scope_semantics` 的 Grant/Profile policy 解释为 `legacy_request_guard_v1`；首次 legacy→v2 仍只能沿用原 owner 确认路径，Agent/task 请求不能指定或升级语义。之后的续发、重签、替换和 v2 policy 调整只走本节的 owner API/CLI/App 入口。
 
 ### Managed browser scope semantics
 
@@ -200,7 +200,7 @@ Agent 能力；旧严格 reader 遇到 `task.*` operation 必须明确拒绝，�
 
 `profile.import` 的 Agent task scope 必须带恰好一个 `profile_source_refs`，与 top-level `profile_source_ref` 完全相同，并且在该 Grant 的 scope 中；`profile_refs` 必须为空。创建目标沿用同 Grant 的 approved creation template/origin 和 Profile creation quota。`profile.migrate.request` 带空 `profile_source_refs` 且绑定一个现存 `profile_ref`、其 owner-approved target template 与该 template 的 exact Provider。Source handle 是授权名称而非源 Profile storage ref，不能加入 Profile list/read 范围，也不能让 Core、Agent 或 Harbor capability projection读取本地路径。
 
-该候选扩展在合并前不改变 Accepted v1.6 reader 声明；严格旧 reader 遇到新增 Grant 字段必须拒绝，不可忽略后继续执行。
+该 v1.10 extension 不改变 Accepted v1.6 reader 声明；严格旧 reader 遇到新增 Grant 字段必须拒绝，不可忽略后继续执行。
 
 ## Owner 入口与历史
 

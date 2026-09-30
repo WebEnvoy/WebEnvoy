@@ -792,6 +792,13 @@ export function createManagedBrowserService(options: {
     });
     return result as ObjectValue;
   }
+  async function requireNoUnresolvedProfileCreation(grantId: string, runId: string): Promise<void> {
+    const unresolved = (await store.listRunRecords()).some(run => run.run_id !== runId &&
+      run.public_result_summary?.grant_id === grantId &&
+      ["profile.create", "profile.copy_environment", "profile.import"].includes(String(run.public_result_summary?.operation)) &&
+      ["running", "admitted", "unknown_outcome"].includes(run.status) && run.public_result_summary?.reconciliation !== "completed");
+    if (unresolved) return fail("managed_browser_creation_reconciliation_required");
+  }
   async function execute(hash: string, input: Request, runId: string, deadlineAt?: number): Promise<ObjectValue> {
     const ensureTaskActive = async () => {
       if (deadlineAt !== undefined && Date.now() >= deadlineAt) return fail("managed_task_timeout");
@@ -850,29 +857,31 @@ export function createManagedBrowserService(options: {
       }
     }
     if (input.operation === "profile.import") {
-      // Unknown creation blocks further quota consumption until the existing receipt is reconciled.
-      const unresolved = (await store.listRunRecords()).some(run => run.run_id !== runId && run.public_result_summary?.grant_id === input.grant_id &&
-        ["profile.create", "profile.copy_environment", "profile.import"].includes(String(run.public_result_summary?.operation)) && ["running", "admitted", "unknown_outcome"].includes(run.status) && run.public_result_summary?.reconciliation !== "completed");
-      if (unresolved) return fail("managed_browser_creation_reconciliation_required");
+      await requireNoUnresolvedProfileCreation(input.grant_id, runId);
       const template = access.creation_template!;
       await check();
-      if (input.operation === "profile.create") {
-        if (template.provider_id !== null && input.provider_id !== undefined) return fail("managed_browser_template_provider_conflict");
-      } else {
-        await runtimeHarbor(`/runtime/profile-sources/${encodeURIComponent(input.profile_source_ref!)}`);
+      const registered = object(await runtimeHarbor(`/runtime/profile-sources/${encodeURIComponent(input.profile_source_ref!)}`));
+      const source = registered.source && typeof registered.source === "object" ? object(registered.source) : {};
+      if (source.schema_version !== "harbor-profile-source/v1" || source.source_ref !== input.profile_source_ref || source.provider_id !== "camoufox" ||
+          source.source_format !== "camoufox.firefox-places.v86" || source.revoked_at !== null || typeof source.expires_at !== "string" || Date.parse(source.expires_at) <= Date.now()) {
+        return fail("managed_browser_profile_source_unavailable");
       }
-      const createKey = input.operation === "profile.create" ? runId : `${runId}:target-create`;
+      const createKey = `${runId}:target-create`;
       const created = await runtimeHarbor("/runtime/identity-environment-mutations", { operation: "create", idempotency_key: createKey,
-        identity_environment: { site: template.site, ...((template.provider_id ?? input.provider_id) === undefined ? {} : { requested_provider_id: template.provider_id ?? input.provider_id }), language: template.language, timezone: template.timezone } });
-      if (created.status !== "completed") return fail("managed_browser_creation_unknown");
+        identity_environment: { site: template.site, ...(template.provider_id === null ? {} : { requested_provider_id: template.provider_id }), language: template.language, timezone: template.timezone } });
+      if (created.status === "rejected") return fail(text(object(created.failure).code));
+      if (created.status !== "completed") throw new CreationReceiptFailure("managed_browser_profile_mutation_unknown");
       try {
         const profile = publicProfile(created.record);
         const providerSelection = publicProviderSelection(created.provider_selection);
-        if (input.operation === "profile.import") await store.updateRunRecord(runId, { public_result_summary: {
+        if (created.operation !== "create" || created.identity_environment_ref !== profile.identity_environment_ref ||
+            created.source_identity_environment_ref !== null || profile.lifecycle_state !== "active") throw new Error("profile_import_target_create_receipt_mismatch");
+        await store.updateRunRecord(runId, { public_result_summary: {
           ...(await store.getRunRecord(runId))!.public_result_summary, target_profile_ref: profile.profile_ref, target_identity_environment_ref: profile.identity_environment_ref
         } });
-        await options.accessStore.recordCreatedProfile({ idempotency_key: runId, grant_id: input.grant_id, profile_ref: profile.profile_ref });
-        if (input.operation === "profile.import") {
+        await options.accessStore.recordCreatedProfile({ idempotency_key: runId, grant_id: input.grant_id,
+          operation: "profile.import", profile_source_ref: input.profile_source_ref, profile_ref: profile.profile_ref });
+        {
           const reauthorizeCreatedTarget = async () => {
             await ensureTaskActive();
             try {
@@ -920,15 +929,13 @@ export function createManagedBrowserService(options: {
         }
         return { profile, provider_selection: providerSelection, authorization_decision_ref: access.decision_ref };
       } catch (error) {
-        if (input.operation === "profile.import" && error instanceof ManagedAccessError && !(error instanceof CreationReceiptFailure)) throw error;
+        if (error instanceof ManagedAccessError && !(error instanceof CreationReceiptFailure)) throw error;
         throw new CreationReceiptFailure(error instanceof ManagedAccessError ? error.code : "managed_browser_creation_unknown");
+      }
 
     }
     if (input.operation === "profile.create" || input.operation === "profile.copy_environment") {
-      // Unknown creation blocks further quota consumption until the existing receipt is reconciled.
-      const unresolved = (await store.listRunRecords()).some(run => run.run_id !== runId && run.public_result_summary?.grant_id === input.grant_id &&
-        ["profile.create", "profile.copy_environment", "profile.import"].includes(String(run.public_result_summary?.operation)) && ["running", "admitted", "unknown_outcome"].includes(run.status) && run.public_result_summary?.reconciliation !== "completed");
-      if (unresolved) return fail("managed_browser_creation_reconciliation_required");
+      await requireNoUnresolvedProfileCreation(input.grant_id, runId);
       await check();
       const template = access.creation_template!;
       if (input.operation === "profile.create") {
@@ -1960,10 +1967,13 @@ export function createManagedBrowserService(options: {
           });
           try {
             const createKey = text(current.public_result_summary!.target_create_key);
-            const created = await harbor(`/runtime/identity-environment-mutations/${encodeURIComponent(createKey)}`);
-            if (created.status !== "completed" || !created.record || typeof created.record !== "object") return response((await store.getRunRecord(runId))!);
+            const created = profileMutationReceipt(await harbor(`/runtime/identity-environment-mutations/${encodeURIComponent(createKey)}`), "create");
+            if (created.status !== "completed") return response((await store.getRunRecord(runId))!);
             const profile = publicProfile(created.record);
-            await options.accessStore.recordCreatedProfile({ idempotency_key: runId, grant_id: current.public_result_summary!.grant_id, profile_ref: profile.profile_ref });
+            if (created.operation !== "create" || created.identity_environment_ref !== profile.identity_environment_ref ||
+                created.source_identity_environment_ref !== null || profile.lifecycle_state !== "active") throw new Error("profile_import_target_create_receipt_mismatch");
+            await options.accessStore.recordCreatedProfile({ idempotency_key: runId, grant_id: current.public_result_summary!.grant_id,
+              operation: "profile.import", profile_source_ref: current.public_result_summary?.profile_source_ref, profile_ref: profile.profile_ref });
             const providerSelection = publicProviderSelection(created.provider_selection);
             const currentResult = current.public_result_summary?.result && typeof current.public_result_summary.result === "object"
               ? object(current.public_result_summary.result) : {};
