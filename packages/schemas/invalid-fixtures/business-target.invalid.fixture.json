@@ -1,0 +1,57 @@
+{
+  "schema": "business-target.schema.json",
+  "cases": [
+    {
+      "name": "metadata cannot claim external verification",
+      "instance": {
+        "schema_version": "webenvoy.business-target/v1",
+        "business_target_ref": "business-target:00000000-0000-4000-8000-000000000001",
+        "account_system_ref": "account-system:example",
+        "account_ref": "account:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "label": "Campaign workspace",
+        "declared_external_id": null,
+        "status": "active",
+        "verification_state": "verified",
+        "created_by_profile_ref": "profile:example",
+        "created_at": "2026-09-30T00:00:00.000Z",
+        "updated_at": "2026-09-30T00:00:00.000Z",
+        "disabled_at": null
+      }
+    },
+    {
+      "name": "disabled record must retain a disable timestamp",
+      "instance": {
+        "schema_version": "webenvoy.business-target/v1",
+        "business_target_ref": "business-target:00000000-0000-4000-8000-000000000001",
+        "account_system_ref": "account-system:example",
+        "account_ref": "account:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "label": "Campaign workspace",
+        "declared_external_id": null,
+        "status": "disabled",
+        "verification_state": "unverified",
+        "created_by_profile_ref": "profile:example",
+        "created_at": "2026-09-30T00:00:00.000Z",
+        "updated_at": "2026-09-30T00:00:00.000Z",
+        "disabled_at": null
+      }
+    },
+    {
+      "name": "unknown fields are rejected",
+      "instance": {
+        "schema_version": "webenvoy.business-target/v1",
+        "business_target_ref": "business-target:00000000-0000-4000-8000-000000000001",
+        "account_system_ref": "account-system:example",
+        "account_ref": "account:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "label": "Campaign workspace",
+        "declared_external_id": null,
+        "status": "active",
+        "verification_state": "unverified",
+        "created_by_profile_ref": "profile:example",
+        "created_at": "2026-09-30T00:00:00.000Z",
+        "updated_at": "2026-09-30T00:00:00.000Z",
+        "disabled_at": null,
+        "owner_verified": true
+      }
+    }
+  ]
+}

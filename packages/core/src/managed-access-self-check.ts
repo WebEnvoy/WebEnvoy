@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire, syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createFileManagedAccessStore, managedScopeConfirmationSchemaVersion, ManagedAccessError, type ManagedAccessRequest, type ManagedCreationTemplate } from "./managed-access.js";
+import { createFileManagedAccessStore, managedBusinessTargetOperations, managedScopeConfirmationSchemaVersion, ManagedAccessError, type ManagedAccessRequest, type ManagedCreationTemplate } from "./managed-access.js";
 
 const directory = await mkdtemp(join(tmpdir(), "managed-access-check-"));
 try {
@@ -152,6 +152,10 @@ try {
     assert.equal((await stopped.list()).grants.filter(item => item.grant_id === directGrant.grant_id).length, 1);
     assert.deepEqual(await stopped.getOwnerOperation("v2-direct-issue"), { status: "completed", result: directGrant });
     assert.equal(directGrant.scope_semantics, "agent_operations_v2");
+    await rejected(stopped.issueAgentOperationsV2Grant({ ...directInput, idempotency_key: "v2-caller-cannot-submit-resolved-account-scope",
+      allowed_operations: [...v2Operations, ...managedBusinessTargetOperations],
+      business_target_account_scopes: [{ profile_ref: "profile:v2", account_system_ref: "account-system:example", account_ref: `account:sha256:${"a".repeat(64)}` }]
+    }), "managed_access_invalid_input");
     const lifecycleGrant = await stopped.issueAgentOperationsV2Grant({
       idempotency_key: "v2-lifecycle-issue",
       source_grant_id: upgraded.grant.grant_id,

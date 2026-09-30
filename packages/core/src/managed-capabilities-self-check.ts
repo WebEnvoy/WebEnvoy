@@ -13,6 +13,11 @@ const fixtureFile = "attachment:runtime/11111111-1111-4111-8111-111111111111";
 
 function fixtureField(field: string, operation: string): unknown {
   if (field === "profile_ref") return fixtureProfile;
+  if (field === "account_system_ref") return "account-system:fixture";
+  if (field === "account_ref") return `account:sha256:${"a".repeat(64)}`;
+  if (field === "business_target_ref") return "business-target:00000000-0000-4000-8000-000000000001";
+  if (field === "label") return "Research target";
+  if (field === "declared_external_id") return "declared-123";
   if (field === "name") return "Research";
   if (field === "tags") return ["github", "team"];
   if (field === "origin") return fixtureOrigin;
@@ -75,7 +80,7 @@ const observation = {
   runtime_session_ref: "session:fixture"
 };
 
-assert.equal(managedCapabilityDefinitions.operations.length, 33);
+assert.equal(managedCapabilityDefinitions.operations.length, 38);
 assert.match(managedCapabilityDefinition("profile.read")?.summary ?? "", /current identity, binding history and Harbor ownership/);
 assert.match(managedCapabilityDefinition("profile.list")?.summary ?? "", /conflicting or unknown identity does not block the read/);
 assert.deepEqual(managedCapabilityInputFields("instance.observe"), [

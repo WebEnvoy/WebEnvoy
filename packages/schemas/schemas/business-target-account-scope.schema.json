@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/core/business-target-account-scope.v1.schema.json",
+  "title": "Persisted BusinessTarget Account scope snapshot",
+  "description": "The exact Profile and stable Account tuple resolved by Core from Harbor when a target-capable v2 Grant is issued.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["profile_ref", "account_system_ref", "account_ref"],
+  "properties": {
+    "profile_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "account_system_ref": { "type": "string", "pattern": "^account-system:[A-Za-z0-9][A-Za-z0-9._-]{0,63}$", "maxLength": 79 },
+    "account_ref": { "type": "string", "pattern": "^account:sha256:[a-f0-9]{64}$", "maxLength": 80 }
+  },
+  "x-webenvoy": {
+    "owner": "Core managed-access Grant store",
+    "status": "accepted-v1",
+    "schema_version": "webenvoy.business-target-account-scope/v1",
+    "compatibility_boundary": "Persisted only on a new v2 Grant after Harbor owner-resolution. It is never reconstructed for old Grants and is rechecked against current Harbor binding on every BusinessTarget operation.",
+    "source_adrs": ["docs/specs/business-target-management-v1.md", "docs/specs/grant-wire-contract-v1.md"],
+    "field_owners": { "profile_ref": "Core authorized Profile scope", "account_system_ref": "Harbor Account binding resolved by Core", "account_ref": "Harbor Account binding resolved by Core" }
+  }
+}

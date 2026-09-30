@@ -464,7 +464,7 @@ if (command === 'setup') {
     if (!args.includes('--confirm')) throw new Error('access_confirmation_required');
     const value = await readJsonFile(required('--grant-file'), 'access_v2_grant_file_invalid');
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('access_v2_grant_file_invalid');
-    const allowed = ['idempotency_key', 'source_grant_id', 'source_grant_digest', 'principal_id', 'profile_refs', 'policy_digest', 'allowed_operations', 'allowed_origins', 'expires_at', 'skill_scope', 'file_scope', 'replaces_grant_id', 'replaces_grant_digest'];
+    const allowed = ['idempotency_key', 'source_grant_id', 'source_grant_digest', 'principal_id', 'profile_refs', 'policy_digest', 'allowed_operations', 'allowed_origins', 'expires_at', 'skill_scope', 'file_scope', 'account_scope_selections', 'replaces_grant_id', 'replaces_grant_digest'];
     if (Object.keys(value).some(key => !allowed.includes(key)) || typeof value.idempotency_key !== 'string' || !value.idempotency_key) throw new Error('access_v2_grant_file_invalid');
     await ensureOwnerRuntime(dataDir);
     result = await requestOwner('/agent-access/v2/grants', value);

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmod, lstat, mkdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, cp, lstat, mkdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,7 +8,7 @@ import { spawn } from 'node:child_process';
 import test from 'node:test';
 import definitions from '../../../packages/core/src/managed-capability-definitions.json' with { type: 'json' };
 import { validateManagedTaskRequest, validateOperationRequest } from './request-validation.mjs';
-import { INSTALLED_SKILL_VERSION } from './bundle.mjs';
+import { INSTALLED_AGENT_MANIFEST_SCHEMA, INSTALLED_SKILL_VERSION, REQUIRED_AGENT_ASSETS, REQUIRED_DRIVER_ASSETS, sha, verifyBundle } from './bundle.mjs';
 
 const entryRoot = dirname(fileURLToPath(import.meta.url));
 const cliPath = join(entryRoot, 'cli.mjs');
@@ -23,9 +23,9 @@ test('installed bundle version tracks the installed SKILL metadata and both pack
   }
 });
 
-async function runCli(args) {
+async function runCli(args, targetCliPath = cliPath) {
   return await new Promise((resolveResult, reject) => {
-    const child = spawn(process.execPath, [cliPath, ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, [targetCliPath, ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '', stderr = '';
     child.stdout.on('data', value => { stdout += value; });
     child.stderr.on('data', value => { stderr += value; });
@@ -137,6 +137,66 @@ test('Agent describe help documents its JSON request shape', async () => {
   assert.equal(describe.code, 0);
   assert.match(describe.stdout, /Usage: webenvoy agent describe --client-file FILE --request-file FILE/);
   assert.match(describe.stdout, /\{"operation":"profile\.create"\}/);
+});
+
+test('owner v2 Grant CLI accepts and forwards selected BusinessTarget Accounts to Core', async () => {
+  const temporary = await (await import('node:fs/promises')).mkdtemp(join(tmpdir(), 'wsa-bt-'));
+  const bundleRoot = join(temporary, 'bundle');
+  const ownerDataDir = temporary;
+  const socketPath = join(ownerDataDir, 'owner-control.sock');
+  const sourceAppRoot = dirname(entryRoot);
+  const files = [
+    'agent-entry/mcp.mjs', 'agent-entry/client.mjs', 'agent-entry/service.mjs', 'agent-entry/bundle.mjs',
+    'agent-entry/skills/webenvoy-browser/SKILL.md',
+    'dist-electron/runtime/core/start-runtime.mjs', 'dist-electron/runtime/harbor/start-runtime.mjs',
+    ...REQUIRED_AGENT_ASSETS, ...REQUIRED_DRIVER_ASSETS
+  ];
+  const requests = [];
+  let assets;
+  const input = {
+    idempotency_key: 'business-target-grant-once', principal_id: 'principal:agent',
+    profile_refs: ['profile:business-target'], policy_digest: `sha256:${'c'.repeat(64)}`,
+    allowed_operations: ['business_target.create', 'business_target.list'], allowed_origins: [],
+    expires_at: '2026-10-01T00:00:00.000Z',
+    account_scope_selections: [{ account_system_ref: 'account-system:example', account_ref: `account:sha256:${'a'.repeat(64)}` }]
+  };
+  const server = createServer(async (request, response) => {
+    const chunks = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : undefined;
+    requests.push({ path: request.url, method: request.method, ...(body === undefined ? {} : { body }) });
+    response.setHeader('content-type', 'application/json');
+    response.end(JSON.stringify(request.url === '/status' ? { ready: true, assets: { digest: assets.digest } }
+      : { ok: true, result: { grant_id: 'grant:business-target', business_target_account_scopes: input.account_scope_selections.map(scope => ({ profile_ref: 'profile:business-target', ...scope })) } }));
+  });
+  try {
+    await mkdir(bundleRoot, { recursive: true });
+    await cp(entryRoot, join(bundleRoot, 'agent-entry'), { recursive: true, dereference: true });
+    for (const name of files.filter(path => path.startsWith('dist-electron/'))) {
+      const destination = join(bundleRoot, name);
+      await mkdir(dirname(destination), { recursive: true });
+      await copyFile(join(sourceAppRoot, name), destination);
+    }
+    const manifestFiles = Object.fromEntries(await Promise.all(files.map(async name => [name, sha(await readFile(join(bundleRoot, name)))])));
+    await writeFile(join(bundleRoot, 'agent-manifest.json'), JSON.stringify({ schema: INSTALLED_AGENT_MANIFEST_SCHEMA, version: '0.0.0-test',
+      skill_version: INSTALLED_SKILL_VERSION, files: manifestFiles, optional_files: {} }));
+    assets = await verifyBundle(bundleRoot);
+    await mkdir(ownerDataDir, { recursive: true, mode: 0o700 });
+    await new Promise((resolve, reject) => { server.once('error', reject); server.listen(socketPath, resolve); });
+    await chmod(socketPath, 0o600);
+    const grantFile = join(temporary, 'grant.json');
+    await writeFile(grantFile, JSON.stringify(input), { mode: 0o600 });
+    const result = await runCli(['access', 'grant-v2', '--data-dir', ownerDataDir, '--grant-file', grantFile, '--confirm'], join(bundleRoot, 'agent-entry/cli.mjs'));
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout).result.business_target_account_scopes, input.account_scope_selections.map(scope => ({ profile_ref: 'profile:business-target', ...scope })));
+    assert.deepEqual(requests, [
+      { path: '/status', method: 'GET' },
+      { path: '/agent-access/v2/grants', method: 'POST', body: input }
+    ], 'the exact selected tuple reaches the existing owner Grant route unchanged');
+  } finally {
+    if (server.listening) await new Promise(resolve => server.close(resolve));
+    await rm(temporary, { recursive: true, force: true });
+  }
 });
 
 test('owner list, diagnose and inspect use live reads without Runtime startup', async () => {

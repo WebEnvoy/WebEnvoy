@@ -8,7 +8,7 @@ import test, { after } from "node:test";
 import { HarborRuntime, createFixtureLauncher, type LocalProviderLauncher } from "./index.js";
 import { LocalIdentityEnvironmentManager } from "./identity-environment-manager.js";
 import { createMutationInput, identityInput, isolateProfileStorage, testProviderDetection } from "./identity-environment-mutation-test-helpers.js";
-import { trustManagedPublicPageOperation, managedOperationCatalog, managedPageObservationExpression, normalizeManagedProviderObservation, trustManagedPageObserver } from "./managed-observation.js";
+import { trustManagedPublicPageOperation, managedOperationCatalog, managedPageObservationExpression, normalizeManagedProviderObservation, trustManagedPageObserver, hasManagedBindingConflict, profileIdentityOwnership, type ManagedObservation } from "./managed-observation.js";
 import { trustManagedInteractionOperation } from "./managed-interaction.js";
 import { profileStoragePath } from "./profile-storage.js";
 import { startHarborRuntimeServer } from "./server.js";
@@ -103,6 +103,7 @@ test("same-instance observation discovers without binding, rejects unknown/confl
     const owned = runtime.listManagedIdentityEnvironmentProfiles().find(profile => profile.identity_environment_ref === "identity:a")!;
     assert.equal(owned.identity_ownership.current.status, "verified");
     assert.equal(owned.identity_ownership.history.bindings[0]?.verification, "verified_at_binding");
+    assert.equal(owned.identity_ownership.history.bindings[0]?.ownership_status, "unique");
     assert.equal(owned.identity_ownership.ownership.status, "unique");
     const second = await runtime.observeManagedSession(b.runtime_session_ref, { holder_ref: "principal:one" });
     if (second.status !== "completed") throw new Error("observation unavailable");
@@ -144,6 +145,46 @@ test("same-instance observation discovers without binding, rejects unknown/confl
   assert.equal(stopped.identity_ownership.current.observed_at, null);
   assert.equal(stopped.identity_ownership.history.bindings[0]?.verification, "verified_at_binding");
   assert.equal(stopped.identity_ownership.ownership.status, "unique");
+});
+
+test("tuple ownership remains precise when another Account binding conflicts", () => {
+  const at = "2026-09-30T00:00:00.000Z";
+  const accountSystemA = "account-system:a", accountSystemB = "account-system:b";
+  const accountA = `account:sha256:${"a".repeat(64)}`, accountB = `account:sha256:${"b".repeat(64)}`;
+  const stored = (identity_environment_ref: string, profile_ref: string, account_bindings: { account_system_ref: string; account_ref: string; observation_ref: string; bound_at: string }[]) => ({
+    schema_version: "harbor-local-identity-environment-store/v0" as const,
+    operation: "created" as const,
+    created_at: at,
+    updated_at: at,
+    identity_environment: { identity_environment_ref, profile_ref, site_binding: { site_id: "example", account_ref: null } },
+    account_bindings,
+    lifecycle_state: "active" as const
+  }) as unknown as import("./identity-environment-manager.js").StoredLocalIdentityEnvironmentRecord;
+  const candidate = stored("identity:candidate", "profile:candidate", [
+    { account_system_ref: accountSystemA, account_ref: accountA, observation_ref: "observation:a", bound_at: at },
+    { account_system_ref: accountSystemB, account_ref: accountB, observation_ref: "observation:b", bound_at: at }
+  ]);
+  const other = stored("identity:other-private", "profile:other-private", [
+    { account_system_ref: accountSystemB, account_ref: accountB, observation_ref: "observation:other", bound_at: at }
+  ]);
+  const currentObservation = {
+    identity_environment_ref: "identity:candidate", profile_ref: "profile:candidate", observed_at: at,
+    observation_ref: "observation:current-a", account: { status: "verified", account_system_ref: accountSystemA, account_ref: accountA }
+  } as unknown as ManagedObservation;
+
+  const projection = profileIdentityOwnership([candidate, other], candidate, currentObservation);
+  assert.equal(projection.current.status, "verified", "a unique current Account remains verified when another Account binding conflicts");
+  assert.equal(projection.ownership.status, "conflict", "the existing Profile-wide summary remains global");
+  assert.deepEqual(projection.history.bindings.map(binding => binding.ownership_status), ["unique", "conflict"]);
+  assert.equal(hasManagedBindingConflict([candidate, other], candidate), true, "default callers keep Profile-wide conflict semantics");
+  assert.equal(hasManagedBindingConflict([candidate, other], candidate, { account_system_ref: accountSystemA, account_ref: accountA }), false);
+  assert.equal(hasManagedBindingConflict([candidate, other], candidate, { account_system_ref: accountSystemB, account_ref: accountB }), true);
+  assert.equal(JSON.stringify(projection).includes("profile:other-private"), false, "the precise projection never exposes another Profile reference");
+
+  (candidate as typeof candidate & { lifecycle_state?: string }).lifecycle_state = "archived";
+  const archived = profileIdentityOwnership([candidate, other], candidate, null);
+  assert.equal(archived.ownership.status, "not_runnable");
+  assert.ok(archived.history.bindings.every(binding => binding.ownership_status === "not_runnable"));
 });
 
 test("v2 owner binding rechecks the observed Page and persists only after a fresh same-Page observation", async () => {

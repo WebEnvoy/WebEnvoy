@@ -130,7 +130,7 @@ HTTP 请求为 MCP 参数加 `connection_id`；所有顶层及 context/task_scop
 | `availability.state` | `no_known_blocker` / `blocked` / `unknown` / `not_evaluated`。不使用 guaranteed/verified-success 一类承诺；见 5.2。 |
 | `inputs.state` | `not_provided` / `incomplete` / `invalid` / `complete`。只判断真实执行 envelope 的结构/必要参数；不把“字段齐全”说成 DOM 或文件仍有效。 |
 | `inputs.missing` / `invalid` | 缺少字段的 JSON Pointer 数组；invalid 项为 `{path,code}`。不输出输入值。 |
-| `execution_checks` | 剩余的真实执行检查，可用 `reauthorize/verify_page_and_target/verify_file_material/acquire_control_if_required/check_provider_runtime`；不是新权限。 |
+| `execution_checks` | 剩余的真实执行检查，可用 `reauthorize/verify_page_and_target/verify_file_material/acquire_control_if_required/check_provider_runtime`；不是新权限。Core 本地 BusinessTarget 元数据不依赖 Provider、Page/Instance、Harbor operation catalog 或执行策略；上下文描述会在 Core 内评估所选 Account 的当前绑定，执行时也会重新检查。该组合授权检查由既有 `reauthorize` 表示，因此 BusinessTarget 描述只返回 `reauthorize`。 |
 | `next_steps` | 至多 8 项 `{code,actor,operation,fields}`；actor 为 `agent/owner`，operation 为已有公开操作或 null，fields 为字段路径数组。建议不自动执行、不授予权限。 |
 
 所有成功响应均保留上例顶层字段；未有可返回值时，provider_id、facts_at、capability、tool、input_schema、example、query_tool用null，数组用[]。已暴露且已定义操作的input_schema不得为空；field_guidance与其必填/条件规则对应。未知/范围外定义不提供上下文支持判断（动态维度not_evaluated），但context若已提交仍先过可见性门。definition_revision形状为`sha256:`加64位小写十六进制。

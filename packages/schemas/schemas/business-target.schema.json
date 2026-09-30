@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/core/business-target.v1.schema.json",
+  "title": "WebEnvoy Core-local BusinessTarget metadata",
+  "description": "Declared local metadata for one stable Account tuple. It does not assert or verify an external business resource.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "business_target_ref", "account_system_ref", "account_ref", "label", "declared_external_id", "status", "verification_state", "created_by_profile_ref", "created_at", "updated_at", "disabled_at"],
+  "properties": {
+    "schema_version": { "const": "webenvoy.business-target/v1" },
+    "business_target_ref": { "type": "string", "pattern": "^business-target:[0-9a-f-]{36}$", "maxLength": 52 },
+    "account_system_ref": { "type": "string", "pattern": "^account-system:[A-Za-z0-9][A-Za-z0-9._-]{0,63}$", "maxLength": 79 },
+    "account_ref": { "type": "string", "pattern": "^account:sha256:[a-f0-9]{64}$", "maxLength": 80 },
+    "label": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\\u0000-\\u001f\\u007f]+$" },
+    "declared_external_id": { "oneOf": [{ "type": "null" }, { "type": "string", "maxLength": 256, "pattern": "^[^\\u0000-\\u001f\\u007f]*$" }] },
+    "status": { "enum": ["active", "disabled"] },
+    "verification_state": { "const": "unverified" },
+    "created_by_profile_ref": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "disabled_at": { "oneOf": [{ "type": "null" }, { "type": "string", "format": "date-time" }] }
+  },
+  "oneOf": [
+    { "properties": { "status": { "const": "active" }, "disabled_at": { "type": "null" } } },
+    { "properties": { "status": { "const": "disabled" }, "disabled_at": { "type": "string", "format": "date-time" } } }
+  ],
+  "x-webenvoy": {
+    "owner": "Core Runtime",
+    "status": "accepted-v1",
+    "schema_version": "webenvoy.business-target/v1",
+    "compatibility_boundary": "Core-local metadata keyed by stable AccountSystem and Account refs. Profile is creation provenance only; unverified metadata does not assert an external resource or grant browser/business write permission.",
+    "source_adrs": ["docs/specs/business-target-management-v1.md", "docs/adr/0002-run-task-capability-model.md"],
+    "field_owners": { "business_target_ref": "Core", "account_system_ref": "Harbor Account binding projected through Core", "account_ref": "Harbor Account binding projected through Core", "label": "trusted Agent input constrained by Core", "declared_external_id": "trusted Agent declaration constrained by Core", "verification_state": "Core" }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "schema": "business-target-account-scope-selection.schema.json",
+  "cases": [
+    {
+      "name": "selection cannot name its own Profile",
+      "instance": {
+        "account_system_ref": "account-system:example",
+        "account_ref": "account:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "profile_ref": "profile:other"
+      }
+    },
+    {
+      "name": "account reference must use the Harbor stable hash form",
+      "instance": { "account_system_ref": "account-system:example", "account_ref": "account:legacy" }
+    }
+  ]
+}
