@@ -18,6 +18,7 @@ export type LocalProviderDriverKind = "chromium_cdp" | "firefox_juggler" | "play
 export type RuntimeErrorCode =
   | "provider_unavailable"
   | "identity_environment_unavailable"
+  | "profile_archived"
   | "launch_failed"
   | "url_unreachable"
   | "session_locked"
@@ -110,7 +111,7 @@ export interface RuntimeControlLockFacts {
 
 export interface RuntimeSessionUnavailable {
   status: "unavailable";
-  failure_class: "identity_environment_unavailable" | "session_locked" | "viewer_unavailable" | "session_cleanup_failed" | "session_missing" | "url_unreachable" | "control_state_changed";
+  failure_class: "identity_environment_unavailable" | "profile_archived" | "session_locked" | "viewer_unavailable" | "session_cleanup_failed" | "session_missing" | "url_unreachable" | "control_state_changed";
   message: string;
   retryable: boolean;
   current_error: RuntimeErrorFact;

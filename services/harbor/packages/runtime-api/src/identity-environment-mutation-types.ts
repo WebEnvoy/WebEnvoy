@@ -10,7 +10,7 @@ import type { SiteBindingInput } from "./identity-environment.js";
 export const HARBOR_IDENTITY_ENVIRONMENT_MUTATION_SCHEMA = "harbor-identity-environment-mutation/v1";
 export const HARBOR_PROVIDER_SELECTION_SCHEMA = "harbor-provider-selection/v1";
 
-export type IdentityEnvironmentMutationOperation = "create" | "import" | "edit" | "profile.metadata.update" | "copy_full" | "copy_environment" | "remove" | "delete";
+export type IdentityEnvironmentMutationOperation = "create" | "import" | "edit" | "profile.metadata.update" | "copy_full" | "copy_environment" | "archive" | "remove" | "delete";
 
 export interface IdentityEnvironmentConfigurationUpdate {
   provider_id?: BrowserProviderId;
@@ -30,6 +30,13 @@ export interface IdentityEnvironmentConfigurationUpdate {
 
 export interface MutationBase {
   idempotency_key: string;
+}
+
+export interface IdentityEnvironmentCopyTemplateExpectation {
+  provider_id: BrowserProviderId;
+  site: { site_id: string; origin: string; display_name: string };
+  language: string;
+  timezone: string;
 }
 
 export const IDENTITY_ENVIRONMENT_BUSINESS_INPUT_KEYS = [
@@ -93,7 +100,9 @@ export type IdentityEnvironmentMutationRequest =
   | (MutationBase & { operation: "import"; identity_environment: IdentityEnvironmentImportInput })
   | (MutationBase & { operation: "edit"; identity_environment_ref: string; configuration: IdentityEnvironmentConfigurationUpdate })
   | (MutationBase & { operation: "profile.metadata.update"; identity_environment_ref: string; name?: string; tags?: string[] })
-  | (MutationBase & { operation: "copy_full" | "copy_environment"; identity_environment_ref: string })
+  | (MutationBase & { operation: "copy_full"; identity_environment_ref: string })
+  | (MutationBase & { operation: "copy_environment"; identity_environment_ref: string; expected_environment_template?: IdentityEnvironmentCopyTemplateExpectation })
+  | (MutationBase & { operation: "archive"; identity_environment_ref: string })
   | (MutationBase & { operation: "remove"; identity_environment_ref: string })
   | (MutationBase & { operation: "delete"; identity_environment_ref: string; confirmation: "delete_local_data" });
 
@@ -107,8 +116,14 @@ export type MaterializedIdentityEnvironmentMutationRequest =
     })
   | Exclude<IdentityEnvironmentMutationRequest, { operation: "create" } | { operation: "import" } | { operation: "copy_full" | "copy_environment" }>
   | (MutationBase & {
-      operation: "copy_full" | "copy_environment";
+      operation: "copy_full";
       identity_environment_ref: string;
+      target: { identity_environment_ref: string; execution_identity_ref: string; profile_ref: string };
+    })
+  | (MutationBase & {
+      operation: "copy_environment";
+      identity_environment_ref: string;
+      expected_environment_template?: IdentityEnvironmentCopyTemplateExpectation;
       target: { identity_environment_ref: string; execution_identity_ref: string; profile_ref: string };
     });
 
@@ -120,6 +135,8 @@ export type IdentityEnvironmentMutationFailureCode =
   | "identity_environment_missing"
   | "invalid_request"
   | "mutation_failed"
+  | "copy_template_mismatch"
+  | "profile_archived"
   | "persistence_failed"
   | "profile_locked"
   | "profile_storage_exists"

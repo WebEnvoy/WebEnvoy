@@ -22,6 +22,7 @@ function fixtureField(field: string, operation: string): unknown {
   if (field === "tags") return ["github", "team"];
   if (field === "origin") return fixtureOrigin;
   if (field === "template_ref") return "template:fixture";
+  if (field === "confirmation") return "delete_local_data";
   if (field === "url") return "https://example.com/next";
   if (field === "runtime_session_ref") return fixtureSession;
   if (field === "observation_ref") return fixtureObservation;
@@ -80,7 +81,7 @@ const observation = {
   runtime_session_ref: "session:fixture"
 };
 
-assert.equal(managedCapabilityDefinitions.operations.length, 38);
+assert.equal(managedCapabilityDefinitions.operations.length, 41);
 assert.match(managedCapabilityDefinition("profile.read")?.summary ?? "", /current identity, binding history and Harbor ownership/);
 assert.match(managedCapabilityDefinition("profile.list")?.summary ?? "", /conflicting or unknown identity does not block the read/);
 assert.deepEqual(managedCapabilityInputFields("instance.observe"), [
@@ -95,6 +96,15 @@ assert.doesNotThrow(() => parseManagedBrowserRequest(observation));
 assert.throws(() => parseManagedBrowserRequest({ ...observation, runtime_session_ref: undefined }), /managed_browser_invalid_input/);
 assert.throws(() => parseManagedBrowserRequest({ ...observation, origin: undefined }), /managed_browser_invalid_input/);
 assert.throws(() => parseManagedBrowserRequest({ ...observation, task_scope: { ...scope, file_refs: ["attachment:runtime/11111111-1111-4111-8111-111111111111"] } }), /managed_browser_invalid_input/);
+
+const copyEnvironment = parserFixture(managedCapabilityDefinition("profile.copy_environment")!);
+assert.doesNotThrow(() => parseManagedBrowserRequest(copyEnvironment));
+assert.throws(() => parseManagedBrowserRequest({ ...copyEnvironment, origin: fixtureOrigin }), /managed_browser_invalid_input/);
+const archiveProfile = parserFixture(managedCapabilityDefinition("profile.archive")!);
+assert.doesNotThrow(() => parseManagedBrowserRequest(archiveProfile));
+const deleteProfile = parserFixture(managedCapabilityDefinition("profile.delete")!);
+assert.doesNotThrow(() => parseManagedBrowserRequest(deleteProfile));
+assert.throws(() => parseManagedBrowserRequest({ ...deleteProfile, confirmation: undefined }), /managed_browser_invalid_input/);
 
 const download = {
   ...observation,

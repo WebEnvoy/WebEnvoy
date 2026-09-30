@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/harbor/profile-lifecycle-mutation-request.v1.schema.json",
+  "title": "Harbor Profile safe lifecycle mutation request",
+  "description": "Harbor owner and Core request for environment copy, archive, or exact Profile deletion. Core supplies its safe-copy template assertion; the trusted owner path preserves its existing source-copy request shape.",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "idempotency_key", "identity_environment_ref"],
+      "properties": {
+        "operation": { "const": "copy_environment" },
+        "idempotency_key": { "$ref": "#/$defs/idempotency_key" },
+        "identity_environment_ref": { "$ref": "#/$defs/identity_environment_ref" },
+        "expected_environment_template": { "$ref": "#/$defs/environment_template" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "idempotency_key", "identity_environment_ref"],
+      "properties": {
+        "operation": { "const": "archive" },
+        "idempotency_key": { "$ref": "#/$defs/idempotency_key" },
+        "identity_environment_ref": { "$ref": "#/$defs/identity_environment_ref" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "idempotency_key", "identity_environment_ref", "confirmation"],
+      "properties": {
+        "operation": { "const": "delete" },
+        "idempotency_key": { "$ref": "#/$defs/idempotency_key" },
+        "identity_environment_ref": { "$ref": "#/$defs/identity_environment_ref" },
+        "confirmation": { "const": "delete_local_data" }
+      }
+    }
+  ],
+  "$defs": {
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^(?=.*\\S)[^\\u0000-\\u001f\\u007f]*$"
+    },
+    "identity_environment_ref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^(?=.*\\S)[^\\u0000-\\u001f\\u007f]*$"
+    },
+    "environment_template": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider_id", "site", "language", "timezone"],
+      "properties": {
+        "provider_id": { "enum": ["cloakbrowser", "chrome_official", "camoufox"] },
+        "site": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["site_id", "origin", "display_name"],
+          "properties": {
+            "site_id": { "$ref": "#/$defs/nonempty_text" },
+            "origin": { "type": "string", "format": "webenvoy-public-origin", "maxLength": 512 },
+            "display_name": { "$ref": "#/$defs/nonempty_text" }
+          }
+        },
+        "language": { "$ref": "#/$defs/nonempty_text" },
+        "timezone": { "$ref": "#/$defs/nonempty_text" }
+      }
+    },
+    "nonempty_text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^(?=.*\\S)[^\\u0000-\\u001f\\u007f]*$"
+    }
+  },
+  "x-webenvoy": {
+    "owner": "Harbor Profile mutation boundary; Core supplies authorization and Run identity",
+    "status": "accepted-v1",
+    "schema_version": "webenvoy.harbor-profile-lifecycle-mutation-request/v1",
+    "compatibility_boundary": "Core copy_environment requests include a fixed expected template and Harbor revalidates it under the mutation lock; trusted owner copy_environment requests may omit that Core-only expectation and copy the source environment as-is. Harbor generates target refs; archive/delete are exact-ref mutations; delete confirmation is request intent only; unknown writes are queried by the original idempotency key.",
+    "source_adrs": ["docs/specs/profile-safe-lifecycle-v1.md", "docs/specs/grant-wire-contract-v1.md"],
+    "field_owners": { "authorization": "Core", "identity_environment_ref": "Harbor", "expected_environment_template": "Core request snapshot revalidated by Harbor", "lifecycle_state": "Harbor" }
+  }
+}

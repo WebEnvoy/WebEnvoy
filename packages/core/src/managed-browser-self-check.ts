@@ -18,6 +18,13 @@ const profiles: Record<string, unknown>[] = [];
 let creates = 0;
 let identityEnvironmentReads = 0;
 let managedOperationCatalogReads = 0;
+let copies = 0;
+let dropCopyResponse = false;
+let malformedUnrelatedProfile = false;
+let archives = 0;
+let deletes = 0;
+let dropDeleteResponse = false;
+let repairDelete = false;
 let navigations = 0, observations = 0, sessionReads = 0;
 let diagnostics = 0, lockAttempts = 0, dropDiagnosticsResponse = false;
 let capabilityDescriptions = 0;
@@ -94,8 +101,8 @@ const server = createServer((req, res) => { void (async () => {
   assert.equal(req.headers.authorization, "Bearer fixture-supervisor");
   let value: unknown;
   if (req.url === "/runtime/managed-operation-catalog") { managedOperationCatalogReads++; value = {
-    schema_version: "webenvoy.harbor-operation-catalog.v0", catalog_ref: "harbor://managed-operations", catalog_version: "1",
-    operations: [...managedOperations.filter(op => !(managedInteractionOperations as readonly string[]).includes(op) && !(managedBusinessTargetOperations as readonly string[]).includes(op) && !op.startsWith("provider.preference.")).map(operation_id => ({ operation_id, category: (managedFileOperations as readonly string[]).includes(operation_id) || operation_id === "environment.update" || operation_id === "recovery.request" || ["page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward"].includes(operation_id) ? "prepare" : ["profile.create", "profile.metadata.update", "account.bind"].includes(operation_id) ? "commit" : "read", target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: (managedFileOperations as readonly string[]).includes(operation_id) ? ["harbor://managed-profile", "harbor://controlled-page", "harbor://managed-file"] : ["harbor://managed-profile"] })),
+    schema_version: "webenvoy.harbor-operation-catalog.v0", catalog_ref: "harbor://managed-operations", catalog_version: "10",
+    operations: [...managedOperations.filter(op => !(managedInteractionOperations as readonly string[]).includes(op) && !(managedBusinessTargetOperations as readonly string[]).includes(op) && !op.startsWith("provider.preference.")).map(operation_id => ({ operation_id, category: (managedFileOperations as readonly string[]).includes(operation_id) || operation_id === "environment.update" || operation_id === "recovery.request" || ["page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward"].includes(operation_id) ? "prepare" : operation_id === "profile.delete" ? "destructive" : ["profile.create", "profile.copy_environment", "profile.archive", "profile.metadata.update", "account.bind"].includes(operation_id) ? "commit" : "read", target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: (managedFileOperations as readonly string[]).includes(operation_id) ? ["harbor://managed-profile", "harbor://controlled-page", "harbor://managed-file"] : ["harbor://managed-profile"] })),
       ...["provider.preference.read", "provider.preference.set", "provider.preference.clear"].map(operation_id => ({ operation_id, category: operation_id === "provider.preference.read" ? "read" : "commit", target_scope: { target_types: ["provider_preference"] }, resource_requirement_refs: ["harbor://browser-provider-preference"] })),
       ...["controlled-page.observe", "controlled-page.interact"].map(operation_id => ({ operation_id, category: operation_id === "controlled-page.interact" ? "prepare" : "read", target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: ["harbor://managed-profile", "harbor://controlled-page"] }))]
   }; }
@@ -149,11 +156,61 @@ const server = createServer((req, res) => { void (async () => {
       }
       receipts.set(input.idempotency_key, value);
       if (dropMetadataResponse) { req.socket.destroy(); return; }
+    } else if (input.operation === "archive") {
+      archives++;
+      const record = profiles.find(item => item.identity_environment_ref === input.identity_environment_ref);
+      if (!record) value = { status: "rejected", operation: input.operation, identity_environment_ref: input.identity_environment_ref, failure: { code: "identity_environment_missing" } };
+      else {
+        record.lifecycle_state = "archived";
+        value = { status: "completed", operation: input.operation, identity_environment_ref: record.identity_environment_ref,
+          source_identity_environment_ref: record.identity_environment_ref, record, failure: null };
+      }
+      receipts.set(input.idempotency_key, value);
+    } else if (input.operation === "delete") {
+      deletes++;
+      const index = profiles.findIndex(item => item.identity_environment_ref === input.identity_environment_ref);
+      if (index < 0) value = { status: "rejected", operation: input.operation, identity_environment_ref: input.identity_environment_ref, failure: { code: "identity_environment_missing" } };
+      else if (repairDelete) {
+        const record = profiles[index]!;
+        value = { status: "repair_required", operation: input.operation, identity_environment_ref: record.identity_environment_ref,
+          source_identity_environment_ref: record.identity_environment_ref, record, effects: { index: "present", local_data: "repair_required" }, failure: { code: "profile_cleanup_failed" } };
+      }
+      else {
+        const record = profiles.splice(index, 1)[0]!;
+        value = { status: "completed", operation: input.operation, identity_environment_ref: record.identity_environment_ref,
+          source_identity_environment_ref: record.identity_environment_ref, record: null, effects: { index: "removed", local_data: "deleted", login_state: "unchanged" }, failure: null };
+      }
+      receipts.set(input.idempotency_key, value);
+      if (dropDeleteResponse) { req.socket.destroy(); return; }
+    } else if (input.operation === "copy_environment") {
+      copies++;
+      const source = profiles.find(item => item.identity_environment_ref === input.identity_environment_ref);
+      const expected = input.expected_environment_template;
+      const sourceSite = source?.site as Record<string, unknown> | undefined;
+      const sourceEnvironment = source?.environment_summary as Record<string, unknown> | undefined;
+      if (!source || !expected || sourceEnvironment?.provider_id !== expected.provider_id ||
+          sourceSite?.site_id !== expected.site.site_id || sourceSite?.origin !== expected.site.origin ||
+          sourceSite?.display_name !== expected.site.display_name || sourceEnvironment?.language !== expected.language ||
+          sourceEnvironment?.timezone !== expected.timezone) {
+        value = { status: "rejected", operation: input.operation, identity_environment_ref: null,
+          source_identity_environment_ref: input.identity_environment_ref, failure: { code: source ? "copy_template_mismatch" : "identity_environment_missing" } };
+      } else {
+        const id = copies;
+        const record = { schema_version: "harbor-local-identity-environment-store/v1", lifecycle_state: "active",
+          refs: { profile_ref: `profile:copied-${id}`, profile_storage_ref: `storage:copied-${id}` }, identity_environment_ref: `identity:copied-${id}`,
+          name: `profile:copied-${id}`, tags: [], site: structuredClone(expected.site), status: { readiness: "needs_auth" }, account_bindings: [],
+          environment_summary: { provider_id: expected.provider_id, language: expected.language, timezone: expected.timezone } };
+        profiles.push(record);
+        value = { status: "completed", operation: input.operation, identity_environment_ref: record.identity_environment_ref,
+          source_identity_environment_ref: source.identity_environment_ref, record, failure: null };
+      }
+      receipts.set(input.idempotency_key, value);
+      if (dropCopyResponse) { req.socket.destroy(); return; }
     } else {
     requestedProviders.push(input.identity_environment.requested_provider_id);
     const selectedProvider = input.identity_environment.requested_provider_id ?? browserPreference;
     if (!selectedProvider) {
-      value = { status: "rejected", failure: { code: "provider_selection_required" } };
+      value = { status: "rejected", operation: input.operation, identity_environment_ref: null, source_identity_environment_ref: null, failure: { code: "provider_selection_required" } };
       receipts.set(input.idempotency_key, value);
       if (dropResponse) { req.socket.destroy(); return; }
       res.statusCode = 409;
@@ -161,7 +218,7 @@ const server = createServer((req, res) => { void (async () => {
     }
     creates++;
     const record = { refs: { profile_ref: `profile:${creates}` }, identity_environment_ref: `identity:${creates}`, name: `profile:${creates}`, tags: [], site: { origin: "https://example.com", display_name: "Example" }, status: { readiness: "ready" }, account_bindings: [], environment_summary: { provider_id: selectedProvider } };
-    profiles.push(record); value = { status: "completed", record, ...(omitProviderSelection ? {} : { provider_selection: { schema_version: "harbor-provider-selection/v1", source: input.identity_environment.requested_provider_id ? "explicit_request" : "user_default", selected_provider_id: selectedProvider } }) };
+    profiles.push(record); value = { status: "completed", operation: input.operation, identity_environment_ref: record.identity_environment_ref, source_identity_environment_ref: null, record, ...(omitProviderSelection ? {} : { provider_selection: { schema_version: "harbor-provider-selection/v1", source: input.identity_environment.requested_provider_id ? "explicit_request" : "user_default", selected_provider_id: selectedProvider } }) };
     receipts.set(input.idempotency_key, value);
     await afterCreate?.();
     if (dropResponse) { req.socket.destroy(); return; }
@@ -170,7 +227,7 @@ const server = createServer((req, res) => { void (async () => {
   else if (req.url === "/runtime/identity-environments") {
     identityEnvironmentReads++;
     await afterProfileList?.();
-    value = { identity_environments: structuredClone(profiles) };
+    value = { identity_environments: structuredClone(malformedUnrelatedProfile ? [{ refs: { profile_ref: "profile:unrelated-malformed" } }, ...profiles] : profiles) };
     await afterIdentityEnvironmentSnapshot?.();
     afterIdentityEnvironmentSnapshot = undefined;
   }
@@ -293,6 +350,7 @@ const server = createServer((req, res) => { void (async () => {
     if (dropInteractionResponse) { req.socket.destroy(); return; }
   } else if (req.url?.startsWith("/runtime/managed-interactions/")) value = receipts.get(decodeURIComponent(req.url.split("/").at(-1)!));
   else { res.writeHead(404); res.end('{}'); return; }
+  if (value && typeof value === "object" && (value as { status?: unknown }).status === "repair_required") res.statusCode = 409;
   res.setHeader("content-type", "application/json"); res.end(JSON.stringify(value));
 })().catch(() => { res.writeHead(500); res.end('{}'); }); });
 await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
@@ -389,6 +447,138 @@ try {
   await assert.rejects(service.submit(credentialHash, { ...request, idempotency_key: "after-revoke", connection_id: reconnect.connection_id }), /grant_unavailable/);
   assert.deepEqual(await service.query(credentialHash, second.run_id), second);
   assert.equal((await runRecordStore.listRunRecords()).filter(run => run.status === "succeeded").length, 5);
+
+
+  const copySourceProfileRef = "profile:copy-source";
+  const copySourceIdentityRef = "identity:copy-source";
+  await accessStore.setProfilePolicy({ idempotency_key: "copy-source-policy", profile_ref: copySourceProfileRef,
+    allowed_operations: ["profile.copy_environment", "profile.read", "instance.start", "instance.stop", "instance.click"],
+    allowed_origins: ["https://example.com", "https://source-only.example"],
+    controlled_interaction_origins: ["https://example.com", "https://source-only.example"] });
+  profiles.push({ schema_version: "harbor-local-identity-environment-store/v1", lifecycle_state: "active",
+    identity_environment_ref: copySourceIdentityRef, refs: { profile_ref: copySourceProfileRef }, name: "Copy source", tags: [],
+    site: { site_id: "example", origin: "https://example.com", display_name: "Example" }, status: { readiness: "needs_auth" }, account_bindings: [],
+    environment_summary: { provider_id: "camoufox", language: "en-US", timezone: "UTC" } });
+  const copyTemplate = { template_ref: "template:copy", provider_id: "camoufox", site: { site_id: "example", origin: "https://example.com", display_name: "Example" },
+    language: "en-US", timezone: "UTC", permission_ceiling: { allowed_operations: ["profile.copy_environment", "profile.read", "instance.start", "instance.click"],
+      allowed_origins: ["https://example.com", "https://template-only.example"], controlled_interaction_origins: ["https://example.com"] } };
+  const copyGrant = await accessStore.createGrant({ idempotency_key: "copy-grant", principal_id: principal.principal_id,
+    profile_refs: [copySourceProfileRef], allowed_operations: ["profile.copy_environment", "profile.read", "instance.start", "instance.stop", "instance.click"],
+    allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 1, creation_template: copyTemplate });
+  const copyRequest = { idempotency_key: "copy-one", connection_id: connection.connection_id, grant_id: copyGrant.grant_id,
+    operation: "profile.copy_environment", profile_ref: copySourceProfileRef, template_ref: copyTemplate.template_ref,
+    task_scope: { operations: ["profile.copy_environment"], profile_refs: [copySourceProfileRef], origins: [] } } as const;
+  malformedUnrelatedProfile = true;
+  const copied = await service.submit(credentialHash, copyRequest);
+  malformedUnrelatedProfile = false;
+  assert.equal(copied.status, "succeeded", JSON.stringify(copied));
+  assert.equal(copies, 1);
+  const copiedResult = copied.result as { profile: { profile_ref: string; lifecycle_state: string; environment_summary: Record<string, unknown> } };
+  assert.notEqual(copiedResult.profile.profile_ref, copySourceProfileRef);
+  assert.equal(copiedResult.profile.lifecycle_state, "active");
+  assert.equal(copiedResult.profile.environment_summary.provider_id, "camoufox");
+  const copiedPolicy = (await accessStore.list()).profile_policies.find(item => item.profile_ref === copiedResult.profile.profile_ref)!;
+  assert.deepEqual(copiedPolicy.allowed_operations, ["profile.copy_environment", "profile.read", "instance.start", "instance.click"]);
+  assert.deepEqual(copiedPolicy.allowed_origins, ["https://example.com"]);
+  assert.deepEqual(copiedPolicy.controlled_interaction_origins, ["https://example.com"]);
+  await assert.rejects(service.submit(credentialHash, { ...copyRequest, idempotency_key: "copy-after-quota" }), /managed_access_creation_denied/);
+  assert.equal(copies, 1, "the completed copy consumes the Grant quota before another Harbor mutation");
+
+  const mismatchTemplate = { ...copyTemplate, template_ref: "template:copy-mismatch", site: { ...copyTemplate.site, display_name: "Other" } };
+  const mismatchGrant = await accessStore.createGrant({ idempotency_key: "copy-mismatch-grant", principal_id: principal.principal_id,
+    profile_refs: [copySourceProfileRef], allowed_operations: ["profile.copy_environment"], allowed_origins: ["https://example.com"],
+    expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 1, creation_template: mismatchTemplate });
+  const mismatch = await service.submit(credentialHash, { ...copyRequest, idempotency_key: "copy-mismatch", grant_id: mismatchGrant.grant_id, template_ref: mismatchTemplate.template_ref });
+  assert.equal(mismatch.failure?.code, "managed_browser_copy_template_mismatch");
+  assert.equal(copies, 1, "a source/template mismatch must fail before Harbor dispatch");
+
+  const unknownCopyGrant = await accessStore.createGrant({ idempotency_key: "unknown-copy-grant", principal_id: principal.principal_id,
+    profile_refs: [copySourceProfileRef], allowed_operations: ["profile.copy_environment"], allowed_origins: ["https://example.com"],
+    expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 1, creation_template: copyTemplate });
+  dropCopyResponse = true;
+  const unknownCopy = await service.submit(credentialHash, { ...copyRequest, idempotency_key: "copy-lost-response", grant_id: unknownCopyGrant.grant_id });
+  dropCopyResponse = false;
+  assert.equal(unknownCopy.status, "unknown_outcome");
+  const copyCountAfterDispatch = copies;
+  const blockedUnknownCopy = await service.submit(credentialHash, { ...copyRequest, idempotency_key: "copy-do-not-repeat", grant_id: unknownCopyGrant.grant_id });
+  assert.equal(blockedUnknownCopy.failure?.code, "managed_browser_creation_reconciliation_required");
+  assert.equal(copies, copyCountAfterDispatch);
+  const reconciledCopy = await service.query(credentialHash, unknownCopy.run_id);
+  assert.equal(reconciledCopy.status, "unknown_outcome");
+  assert.equal((reconciledCopy.result as { profile: { profile_ref: string } }).profile.profile_ref, "profile:copied-2");
+  assert.equal(copies, copyCountAfterDispatch, "receipt query must not replay Harbor copy");
+  assert.deepEqual((await accessStore.list()).grants.find(item => item.grant_id === unknownCopyGrant.grant_id)?.created_profile_refs, ["profile:copied-2"]);
+
+  const sourceRecord = profiles.find(item => item.identity_environment_ref === copySourceIdentityRef)!;
+  const retainedBinding = { account_system_ref: "account-system:copy-source", account_ref: "account:sha256:copy-source" };
+  sourceRecord.account_bindings = [retainedBinding];
+  await accessStore.setProfilePolicy({ idempotency_key: "lifecycle-source-policy", profile_ref: copySourceProfileRef,
+    allowed_operations: ["profile.copy_environment", "profile.read", "profile.archive", "profile.delete", "instance.start"],
+    allowed_origins: ["https://example.com"], controlled_interaction_origins: ["https://example.com"] });
+  const lifecycleGrant = await accessStore.createGrant({ idempotency_key: "lifecycle-grant", principal_id: principal.principal_id,
+    profile_refs: [copySourceProfileRef], allowed_operations: ["profile.archive", "profile.delete", "instance.start"],
+    allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
+  const archiveRequest = { idempotency_key: "archive-profile", connection_id: connection.connection_id, grant_id: lifecycleGrant.grant_id,
+    operation: "profile.archive", profile_ref: copySourceProfileRef,
+    task_scope: { operations: ["profile.archive"], profile_refs: [copySourceProfileRef], origins: [] } } as const;
+  const archived = await service.submit(credentialHash, archiveRequest);
+  assert.equal(archived.status, "succeeded", JSON.stringify(archived));
+  assert.equal((archived.result as { profile: { lifecycle_state: string; account_bindings: unknown[] } }).profile.lifecycle_state, "archived");
+  assert.deepEqual((archived.result as { profile: { account_bindings: unknown[] } }).profile.account_bindings, [retainedBinding]);
+  assert.equal(archives, 1);
+  const startArchived = await service.submit(credentialHash, { ...archiveRequest, idempotency_key: "start-archived", operation: "instance.start",
+    origin: "https://example.com", task_scope: { operations: ["instance.start"], profile_refs: [copySourceProfileRef], origins: ["https://example.com"] } });
+  assert.equal(startArchived.failure?.code, "managed_browser_profile_archived");
+
+  const deleteRequest = { idempotency_key: "delete-profile-denied", connection_id: connection.connection_id, grant_id: lifecycleGrant.grant_id,
+    operation: "profile.delete", profile_ref: copySourceProfileRef, confirmation: "delete_local_data",
+    task_scope: { operations: ["profile.delete"], profile_refs: [copySourceProfileRef], origins: [] } } as const;
+  const deleteDenied = await service.submit(credentialHash, deleteRequest);
+  assert.equal(deleteDenied.failure?.code, "managed_browser_policy_refused");
+  assert.equal(deletes, 0, "the Profile Grant and confirmation do not bypass destructive ExecutionPolicy");
+  const globalPolicy = await executionPolicyConfigStore.getGlobalConfiguration();
+  assert.ok(globalPolicy);
+  await executionPolicyConfigStore.putGlobalConfiguration({ schema_version: executionPolicyMutationSchemaVersion, idempotency_key: "allow-profile-delete",
+    expected_source_version: globalPolicy.source_version, modes: { ...globalPolicy.modes, destructive: "auto" } });
+  dropDeleteResponse = true;
+  const deleted = await service.submit(credentialHash, { ...deleteRequest, idempotency_key: "delete-profile-allowed" });
+  dropDeleteResponse = false;
+  assert.equal(deleted.status, "unknown_outcome", JSON.stringify(deleted));
+  assert.equal(deletes, 1);
+  assert.equal(profiles.some(item => item.identity_environment_ref === copySourceIdentityRef), false);
+  const queriedDelete = await service.query(credentialHash, deleted.run_id);
+  assert.equal(queriedDelete.status, "unknown_outcome", "reconciling an unknown delete must keep the original Run outcome visible");
+  const deleteReceipt = (queriedDelete.result as { receipt: { operation: string; identity_environment_ref: string } }).receipt;
+  assert.equal(deleteReceipt.operation, "delete");
+  assert.equal(deleteReceipt.identity_environment_ref, copySourceIdentityRef);
+  assert.equal(deletes, 1, "query may inspect the original receipt but must never replay deletion");
+
+  const repairProfileRef = "profile:repair-required";
+  const repairIdentityRef = "identity:repair-required";
+  profiles.push({ schema_version: "harbor-local-identity-environment-store/v1", lifecycle_state: "active",
+    identity_environment_ref: repairIdentityRef, refs: { profile_ref: repairProfileRef }, name: "Repair required", tags: [],
+    site: { site_id: "example", origin: "https://example.com", display_name: "Example" }, status: { readiness: "ready" }, account_bindings: [],
+    environment_summary: { provider_id: "camoufox", language: "en-US", timezone: "UTC" } });
+  await accessStore.setProfilePolicy({ idempotency_key: "repair-profile-policy", profile_ref: repairProfileRef,
+    allowed_operations: ["profile.delete"], allowed_origins: [] });
+  const repairGrant = await accessStore.createGrant({ idempotency_key: "repair-delete-grant", principal_id: principal.principal_id,
+    profile_refs: [repairProfileRef], allowed_operations: ["profile.delete"], allowed_origins: [],
+    expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null });
+  const repairRequest = { idempotency_key: "repair-delete", connection_id: connection.connection_id, grant_id: repairGrant.grant_id,
+    operation: "profile.delete", profile_ref: repairProfileRef, confirmation: "delete_local_data",
+    task_scope: { operations: ["profile.delete"], profile_refs: [repairProfileRef], origins: [] } } as const;
+  repairDelete = true;
+  const repairSubmitted = await service.submit(credentialHash, repairRequest);
+  repairDelete = false;
+  assert.equal(repairSubmitted.status, "unknown_outcome", "HTTP 409 repair_required is not a completed rejection");
+  const repairQueried = await service.query(credentialHash, repairSubmitted.run_id);
+  assert.equal(repairQueried.status, "unknown_outcome");
+  const repairReceipt = (repairQueried.result as { receipt: { status: string; failure: { code: string } } }).receipt;
+  assert.equal(repairReceipt.status, "repair_required");
+  assert.equal(repairReceipt.failure.code, "profile_cleanup_failed");
+  assert.equal(deletes, 2, "query reads the original repair receipt without replaying deletion");
+  assert.equal(profiles.some(item => item.identity_environment_ref === repairIdentityRef), true, "repair-required retains the Profile reference for recovery");
+
   const recoveryGrant = await accessStore.createGrant({ idempotency_key: "recovery-grant", principal_id: principal.principal_id, profile_refs: [], allowed_operations: grant.allowed_operations, allowed_origins: grant.allowed_origins, expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 2, creation_template: grant.creation_template });
   afterCreate = undefined; dropResponse = true;
   const unknown = await service.submit(credentialHash, { ...request, idempotency_key: "lost-response", grant_id: recoveryGrant.grant_id });

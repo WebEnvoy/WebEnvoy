@@ -27,6 +27,76 @@ import type { IdentityEnvironmentMutationPersistenceState } from "./identity-env
 
 after(isolateProfileStorage("identity-mutations"));
 
+test("archives a Profile durably, retains account bindings, and rejects a later start", async () => {
+  const dir = tempDir("profile-archive");
+  const persistence_path = join(dir, "identity-environments.json");
+  try {
+    const manager = new LocalIdentityEnvironmentManager({ persistence_path, provider_detection: testProviderDetection });
+    const created = manager.mutate({ operation: "create", idempotency_key: "archive-create", identity_environment: createMutationInput() });
+    assert.equal(created.status, "completed");
+    const identity_environment_ref = created.identity_environment_ref!;
+    const binding = {
+      account_system_ref: "account-system:archive-test",
+      account_ref: "account:sha256:archive-test",
+      observation_ref: "observation:archive-test",
+      bound_at: new Date().toISOString()
+    };
+    manager.bindObservedAccount(identity_environment_ref, binding, "archive-binding", "archive-binding-request-hash");
+
+    const archived = manager.mutate({ operation: "archive", identity_environment_ref, idempotency_key: "archive-profile" });
+    assert.equal(archived.status, "completed");
+    assert.equal(archived.record?.lifecycle_state, "archived");
+    assert.deepEqual(archived.record?.account_bindings, [binding]);
+    assert.equal(archived.effects.local_data, "unchanged");
+    assert.equal(archived.effects.login_state, "unchanged");
+    const archivedSourceCopy = manager.mutate(copyRequest(identity_environment_ref, "copy-archived-source"));
+    assert.equal(archivedSourceCopy.status, "rejected");
+    assert.equal(archivedSourceCopy.failure?.code, "profile_archived");
+    assert.equal(manager.list().length, 1, "an archived source cannot materialize a copy");
+
+    const reloaded = new LocalIdentityEnvironmentManager({ persistence_path, provider_detection: testProviderDetection });
+    assert.equal(reloaded.get(identity_environment_ref)?.lifecycle_state, "archived");
+    assert.deepEqual(reloaded.get(identity_environment_ref)?.account_bindings, [binding]);
+    assert.equal(reloaded.mutate({ operation: "archive", identity_environment_ref, idempotency_key: "archive-profile-again" }).record?.lifecycle_state, "archived");
+
+    let launches = 0;
+    const fixture = createFixtureLauncher("ready");
+    const runtime = new HarborRuntime(async input => { launches++; return fixture(input); }, { persistence_path, provider_detection: testProviderDetection });
+    const refused = await runtime.openManagedIdentityEnvironmentSession({ identity_environment_ref, url: "https://www.xiaohongshu.com/", control_owner: "core_task", holder_ref: "principal:archive", operation_scope: "profile_management" });
+    assert.equal("failure_class" in refused ? refused.failure_class : refused.current_error?.code, "profile_archived");
+    assert.equal(launches, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("legacy v0 Profile records default to active and migrate on the next write", () => {
+  const dir = tempDir("profile-lifecycle-v0");
+  const persistence_path = join(dir, "identity-environments.json");
+  try {
+    const initial = new LocalIdentityEnvironmentManager({ persistence_path, provider_detection: testProviderDetection });
+    const created = initial.mutate({ operation: "create", idempotency_key: "legacy-lifecycle-create", identity_environment: createMutationInput() });
+    assert.equal(created.status, "completed");
+    const state = JSON.parse(readFileSync(persistence_path, "utf8")) as Record<string, any>;
+    state.schema_version = "harbor-local-identity-environment-store/v0";
+    for (const record of state.records as Record<string, any>[]) {
+      record.schema_version = "harbor-local-identity-environment-store/v0";
+      delete record.lifecycle_state;
+    }
+    writeFileSync(persistence_path, JSON.stringify(state));
+
+    const legacy = new LocalIdentityEnvironmentManager({ persistence_path, provider_detection: testProviderDetection });
+    assert.equal(legacy.get(created.identity_environment_ref!)?.lifecycle_state, "active");
+    const archived = legacy.mutate({ operation: "archive", idempotency_key: "legacy-lifecycle-archive", identity_environment_ref: created.identity_environment_ref! });
+    assert.equal(archived.record?.lifecycle_state, "archived");
+    const migrated = JSON.parse(readFileSync(persistence_path, "utf8")) as Record<string, any>;
+    assert.equal(migrated.schema_version, "harbor-local-identity-environment-store/v1");
+    assert.equal(migrated.records[0].lifecycle_state, "archived");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("updates Profile organization metadata through the owner receipt without locking browser storage", () => {
   const dir = tempDir("profile-metadata");
   const persistence_path = join(dir, "identity-environments.json");
@@ -104,7 +174,12 @@ test("updates Profile organization metadata through the owner receipt without lo
     assert.equal(reloaded.get(identity_environment_ref)?.environment_summary.language, "en-GB");
     assert.deepEqual(reloaded.list()[0]?.account_bindings, [binding]);
 
-    const copy = reloaded.mutate(copyRequest(identity_environment_ref, "metadata-copy"));
+    const copy = reloaded.mutate(copyRequest(identity_environment_ref, "metadata-copy", "copy_environment", {
+      provider_id: "chrome_official",
+      site: { site_id: "xiaohongshu", origin: "https://www.xiaohongshu.com", display_name: "小红书" },
+      language: "en-GB",
+      timezone: "UTC"
+    }));
     assert.equal(copy.status, "completed");
     assert.equal(copy.record!.name, copy.record!.refs.profile_ref);
     assert.deepEqual(copy.record!.tags, []);
@@ -421,6 +496,8 @@ test("full copy includes owner session material while configuration-only copy ex
   try {
     const manager = new LocalIdentityEnvironmentManager({
       provider_detection: testProviderDetection,
+      validate_proxy: (ref) => ref === "proxy-reachable" ? "reachable" : "unreachable",
+      resolve_proxy: () => "http://127.0.0.1:8080",
       stage_local_material_copy: (refs, target) => {
         localCopyCalls += 1;
         assert.deepEqual(refs, { cookie_jar_ref: "source-cookie-ref", browser_storage_ref: "source-browser-storage" });
@@ -450,6 +527,8 @@ test("full copy includes owner session material while configuration-only copy ex
       }
     });
     manager.completeManualAuthentication("identity-source", "session-source");
+    assert.equal(manager.mutate({ operation: "edit", idempotency_key: "copy-source-proxy", identity_environment_ref: "identity-source",
+      configuration: { proxy_ref: "proxy-reachable", proxy_label: "Tokyo", geoip_mode: "proxy" } }).status, "completed");
     const sourcePath = profileStoragePath("source-profile-storage");
     mkdirSync(sourcePath, { recursive: true });
     writeFileSync(join(sourcePath, "session-owner-data"), "cookie-secret");
@@ -470,15 +549,32 @@ test("full copy includes owner session material while configuration-only copy ex
     assert.equal(JSON.stringify(full).includes("cookie-secret"), false);
     assert.deepEqual(manager.mutate(fullRequest), full);
 
-    const environmentRequest = copyRequest("identity-source", "copy-environment-1");
+    manager.bindObservedAccount("identity-source", {
+      account_system_ref: "account-system:copy-source",
+      account_ref: "account:sha256:copy-source",
+      observation_ref: "observation:copy-source",
+      bound_at: new Date().toISOString()
+    }, "copy-source-binding", "copy-source-binding-hash");
+
+    const environmentRequest = copyRequest("identity-source", "copy-environment-1", "copy_environment", {
+      provider_id: "chrome_official",
+      site: { site_id: "xiaohongshu", origin: "https://www.xiaohongshu.com", display_name: "小红书" },
+      language: "ja-JP",
+      timezone: "Asia/Tokyo"
+    });
     const environmentTarget = copyTarget(environmentRequest);
     const environment = manager.mutate(environmentRequest);
     const environmentPath = profileStoragePath(`${environmentTarget.profile_ref}:storage`);
     assert.equal(environment.status, "completed");
     assert.equal(environment.record?.status.login_state, "logged_out");
     assert.equal(environment.record?.site.account_ref, null);
+    assert.deepEqual(environment.record?.account_bindings, []);
     assert.equal(environment.record?.refs.cookie_jar_ref, null);
     assert.equal(environment.record?.refs.browser_storage_ref, null);
+    assert.equal(environment.record?.refs.proxy_ref, null);
+    assert.equal(environment.record?.environment_summary.proxy_state, "missing");
+    assert.equal(environment.record?.environment_summary.geoip_mode, null);
+    assert.equal(environment.record?.environment_summary.viewport, null);
     assert.equal(environment.record?.environment_summary.timezone, "Asia/Tokyo");
     assert.deepEqual(readdirSync(environmentPath), []);
     assert.equal(localCopyCalls, 1);
@@ -555,12 +651,39 @@ test("exposes redacted mutation HTTP results with stable authorization and statu
     assert.equal(legacyEdit.status, 200);
     assert.equal((await legacyEdit.json() as Record<string, any>).record.environment_summary.language, "en-US");
 
+    const trustedOwnerCopy = await fetch(`${running.url}/runtime/identity-environment-mutations`, {
+      method: "POST",
+      headers: mutationHeaders(token),
+      body: JSON.stringify({
+        operation: "copy_environment",
+        idempotency_key: "trusted-owner-copy-environment",
+        identity_environment_ref: httpIdentityRef
+      })
+    });
+    const trustedOwnerCopyBody = await trustedOwnerCopy.json() as Record<string, any>;
+    assert.equal(trustedOwnerCopy.status, 201);
+    assert.equal(trustedOwnerCopyBody.status, "completed");
+    assert.equal(trustedOwnerCopyBody.record.environment_summary.language, "en-US");
+    assert.notEqual(trustedOwnerCopyBody.identity_environment_ref, httpIdentityRef);
+
     const malformed = await fetch(`${running.url}/runtime/identity-environment-mutations`, {
       method: "POST",
       headers: mutationHeaders(token),
       body: JSON.stringify({ operation: "delete", idempotency_key: "bad-delete", identity_environment_ref: "identity-http" })
     });
     assert.equal(malformed.status, 400);
+
+    const malformedCopyExpectation = await fetch(`${running.url}/runtime/identity-environment-mutations`, {
+      method: "POST",
+      headers: mutationHeaders(token),
+      body: JSON.stringify({
+        operation: "copy_environment",
+        idempotency_key: "malformed-copy-expectation",
+        identity_environment_ref: httpIdentityRef,
+        expected_environment_template: null
+      })
+    });
+    assert.equal(malformedCopyExpectation.status, 400);
 
     const callerAssignedCreateOwner = await fetch(`${running.url}/runtime/identity-environment-mutations`, {
       method: "POST",

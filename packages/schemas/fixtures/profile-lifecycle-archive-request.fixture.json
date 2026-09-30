@@ -1,0 +1,6 @@
+{
+  "$schema": "../schemas/profile-lifecycle-mutation-request.schema.json",
+  "operation": "archive",
+  "idempotency_key": "managed-run-archive-key",
+  "identity_environment_ref": "identity-env:source"
+}

@@ -5,7 +5,7 @@ import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { RuntimeSessionStore } from "./runtime-session.js";
 import { ViewerControlStore } from "./viewer-control.js";
-import { profileStoragePath } from "./profile-storage.js";
+import { acquireProfileStorageOwnership, profileStoragePath } from "./profile-storage.js";
 import { HARBOR_PROFILE_RECOVERY_SCHEMA, HARBOR_PROFILE_RECOVERY_OPERATION_SCHEMA } from "./profile-recovery.js";
 
 test("an interrupted apply journal blocks the original Profile even with a present directory; another Profile can start", async () => {
@@ -37,4 +37,30 @@ test("an interrupted apply journal blocks the original Profile even with a prese
     assert.equal(p2.lifecycle_state, "active");
     await sessions.closeSession(p2.runtime_session_ref);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("rechecks lifecycle after Profile storage ownership before launching", async () => {
+  const root = mkdtempSync(join(tmpdir(), "harbor-lifecycle-start-"));
+  const previousRoot = process.env.HARBOR_PROFILE_STORAGE_ROOT;
+  process.env.HARBOR_PROFILE_STORAGE_ROOT = root;
+  let lifecycleChecks = 0;
+  let launches = 0;
+  const sessions = new RuntimeSessionStore(new ViewerControlStore(), async () => {
+    launches++;
+    throw new Error("archived Profile reached the Provider launcher");
+  }, {
+    profile_lifecycle_state_for_start: () => ++lifecycleChecks === 1 ? "active" : "archived"
+  });
+  try {
+    const refused = await sessions.createSession({ identity_environment_ref: "identity:race", profile_ref: "profile:race", profile_storage_ref: "storage:race" });
+    assert.equal(refused.current_error?.code, "profile_archived");
+    assert.equal(lifecycleChecks, 2);
+    assert.equal(launches, 0);
+    const ownership = acquireProfileStorageOwnership(["storage:race"]);
+    ownership.release();
+  } finally {
+    if (previousRoot === undefined) delete process.env.HARBOR_PROFILE_STORAGE_ROOT;
+    else process.env.HARBOR_PROFILE_STORAGE_ROOT = previousRoot;
+    rmSync(root, { recursive: true, force: true });
+  }
 });

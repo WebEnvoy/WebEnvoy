@@ -1962,6 +1962,13 @@ try {
   ) {
     throw new Error("Harbor manual authentication smoke failed: packaged opaque refs were rejected or unsafe refs were accepted.");
   }
+  const lifecycleStoreRuntimeRefs = manualAuthenticationCompletionModule.redactPublicManualAuthenticationResponse(JSON.stringify({
+    ...packagedRuntimeRefs,
+    schema_version: "harbor-local-identity-environment-store/v1",
+  }));
+  if (lifecycleStoreRuntimeRefs?.schema_version !== "harbor-local-identity-environment-store/v1") {
+    throw new Error("Harbor manual authentication smoke failed: lifecycle store v1 was rejected or its version was rewritten.");
+  }
   const ownerRuntimeRefs = manualAuthenticationCompletionModule.redactPublicManualAuthenticationResponse(JSON.stringify({
     ...packagedRuntimeRefs,
     identity_environment_ref: "identity-env_26acb6c902330d7b27f98f19",

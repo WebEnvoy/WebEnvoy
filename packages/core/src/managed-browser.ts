@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { withFileOwnershipLock } from "./file-ownership.js";
-import { ManagedAccessError, managedFileOperations, managedInteractionOperations, managedPageOperations, type FileManagedAccessStore, type ManagedAccessRequest } from "./managed-access.js";
+import { ManagedAccessError, managedFileOperations, managedInteractionOperations, managedPageOperations, type FileManagedAccessStore, type ManagedAccessRequest, type ManagedCreationTemplate } from "./managed-access.js";
 import { managedBusinessTargetOperations, type ManagedBusinessTargetAccountScope } from "./managed-access.js";
 import { createFileBusinessTargetStore, type BusinessTargetAccountScope } from "./business-target-store.js";
 import { publicRunResult, type FileRunRecordStore, type RunRecord } from "./run-record-store.js";
@@ -30,7 +30,7 @@ import {
 
 type ObjectValue = Record<string, unknown>;
 type EnvironmentConfiguration = { timezone?: string; language?: string; viewport?: string };
-type Request = ManagedAccessRequest & { idempotency_key: string; url?: string; name?: string; tags?: string[]; label?: string; runtime_session_ref?: string; observation_ref?: string; account_system_ref?: string; account_ref?: string; business_target_ref?: string; declared_external_id?: string;
+type Request = ManagedAccessRequest & { idempotency_key: string; url?: string; name?: string; tags?: string[]; label?: string; confirmation?: "delete_local_data"; runtime_session_ref?: string; observation_ref?: string; account_system_ref?: string; account_ref?: string; business_target_ref?: string; declared_external_id?: string;
   page_id?: string; page_ref?: string; document_generation?: number; cursor?: string; limit?: number; target_ref?: string; file_ref?: string; text?: string; key?: string; delta_y?: number; wait_for?: "page_changed" | "text" | "enabled"; timeout_ms?: number; configuration?: EnvironmentConfiguration; backup_ref?: string; operation_ref?: string; provider_id?: "cloakbrowser" | "chrome_official" | "camoufox" };
 type DescribeContext = { grant_id: string; profile_ref: string; task_scope: ManagedAccessRequest["task_scope"] };
 type DescribeInput = { operation: string; connection_id: string; context?: DescribeContext; arguments?: ObjectValue };
@@ -263,6 +263,13 @@ function parse(value: unknown): Request {
       (input.operation === "provider.preference.set" ? input.provider_id === undefined : input.provider_id !== undefined)) return fail("managed_browser_invalid_input");
   } else if (input.operation === "profile.create") {
     if (["profile_ref", "runtime_session_ref", "observation_ref", "account_system_ref", "account_ref", "page_id", "page_ref", "document_generation", "cursor", "limit", "target_ref", "text", "key", "delta_y", "wait_for", "timeout_ms", "configuration", "backup_ref", "operation_ref"].some(key => input[key] !== undefined)) return fail("managed_browser_invalid_input");
+  } else if (input.operation === "profile.copy_environment") {
+    text(input.profile_ref); text(input.template_ref);
+  } else if (input.operation === "profile.archive") {
+    text(input.profile_ref);
+  } else if (input.operation === "profile.delete") {
+    text(input.profile_ref);
+    if (input.confirmation !== "delete_local_data") return fail("managed_browser_invalid_input");
   } else if (input.operation === "profile.metadata.update") {
     text(input.profile_ref);
     if (input.name === undefined && input.tags === undefined) return fail("managed_browser_invalid_input");
@@ -451,7 +458,24 @@ function rawProfileRef(value: unknown): string | undefined {
   const refs = (value as ObjectValue).refs;
   if (!refs || typeof refs !== "object" || Array.isArray(refs)) return undefined;
   const profileRef = (refs as ObjectValue).profile_ref;
-  return typeof profileRef === "string" ? profileRef : undefined;
+  return typeof profileRef === "string" && profileRef.length > 0 ? profileRef : undefined;
+}
+function assertCopyTemplateMatch(profile: ObjectValue, template: Pick<ManagedCreationTemplate, "provider_id" | "site" | "language" | "timezone">): void {
+  if (template.provider_id === null) return fail("managed_browser_template_provider_unspecified");
+  const site = object(profile.site), environment = object(profile.environment_summary);
+  if (site.site_id !== template.site.site_id || site.origin !== template.site.origin || site.display_name !== template.site.display_name ||
+      environment.provider_id !== template.provider_id || environment.language !== template.language || environment.timezone !== template.timezone) {
+    return fail("managed_browser_copy_template_mismatch");
+  }
+}
+function copyTemplateFacts(value: unknown): Pick<ManagedCreationTemplate, "provider_id" | "site" | "language" | "timezone"> {
+  const input = object(value), site = object(input.site);
+  if (!(["cloakbrowser", "chrome_official", "camoufox"] as unknown[]).includes(input.provider_id)) return fail("managed_browser_runtime_invalid");
+  return {
+    provider_id: input.provider_id as ManagedCreationTemplate["provider_id"],
+    site: { site_id: text(site.site_id), origin: text(site.origin), display_name: text(site.display_name) },
+    language: text(input.language), timezone: text(input.timezone)
+  };
 }
 function publicProviderSelection(value: unknown): ObjectValue {
   if (!value || typeof value !== "object" || Array.isArray(value)) return fail("managed_browser_provider_selection_invalid");
@@ -524,6 +548,10 @@ export function createManagedBrowserService(options: {
       if (["completed", "unavailable", "unknown_outcome"].includes(String(value.status)) && ["not_dispatched", "dispatched"].includes(String(value.dispatch_state))) return value;
       throw new Error(`managed_${receiptKind}_receipt_unavailable`);
     }
+    // Harbor uses 409 for a delete receipt that still needs local repair. Keep
+    // the durable receipt available to the caller so it stays unknown until a
+    // GET-only reconciliation reads that same key.
+    if (value.status === "repair_required") return value;
     if (!result.ok || value.status === "unavailable" || value.status === "failed" || value.lifecycle_state === "failed") {
       const failure = value.failure && typeof value.failure === "object" ? object(value.failure) : {};
       const error = value.current_error && typeof value.current_error === "object" ? object(value.current_error) : {};
@@ -682,24 +710,67 @@ export function createManagedBrowserService(options: {
         throw error;
       }
     }
-    if (input.operation === "profile.create") {
+    if (input.operation === "profile.create" || input.operation === "profile.copy_environment") {
       // Unknown creation blocks further quota consumption until the existing receipt is reconciled.
       const unresolved = (await store.listRunRecords()).some(run => run.run_id !== runId && run.public_result_summary?.grant_id === input.grant_id &&
-        run.public_result_summary?.operation === "profile.create" && ["running", "admitted", "unknown_outcome"].includes(run.status) && run.public_result_summary?.reconciliation !== "completed");
+        ["profile.create", "profile.copy_environment"].includes(String(run.public_result_summary?.operation)) && ["running", "admitted", "unknown_outcome"].includes(run.status) && run.public_result_summary?.reconciliation !== "completed");
       if (unresolved) return fail("managed_browser_creation_reconciliation_required");
-      const template = access.creation_template!;
-      if (template.provider_id !== null && input.provider_id !== undefined) return fail("managed_browser_template_provider_conflict");
       await check();
-      const created = await runtimeHarbor("/runtime/identity-environment-mutations", { operation: "create", idempotency_key: runId,
-        identity_environment: { site: template.site, ...((template.provider_id ?? input.provider_id) === undefined ? {} : { requested_provider_id: template.provider_id ?? input.provider_id }), language: template.language, timezone: template.timezone } });
-      if (created.status !== "completed") return fail("managed_browser_creation_unknown");
+      const template = access.creation_template!;
+      if (input.operation === "profile.create") {
+        if (template.provider_id !== null && input.provider_id !== undefined) return fail("managed_browser_template_provider_conflict");
+        const created = await runtimeHarbor("/runtime/identity-environment-mutations", { operation: "create", idempotency_key: runId,
+          identity_environment: { site: template.site, ...((template.provider_id ?? input.provider_id) === undefined ? {} : { requested_provider_id: template.provider_id ?? input.provider_id }), language: template.language, timezone: template.timezone } });
+        if (created.status !== "completed") return fail("managed_browser_creation_unknown");
+        try {
+          const profile = publicProfile(created.record);
+          const providerSelection = publicProviderSelection(created.provider_selection);
+          await options.accessStore.recordCreatedProfile({ idempotency_key: runId, grant_id: input.grant_id, profile_ref: profile.profile_ref });
+          return { profile, provider_selection: providerSelection, authorization_decision_ref: access.decision_ref };
+        } catch (error) {
+          throw new CreationReceiptFailure(error instanceof ManagedAccessError ? error.code : "managed_browser_creation_unknown");
+        }
+      }
+      if (template.provider_id === null) return fail("managed_browser_template_provider_unspecified");
+      const list = await runtimeHarbor("/runtime/identity-environments");
+      if (!Array.isArray(list.identity_environments)) return fail("managed_browser_runtime_invalid");
+      // Select by the already-authorized exact Profile ref before validating its record.
+      // A malformed unrelated Profile must not block a copy from this source.
+      const sourceRecord = list.identity_environments.find(profile => rawProfileRef(profile) === input.profile_ref);
+      const source = sourceRecord === undefined ? undefined : publicProfile(sourceRecord);
+      if (!source) return fail("managed_browser_profile_not_found");
+      if (source.lifecycle_state === "archived") return fail("managed_browser_profile_archived");
+      assertCopyTemplateMatch(source, template);
+      const currentAccess = await check();
+      if (accessFingerprint(currentAccess) !== accessFingerprint(access)) return fail("managed_browser_authorization_changed");
+      const sourcePolicySnapshot = access.profile_policy;
+      if (!sourcePolicySnapshot || sourcePolicySnapshot.profile_ref !== source.profile_ref) return fail("managed_browser_profile_policy_unavailable");
+      const current = (await store.getRunRecord(runId))!;
+      await store.updateRunRecord(runId, { public_result_summary: { ...current.public_result_summary,
+        source_identity_environment_ref: source.identity_environment_ref,
+        copy_template_snapshot: copyTemplateFacts(template), copy_source_policy_snapshot: sourcePolicySnapshot } });
+      const expectedSource = { provider_id: template.provider_id, site: template.site, language: template.language, timezone: template.timezone };
+      const copied = await runtimeHarbor("/runtime/identity-environment-mutations", {
+        operation: "copy_environment", idempotency_key: runId, identity_environment_ref: text(source.identity_environment_ref),
+        expected_environment_template: expectedSource
+      });
+      if (copied.status === "rejected") {
+        const failure = copied.failure && typeof copied.failure === "object" ? object(copied.failure) : {};
+        return fail(typeof failure.code === "string" ? failure.code : "managed_browser_runtime_refused");
+      }
+      if (copied.status !== "completed") throw new CreationReceiptFailure("managed_browser_copy_unknown");
       try {
-        const profile = publicProfile(created.record);
-        const providerSelection = publicProviderSelection(created.provider_selection);
-        await options.accessStore.recordCreatedProfile({ idempotency_key: runId, grant_id: input.grant_id, profile_ref: profile.profile_ref });
-        return { profile, provider_selection: providerSelection, authorization_decision_ref: access.decision_ref };
+        const profile = publicProfile(copied.record);
+        assertCopyTemplateMatch(profile, template);
+        if (copied.operation !== "copy_environment" || copied.identity_environment_ref !== profile.identity_environment_ref ||
+            copied.source_identity_environment_ref !== source.identity_environment_ref || profile.profile_ref === source.profile_ref ||
+            profile.identity_environment_ref === source.identity_environment_ref || profile.lifecycle_state !== "active") throw new Error("managed_browser_copy_result_invalid");
+        await options.accessStore.recordCreatedProfile({ idempotency_key: runId, grant_id: input.grant_id,
+          operation: "profile.copy_environment", source_profile_ref: source.profile_ref,
+          source_policy_snapshot: sourcePolicySnapshot, profile_ref: profile.profile_ref });
+        return { profile, authorization_decision_ref: access.decision_ref };
       } catch (error) {
-        throw new CreationReceiptFailure(error instanceof ManagedAccessError ? error.code : "managed_browser_creation_unknown");
+        throw new CreationReceiptFailure(error instanceof ManagedAccessError ? error.code : "managed_browser_copy_unknown");
       }
     }
     const list = await runtimeHarbor("/runtime/identity-environments");
@@ -715,6 +786,7 @@ export function createManagedBrowserService(options: {
     if (!rawProfile) return fail("managed_browser_profile_not_found");
     const profile = publicProfile(rawProfile);
     if (input.operation === "profile.read") return { profile };
+    if (input.operation === "instance.start" && profile.lifecycle_state === "archived") return fail("managed_browser_profile_archived");
     const identityEnvironmentRef = text(profile.identity_environment_ref);
     const identity = encodeURIComponent(identityEnvironmentRef);
     if (input.operation === "profile.metadata.update") {
@@ -731,6 +803,43 @@ export function createManagedBrowserService(options: {
         return fail(typeof failure.code === "string" ? failure.code : "managed_browser_runtime_refused");
       }
       return { profile: publicProfile(mutation.record), authorization_decision_ref: access.decision_ref };
+    }
+    if (input.operation === "profile.archive" || input.operation === "profile.delete") {
+      const current = (await store.getRunRecord(runId))!;
+      await store.updateRunRecord(runId, { public_result_summary: { ...current.public_result_summary,
+        identity_environment_ref: identityEnvironmentRef } });
+      await check();
+      const mutation = await runtimeHarbor("/runtime/identity-environment-mutations", {
+        operation: input.operation === "profile.archive" ? "archive" : "delete",
+        idempotency_key: runId,
+        identity_environment_ref: identityEnvironmentRef,
+        ...(input.operation === "profile.delete" ? { confirmation: input.confirmation } : {})
+      });
+      if (mutation.status === "repair_required") throw new CreationReceiptFailure("managed_browser_profile_mutation_unknown");
+      if (mutation.status === "rejected") {
+        const failure = mutation.failure && typeof mutation.failure === "object" ? object(mutation.failure) : {};
+        return fail(typeof failure.code === "string" ? failure.code : "managed_browser_runtime_refused");
+      }
+      if (mutation.status !== "completed") throw new CreationReceiptFailure("managed_browser_profile_mutation_unknown");
+      const expectedOperation = input.operation === "profile.archive" ? "archive" : "delete";
+      if (mutation.operation !== expectedOperation || mutation.identity_environment_ref !== identityEnvironmentRef ||
+          mutation.source_identity_environment_ref !== identityEnvironmentRef) throw new CreationReceiptFailure("managed_browser_profile_mutation_unknown");
+      if (input.operation === "profile.delete") {
+        const effects = mutation.effects && typeof mutation.effects === "object" && !Array.isArray(mutation.effects) ? mutation.effects as ObjectValue : undefined;
+        if (mutation.record !== null || effects?.index !== "removed" || effects?.local_data !== "deleted") throw new CreationReceiptFailure("managed_browser_profile_mutation_unknown");
+      }
+      let archivedProfile: ObjectValue | undefined;
+      if (input.operation === "profile.archive") {
+        try { archivedProfile = publicProfile(mutation.record); }
+        catch { throw new CreationReceiptFailure("managed_browser_profile_mutation_unknown"); }
+      }
+      if (archivedProfile && (archivedProfile.profile_ref !== input.profile_ref || archivedProfile.identity_environment_ref !== identityEnvironmentRef || archivedProfile.lifecycle_state !== "archived")) {
+        throw new CreationReceiptFailure("managed_browser_profile_mutation_unknown");
+      }
+      return {
+        ...(archivedProfile ? { profile: archivedProfile } : { receipt: mutation }),
+        authorization_decision_ref: access.decision_ref
+      };
     }
     if (isEnvironment(input.operation)) await check();
     if (input.operation === "environment.read") return await runtimeHarbor(`/runtime/identity-environments/${identity}/environment`);
@@ -1228,7 +1337,7 @@ export function createManagedBrowserService(options: {
     },
     async putManagementPolicy(value: unknown) {
       // These are the categories declared by Harbor's managed operation catalog.
-      const mutation = normalizeExecutionPolicyMutation(value, { allowed_categories: new Set(["read", "prepare", "commit"]) });
+      const mutation = normalizeExecutionPolicyMutation(value, { allowed_categories: new Set(["read", "prepare", "commit", "destructive"]) });
       return options.executionPolicyConfigStore.putInstalledSkillConfiguration("harbor:managed-browser", mutation);
     },
     /**
@@ -1253,7 +1362,8 @@ export function createManagedBrowserService(options: {
       const runId = `managed-${digest(`${principal.principal_id}:${input.idempotency_key}`)}`;
       const requestHash = digest(JSON.stringify(input));
       await mkdir(directory, { recursive: true, mode: 0o700 });
-      return withFileOwnershipLock(join(directory, `${digest(input.operation === "profile.create" || isProviderPreference(input.operation) ? input.grant_id : input.profile_ref ?? runId)}.lock`), 5000, async () => {
+      const grantScopedCreation = input.operation === "profile.create" || input.operation === "profile.copy_environment";
+      return withFileOwnershipLock(join(directory, `${digest(grantScopedCreation || isProviderPreference(input.operation) ? input.grant_id : input.profile_ref ?? runId)}.lock`), 5000, async () => {
         const previous = await store.getRunRecord(runId);
         if (previous) {
           if (previous.public_result_summary?.request_hash !== requestHash) return fail("managed_browser_idempotency_conflict");
@@ -1261,14 +1371,14 @@ export function createManagedBrowserService(options: {
         }
         await options.accessStore.checkAccess(credentialHash, accessRequest(input));
         const summary = { principal_id: principal.principal_id, grant_id: input.grant_id, operation: input.operation, request_hash: requestHash,
-          ...(input.operation === "profile.metadata.update" || isBusinessTargetOperation(input.operation) || isInteraction(input.operation) || isEnvironment(input.operation) || isPageMutation(input.operation) || managedFileOperations.includes(input.operation as typeof managedFileOperations[number]) ? {
+          ...(input.operation === "profile.metadata.update" || input.operation === "profile.copy_environment" || input.operation === "profile.archive" || input.operation === "profile.delete" || isBusinessTargetOperation(input.operation) || isInteraction(input.operation) || isEnvironment(input.operation) || isPageMutation(input.operation) || managedFileOperations.includes(input.operation as typeof managedFileOperations[number]) ? {
             ...(isInteraction(input.operation) || isPageMutation(input.operation) || managedFileOperations.includes(input.operation as typeof managedFileOperations[number]) ? { runtime_session_ref: input.runtime_session_ref } : {}),
             profile_ref: input.profile_ref, origin: input.origin,
             ...(isInteraction(input.operation) || isPageMutation(input.operation) || managedFileOperations.includes(input.operation as typeof managedFileOperations[number]) ? { dispatch_state: "not_dispatched" } : {}),
             ...(input.file_ref === undefined ? {} : { file_ref: input.file_ref })
           } : {}) };
         await store.createRunRecord({ run_id: runId, task_intent_ref: `managed-intent:${runId}`, capability_ref: "harbor:managed-browser", status: "admitted",
-          admission: { decision: "accepted", action_risk: (["profile.create", "profile.metadata.update", "provider.preference.set", "provider.preference.clear", "account.bind", "environment.update", "business_target.create", "business_target.metadata.update", "business_target.disable"].includes(input.operation) || isInput(input.operation) || isPageMutation(input.operation) || managedFileOperations.includes(input.operation as typeof managedFileOperations[number])) ? "write" : "read" }, public_result_summary: summary });
+          admission: { decision: "accepted", action_risk: input.operation === "profile.delete" ? "destructive" : (["profile.create", "profile.copy_environment", "profile.archive", "profile.metadata.update", "provider.preference.set", "provider.preference.clear", "account.bind", "environment.update", "business_target.create", "business_target.metadata.update", "business_target.disable"].includes(input.operation) || isInput(input.operation) || isPageMutation(input.operation) || managedFileOperations.includes(input.operation as typeof managedFileOperations[number])) ? "write" : "read" }, public_result_summary: summary });
         await store.updateRunRecord(runId, { status: "running" });
         try {
           const result = await execute(credentialHash, input, runId);
@@ -1438,29 +1548,71 @@ export function createManagedBrowserService(options: {
           return response((await store.getRunRecord(runId))!);
         });
       }
-      if (["running", "admitted", "unknown_outcome"].includes(run.status) && run.public_result_summary?.operation === "profile.create" && run.public_result_summary.reconciliation !== "completed") {
+      const profileOperation = String(run.public_result_summary?.operation);
+      if (["running", "admitted", "unknown_outcome", "failed"].includes(run.status) &&
+          ["profile.create", "profile.copy_environment", "profile.archive", "profile.delete"].includes(profileOperation) &&
+          run.public_result_summary?.reconciliation !== "completed") {
         await mkdir(directory, { recursive: true, mode: 0o700 });
-        return withFileOwnershipLock(join(directory, `${digest(text(run.public_result_summary!.grant_id))}.lock`), 5000, async () => {
+        const creation = profileOperation === "profile.create" || profileOperation === "profile.copy_environment";
+        const lockRef = creation ? text(run.public_result_summary!.grant_id) : text(run.public_result_summary!.profile_ref);
+        return withFileOwnershipLock(join(directory, `${digest(lockRef)}.lock`), 5000, async () => {
           const current = (await store.getRunRecord(runId))!;
           if (current.status === "succeeded" || current.public_result_summary?.reconciliation === "completed") return response(current);
           if (current.status === "running" || current.status === "admitted") await completeRunWithFailure(store, runId, {
             status: "unknown_outcome", failure: { category: "write_outcome", code: "managed_browser_outcome_unknown", phase: "query", recovery_hint: "query_operation_without_replay" }
           });
-          // A read-only receipt lookup never reissues the original creation.
-          const receipt = await harbor(`/runtime/identity-environment-mutations/${encodeURIComponent(runId)}`);
-          if (receipt.status === "completed") {
-            try {
-              const profile = publicProfile(receipt.record);
-              const providerSelection = publicProviderSelection(receipt.provider_selection);
-              await options.accessStore.recordCreatedProfile({ idempotency_key: runId, grant_id: run.public_result_summary!.grant_id, profile_ref: profile.profile_ref });
-              await store.updateRunRecord(runId, { public_result_summary: { ...run.public_result_summary, reconciliation: "completed", result: { profile, provider_selection: providerSelection } } });
-            } catch (error) {
-              await store.updateRunRecord(runId, { failure: { category: "write_outcome", code: error instanceof ManagedAccessError ? error.code : "managed_browser_creation_unknown", phase: "query", recovery_hint: "query_operation_without_replay" } });
+          // Only read Harbor's receipt for the original Run ID; never replay a lifecycle mutation.
+          try {
+            const receipt = await harbor(`/runtime/identity-environment-mutations/${encodeURIComponent(runId)}`);
+            const expectedOperation = profileOperation === "profile.create" ? "create"
+              : profileOperation === "profile.copy_environment" ? "copy_environment"
+                : profileOperation === "profile.archive" ? "archive" : "delete";
+            if (receipt.operation !== expectedOperation) throw new Error("profile_mutation_receipt_mismatch");
+            if (receipt.status === "completed") {
+              if (creation) {
+                const profile = publicProfile(receipt.record);
+                let result: ObjectValue = { profile };
+                if (profileOperation === "profile.create") {
+                  const providerSelection = publicProviderSelection(receipt.provider_selection);
+                  result.provider_selection = providerSelection;
+                  await options.accessStore.recordCreatedProfile({ idempotency_key: runId, grant_id: current.public_result_summary!.grant_id, profile_ref: profile.profile_ref });
+                } else {
+                  const expectedTemplate = copyTemplateFacts(current.public_result_summary?.copy_template_snapshot);
+                  if (receipt.source_identity_environment_ref !== current.public_result_summary?.source_identity_environment_ref ||
+                      profile.identity_environment_ref !== receipt.identity_environment_ref ||
+                      profile.identity_environment_ref === current.public_result_summary?.source_identity_environment_ref ||
+                      profile.profile_ref === current.public_result_summary?.profile_ref || profile.lifecycle_state !== "active") throw new Error("profile_copy_receipt_mismatch");
+                  assertCopyTemplateMatch(profile, expectedTemplate);
+                  await options.accessStore.recordCreatedProfile({ idempotency_key: runId, grant_id: current.public_result_summary!.grant_id,
+                    operation: "profile.copy_environment", source_profile_ref: current.public_result_summary!.profile_ref,
+                    source_policy_snapshot: current.public_result_summary?.copy_source_policy_snapshot, profile_ref: profile.profile_ref });
+                }
+                await store.updateRunRecord(runId, { public_result_summary: { ...current.public_result_summary, reconciliation: "completed", result } });
+              } else {
+                const targetRef = current.public_result_summary?.identity_environment_ref;
+                if (receipt.identity_environment_ref !== targetRef) throw new Error("profile_mutation_receipt_mismatch");
+                const result: ObjectValue = profileOperation === "profile.archive"
+                  ? { profile: publicProfile(receipt.record) }
+                  : { receipt };
+                if (receipt.status === "completed" && receipt.source_identity_environment_ref !== targetRef) throw new Error("profile_mutation_receipt_mismatch");
+                if (profileOperation === "profile.archive" && (object(result.profile).profile_ref !== current.public_result_summary?.profile_ref ||
+                    object(result.profile).identity_environment_ref !== targetRef || object(result.profile).lifecycle_state !== "archived")) throw new Error("profile_archive_receipt_mismatch");
+                if (profileOperation === "profile.delete" && receipt.status === "completed") {
+                  const effects = object(receipt.effects);
+                  if (receipt.record !== null || effects.index !== "removed" || effects.local_data !== "deleted") throw new Error("profile_delete_receipt_mismatch");
+                }
+                await store.updateRunRecord(runId, { public_result_summary: { ...current.public_result_summary, reconciliation: "completed", result } });
+              }
+            } else if (receipt.status === "rejected") {
+              const failure = object(receipt.failure);
+              text(failure.code);
+              await store.updateRunRecord(runId, { public_result_summary: { ...current.public_result_summary, reconciliation: "completed", result: { receipt } } });
+            } else if (receipt.status === "repair_required") {
+              await store.updateRunRecord(runId, { public_result_summary: { ...current.public_result_summary, result: { receipt } } });
             }
-          } else if (receipt.status === "rejected") {
-            const failure = object(receipt.failure);
-            text(failure.code);
-            await store.updateRunRecord(runId, { public_result_summary: { ...run.public_result_summary, reconciliation: "completed", result: { receipt } } });
+          } catch (error) {
+            if (error instanceof ManagedAccessError) await store.updateRunRecord(runId, { failure: { category: "write_outcome", code: error.code, phase: "query", recovery_hint: "query_operation_without_replay" } });
+            // Missing or mismatched receipts remain unknown; do not retry the write.
           }
           return response((await store.getRunRecord(runId))!);
         });

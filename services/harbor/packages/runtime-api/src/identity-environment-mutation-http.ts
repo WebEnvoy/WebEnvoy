@@ -61,7 +61,7 @@ export function isIdentityEnvironmentMutationRequest(value: unknown): value is I
     return onlyKeys(input, ["operation", "idempotency_key", "identity_environment"]) &&
       isIdentityEnvironmentMutationInput(input.identity_environment, input.operation as "create" | "import");
   }
-  if (!["edit", "profile.metadata.update", "copy_full", "copy_environment", "remove", "delete"].includes(input.operation)) return false;
+  if (!["edit", "profile.metadata.update", "copy_full", "copy_environment", "archive", "remove", "delete"].includes(input.operation)) return false;
   if (!nonEmptyString(input.identity_environment_ref)) return false;
   if (input.operation === "profile.metadata.update") {
     if (!onlyKeys(input, ["operation", "idempotency_key", "identity_environment_ref", "name", "tags"]) ||
@@ -74,9 +74,12 @@ export function isIdentityEnvironmentMutationRequest(value: unknown): value is I
       isIdentityEnvironmentConfiguration(input.configuration);
   }
   if (input.operation.startsWith("copy_")) {
-    return onlyKeys(input, ["operation", "idempotency_key", "identity_environment_ref"]);
+    const allowed = ["operation", "idempotency_key", "identity_environment_ref", ...(input.operation === "copy_environment" ? ["expected_environment_template"] : [])];
+    return onlyKeys(input, allowed) && (input.operation === "copy_environment"
+      ? input.expected_environment_template === undefined || isCopyTemplateExpectation(input.expected_environment_template)
+      : input.expected_environment_template === undefined);
   }
-  if (input.operation === "remove") {
+  if (input.operation === "remove" || input.operation === "archive") {
     return onlyKeys(input, ["operation", "idempotency_key", "identity_environment_ref"]);
   }
   return onlyKeys(input, ["operation", "idempotency_key", "identity_environment_ref", "confirmation"]) &&
@@ -195,6 +198,17 @@ function isIdentityEnvironmentMutationInput(value: unknown, operation: "create" 
     return !Object.hasOwn(input, "profile_storage_ref") && !Object.hasOwn(input, "import_source_ref");
   }
   return !Object.hasOwn(input, "profile_storage_ref") && nonEmptyString(input.import_source_ref);
+}
+
+function isCopyTemplateExpectation(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const input = value as Record<string, unknown>;
+  if (!onlyKeys(input, ["provider_id", "site", "language", "timezone"]) ||
+      !["cloakbrowser", "chrome_official", "camoufox"].includes(String(input.provider_id)) ||
+      !nonEmptyString(input.language) || !nonEmptyString(input.timezone) || !input.site || typeof input.site !== "object" || Array.isArray(input.site)) return false;
+  const site = input.site as Record<string, unknown>;
+  return onlyKeys(site, ["site_id", "origin", "display_name"]) && nonEmptyString(site.site_id) &&
+    typeof site.display_name === "string" && isHttpOrigin(site.origin);
 }
 
 function legacyIdempotencyKey(request: IncomingMessage): string | null {

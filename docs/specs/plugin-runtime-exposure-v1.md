@@ -1,6 +1,6 @@
 # Plugin Runtime Exposure V1
 
-状态：Accepted；版本：v1.4（#599 Profile 元数据管理投影）；owner：Core（授权、Run 与结果）、Harbor（Runtime 能力与现场）、Desktop Agent entry（MCP 投影）。产品归口：[Runtime Work Item #498](https://github.com/WebEnvoy/WebEnvoy/issues/498)、[#474](https://github.com/WebEnvoy/WebEnvoy/issues/474)、[#508](https://github.com/WebEnvoy/WebEnvoy/issues/508)、受管浏览器文件 [#523](https://github.com/WebEnvoy/WebEnvoy/issues/523)、Profile 元数据 [#599](https://github.com/WebEnvoy/WebEnvoy/issues/599)。依据：[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)、[Browser Runtime Capabilities V1](browser-runtime-capabilities-v1.md)、[Managed SKILL Library Lifecycle V1](skill-library-lifecycle-v1.md)、[Managed Browser Files V1](browser-files-v1.md)。
+状态：Accepted；版本：v1.5（#601 Profile safe lifecycle projection）；owner：Core（授权、Run 与结果）、Harbor（Runtime 能力与现场）、Desktop Agent entry（MCP 投影）。产品归口：[Runtime Work Item #498](https://github.com/WebEnvoy/WebEnvoy/issues/498)、[#474](https://github.com/WebEnvoy/WebEnvoy/issues/474)、[#508](https://github.com/WebEnvoy/WebEnvoy/issues/508)、受管浏览器文件 [#523](https://github.com/WebEnvoy/WebEnvoy/issues/523)、Profile 元数据 [#599](https://github.com/WebEnvoy/WebEnvoy/issues/599) 与 Profile 安全生命周期 [#601](https://github.com/WebEnvoy/WebEnvoy/issues/601)。依据：[ADR 0012](../adr/0012-runtime-capability-plane-and-plugin-first.md)、[Browser Runtime Capabilities V1](browser-runtime-capabilities-v1.md)、[Profile Safe Lifecycle V1](profile-safe-lifecycle-v1.md)、[Managed SKILL Library Lifecycle V1](skill-library-lifecycle-v1.md)、[Managed Browser Files V1](browser-files-v1.md)。
 
 本规格冻结首宿主的固定 MCP 投影、授权边界、版本兼容和失败语义。工具可见、Runtime capability 存在、当前 Grant 允许调用以及 Provider 当前可执行性是四个独立事实。
 
@@ -34,6 +34,7 @@
 
 | Runtime/管理能力 | MCP 工具与 operation | 授权和结果归口 |
 | --- | --- | --- |
+| 安全 Profile 复制、归档与删除 | `webenvoy_operation`：`profile.copy_environment`、`profile.archive`、`profile.delete`；`webenvoy_query` 查询原 Run/receipt | 同名 `allowed_operations` 与唯一 source/target `profile_ref`；copy 使用固定 Grant template 和共享 quota，archive 保留数据并阻止所有 start，delete 需要精确授权及允许 `destructive` 的 Core ExecutionPolicy；confirmation 仅表达 intent。详见 [Profile Safe Lifecycle V1](profile-safe-lifecycle-v1.md)。 |
 | Profile 展示元数据 | `webenvoy_operation`：`profile.metadata.update` | 必须逐项授予同名 operation，并在 `task_scope` 限定一个获准 `profile_ref`、`origins: []`；`name`／`tags` 格式、Harbor 规范化与 receipt 对账见 [#599](#599-profile-display-metadata-management)。 |
 | BusinessTarget 本地 metadata | `webenvoy_operation`：`business_target.create`、`business_target.list`、`business_target.read`、`business_target.metadata.update`、`business_target.disable`；`webenvoy_query` 查询原 Run | 仅限 owner 在当前 v2 Grant 签发时由 Harbor 唯一 Account binding 解析出的 tuple snapshots；复用 Core Run/idempotency/query，不代表站点资源写入，详见 [BusinessTarget Management V1](business-target-management-v1.md) 与 [Grant Wire v1.7](grant-wire-contract-v1.md)。 |
 | Page list/open/activate/close and navigation | `webenvoy_operation`：`page.list`、`page.open`、`page.activate`、`page.close`、`page.navigate`、`page.reload`、`page.back`、`page.forward` | 同名 `allowed_operations`；同一 Instance 的 Page/document contract 与关系异常暂停由 [Page, Document and Navigation V1](page-navigation-runtime-contract-v1.md) 维护。 |
@@ -67,6 +68,43 @@ Core 在映射前按已授权 Profile refs 过滤 Harbor records；profile.list 
 At v2 Grant issuance, the trusted owner selects one or more exact Account tuples. Core resolves them through Harbor's selected Profile identity projection and accepts only `ownership_status: unique` bindings. The resolved `(profile_ref, account_system_ref, account_ref)` values are bound to the new Grant; the Agent cannot mint or expand this list. Every target operation checks those snapshots against the current Harbor bindings again. A Profile-wide `ownership.status: conflict` does not reject another selected tuple whose own status remains unique; unknown, conflict, changed or non-runnable selected tuples are refused. Older Grants are not upgraded and do not gain this scope implicitly.
 
 BusinessTarget records are Core-owned metadata keyed by the stable Account tuple, with Profile retained only as creation provenance. Results are `declared/unverified`; metadata never claims the referenced external site resource exists or grants browser, network or business write authority. List exposes only the selected Account's records. See [BusinessTarget Management V1](business-target-management-v1.md) for fields, persistence, and compatibility.
+### #601 Profile safe lifecycle projection
+
+`profile.copy_environment`、`profile.archive` 与 `profile.delete` 均通过既有
+`webenvoy_operation` 暴露，并用 `webenvoy_query` 查询同一 Core Run/Harbor receipt；没有
+专用 bypass、owner 权限或新状态机。每个 operation 必须同时由当前 Grant 和 task scope
+明确选择，并绑定精确 Profile。copy 还需要同一 Grant 的固定 `template_ref` 与共享创建
+quota，source 必须未归档且其 Provider/site/language/timezone 与模板完全一致；Core 在
+派发前发送已核验模板，Harbor 在 mutation lock 内再次核验。目标 refs 由 Harbor 创建，
+storage 为空；只保留固定模板 Provider、site、language/timezone，不复制 proxy、账号、
+Cookie、login state、凭据、权限或历史，target permission 逐项取 source policy、模板
+ceiling 和 Grant 的交集。
+
+`profile.archive` 只归档准确、已停止且无占用/修复的 Profile，保留原 data、Account
+bindings、refs、receipt 和恢复资料；`profile.list/read` 明示 `lifecycle_state: archived`。
+所有 Provider start 都由 Harbor 按 owner refs 拒绝 archived Profile；Agent 不能用另一条
+start route 绕过该门。唯一 runnable Account 冲突判定排除 archived binding，但其历史
+binding 仍可读取。归档不会隐式 stop、解绑或删除。
+
+`profile.delete` 除精确 Grant/task scope 外还要求 `confirmation: "delete_local_data"`
+作为本次 request intent，以及 Core ExecutionPolicy 对 `destructive` action 的放行。该
+confirmation 不是 owner 授权凭据。活动 Instance、外部锁、mutation reservation 或未决
+repair 时拒绝且不自动 stop/unlock；Harbor 保留原 ref/receipt 直到 storage 与 local
+material 清理和 residual check 成功。清理不完整时显式保留 `repair_required`、refs 和原
+key receipt。任何已派发写入 unknown 后只能 query 同一 key；查询可报告已完成 receipt
+或 residual repair，但绝不重放。
+
+### #601 Design Obligation disposition
+
+| Trigger | disposition | 依据 |
+| --- | --- | --- |
+| `DO-PLUGIN-EXPOSURE` | `triggered` | 新增三个正式 managed-browser Agent operation 值，固定在 `webenvoy_operation` 并通过原 Run/query 入口消费；本节与 Profile Safe Lifecycle V1 冻结 projection。 |
+| `DO-GRANT-WIRE` | `triggered` | operation 值写入 Grant/task scope 并参与 managed Core 授权；Grant Wire V1.8 冻结旧严格 reader 拒绝与无新字段/维度的兼容规则。 |
+| Profile lifecycle/persistence wire | `triggered` | Harbor durable `lifecycle_state` 与 Core-to-Harbor mutation request/result 由 Profile Safe Lifecycle V1、schema 与 migration tests 承接。 |
+| `DO-NETWORK-CONTRACT` | `not-triggered` | 不新增 Driver→Harbor→Core→Plugin Network payload、request interception、body 或修改能力。 |
+| `DO-CONSOLE-CONTRACT` | `not-triggered` | 不新增 console/page-error public payload。 |
+| `DO-PROVIDER-PRIVATE-SCHEMA` | `not-triggered` | safe copy 只用同 Provider 的现有 Harbor/Profile facts；不新增 Provider-private versioned bundle。 |
+| `DO-APP-IA` | `not-triggered` | 只扩展既有 managed Agent operation；不新增完整 Desktop workbench、页面或导航。 |
 
 ### #563 site-task execution projection
 

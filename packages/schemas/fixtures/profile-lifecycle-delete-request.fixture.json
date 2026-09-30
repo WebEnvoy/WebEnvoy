@@ -1,0 +1,7 @@
+{
+  "$schema": "../schemas/profile-lifecycle-mutation-request.schema.json",
+  "operation": "delete",
+  "idempotency_key": "managed-run-delete-key",
+  "identity_environment_ref": "identity-env:source",
+  "confirmation": "delete_local_data"
+}

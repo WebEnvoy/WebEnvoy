@@ -311,11 +311,23 @@ test("shared persisted binding owner protects direct creation/import and exposes
     assert.equal(reloaded.list().length, 1);
     assert.equal(reloaded.mutate({ operation: "copy_full", identity_environment_ref: "legacy:a", idempotency_key: "full-duplicate" }).status, "rejected");
     mkdirSync(profileStoragePath("legacy:profile-a:storage"), { recursive: true });
-    const copied = reloaded.mutate({ operation: "copy_environment", identity_environment_ref: "legacy:a", idempotency_key: "environment-copy" });
+    const copied = reloaded.mutate({ operation: "copy_environment", identity_environment_ref: "legacy:a", idempotency_key: "environment-copy", expected_environment_template: {
+      provider_id: "chrome_official",
+      site: { site_id: "xiaohongshu", origin: "https://www.xiaohongshu.com", display_name: "xiaohongshu" },
+      language: "en-US",
+      timezone: "UTC"
+    } });
     assert.equal(copied.status, "completed");
     assert.equal(copied.record?.site.account_ref, null);
     assert.deepEqual(copied.record?.account_bindings, []);
     assert.equal(copied.record?.status.login_state, "logged_out");
+    const archived = reloaded.mutate({ operation: "archive", identity_environment_ref: "legacy:a", idempotency_key: "archive-bound-source" });
+    assert.equal(archived.status, "completed");
+    assert.equal(reloaded.get("legacy:a")?.site.account_ref, account_ref, "archive retains the historical binding fact");
+    const afterArchive = new LocalIdentityEnvironmentManager(options);
+    const runnableReplacement = afterArchive.create({ ...identityInput("legacy:b", "legacy:profile-b"), site: { site_id: "xiaohongshu", origin: "https://www.xiaohongshu.com", account_ref } });
+    assert.equal(runnableReplacement.identity_environment_ref, "legacy:b", "an archived binding does not block the only runnable identity");
+    assert.equal(afterArchive.get("legacy:a")?.site.account_ref, account_ref);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -388,7 +400,8 @@ test("management scope opens persisted unauthenticated profiles without promotin
 test("managed operation catalog preserves compatibility categories", () => {
   const categories = new Map(managedOperationCatalog.operations.map(operation => [operation.operation_id, operation.category]));
   for (const [category, operations] of Object.entries({
-    commit: ["profile.create", "profile.metadata.update", "account.bind"],
+    commit: ["profile.create", "profile.copy_environment", "profile.archive", "profile.metadata.update", "account.bind"],
+    destructive: ["profile.delete"],
     read: ["recovery.inspect", "recovery.status", "page.list"],
     prepare: ["recovery.request", "page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward"]
   })) for (const operation of operations) assert.equal(categories.get(operation), category, operation);

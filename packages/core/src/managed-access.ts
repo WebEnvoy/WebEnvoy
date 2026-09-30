@@ -10,7 +10,7 @@ export const managedSkillOperations = ["skill.list", "skill.inspect", "skill.ins
 export const managedTaskOperations = ["task.submit", "task.query", "task.stop"] as const;
 export const managedFileOperations = ["file.upload", "file.download"] as const;
 export const managedBusinessTargetOperations = ["business_target.create", "business_target.list", "business_target.read", "business_target.metadata.update", "business_target.disable"] as const;
-export const managedOperations = ["profile.list", "profile.read", "profile.create", "profile.metadata.update", "provider.preference.read", "provider.preference.set", "provider.preference.clear", "instance.start", "instance.stop", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "instance.navigate", "instance.read", "instance.handoff", "account.bind", "recovery.inspect", "recovery.request", "recovery.status", ...managedPageOperations, ...managedInteractionOperations, ...managedFileOperations, ...managedSkillOperations, ...managedTaskOperations, ...managedBusinessTargetOperations] as const;
+export const managedOperations = ["profile.list", "profile.read", "profile.create", "profile.copy_environment", "profile.archive", "profile.delete", "profile.metadata.update", "provider.preference.read", "provider.preference.set", "provider.preference.clear", "instance.start", "instance.stop", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "instance.navigate", "instance.read", "instance.handoff", "account.bind", "recovery.inspect", "recovery.request", "recovery.status", ...managedPageOperations, ...managedInteractionOperations, ...managedFileOperations, ...managedSkillOperations, ...managedTaskOperations, ...managedBusinessTargetOperations] as const;
 export type ManagedOperation = typeof managedOperations[number];
 export type ManagedSkillOperation = typeof managedSkillOperations[number];
 export type ManagedTaskOperation = typeof managedTaskOperations[number];
@@ -51,7 +51,7 @@ export type ManagedGrant = {
 export type ManagedTaskScope = { operations: ManagedOperation[]; profile_refs: string[]; origins: string[]; file_refs?: string[]; skill_refs?: string[]; source_refs?: string[] };
 export type ManagedAccessRequest = {
   connection_id: string; grant_id: string; operation: ManagedOperation;
-  profile_ref?: string; origin?: string; template_ref?: string; skill_ref?: string; source_ref?: string; revision_ref?: string; file_refs?: string[];
+  profile_ref?: string; origin?: string; template_ref?: string; confirmation?: "delete_local_data"; skill_ref?: string; source_ref?: string; revision_ref?: string; file_refs?: string[];
   account_system_ref?: string; account_ref?: string; business_target_ref?: string; task_scope: ManagedTaskScope;
 };
 export type ManagedAccess = {
@@ -537,11 +537,13 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       })));
     },
     async checkAccess(credentialHash: unknown, value: unknown): Promise<ManagedAccess> {
-      const input = object(value, ["connection_id", "grant_id", "operation", "task_scope"], ["profile_ref", "origin", "template_ref", "skill_ref", "source_ref", "revision_ref", "file_refs", "account_system_ref", "account_ref", "business_target_ref"]);
+      const input = object(value, ["connection_id", "grant_id", "operation", "task_scope"], ["profile_ref", "origin", "template_ref", "confirmation", "skill_ref", "source_ref", "revision_ref", "file_refs", "account_system_ref", "account_ref", "business_target_ref"]);
       const connectionId = string(input.connection_id), grantId = string(input.grant_id), op = operation(input.operation);
       const profileRef = input.profile_ref === undefined ? undefined : string(input.profile_ref);
       const targetOrigin = input.origin === undefined ? undefined : origin(input.origin);
       const templateRef = input.template_ref === undefined ? undefined : string(input.template_ref);
+      const confirmation = input.confirmation === undefined ? undefined : string(input.confirmation);
+      if (op === "profile.delete" ? confirmation !== "delete_local_data" : confirmation !== undefined) return fail("managed_access_invalid_input");
       const skillRef = input.skill_ref === undefined ? undefined : string(input.skill_ref);
       const sourceRef = input.source_ref === undefined ? undefined : string(input.source_ref);
       const revisionRef = input.revision_ref === undefined ? undefined : string(input.revision_ref);
@@ -620,7 +622,11 @@ export function createFileManagedAccessStore(options: { directory: string; clock
         if ((targetOrigin !== undefined && targetOrigin !== creationOrigin) || !grant.allowed_origins.includes(creationOrigin) || !task.origins.includes(creationOrigin)) return fail("managed_access_denied");
         return { ...result, creation_template: grant.creation_template };
       }
-      if (templateRef !== undefined) return fail("managed_access_invalid_input");
+      if (op === "profile.copy_environment") {
+        if (!profileRef || !grant.creation_template || templateRef !== grant.creation_template.template_ref || grant.created_profile_refs.length >= grant.max_created_profiles ||
+          targetOrigin !== undefined || task.origins.length !== 0 || task.profile_refs.length !== 1 || task.profile_refs[0] !== profileRef) return fail("managed_access_creation_denied");
+        if (!grant.profile_refs.includes(profileRef)) return fail("managed_access_denied");
+      } else if (templateRef !== undefined) return fail("managed_access_invalid_input");
       if (op === "profile.list" && profileRef === undefined) {
         return { ...result, authorized_origins: [...new Set(task.origins.filter(item => grant.allowed_origins.includes(item)))], grant: { ...grant, profile_refs: grant.profile_refs.filter(ref => task.profile_refs.includes(ref) && state.profile_policies.some(item => item.profile_ref === ref && item.allowed_operations.includes(op) && (profileScopeIndependentReads.includes(op) || scopeSemantics(item.scope_semantics) === grantScope))) } };
       }
@@ -633,11 +639,13 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       if (!profileScopeIndependentReads.includes(op) && scopeSemantics(profile.scope_semantics) !== grantScope) return fail("managed_access_scope_semantics_mismatch");
       if (op === "profile.metadata.update" && (targetOrigin !== undefined || task.origins.length !== 0)) return fail("managed_access_denied");
       if (businessTargetOperation && task.origins.length !== 0) return fail("managed_access_denied");
+      if (["profile.archive", "profile.delete"].includes(op) && (targetOrigin !== undefined || task.origins.length !== 0 || task.profile_refs.length !== 1 || task.profile_refs[0] !== profileRef)) return fail("managed_access_denied");
       const authorized_origins = [...new Set(grant.allowed_origins.filter(item => profile.allowed_origins.includes(item) && task.origins.includes(item)))];
       if (targetOrigin !== undefined && !authorized_origins.includes(targetOrigin)) return fail("managed_access_denied");
       if (["instance.start", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "instance.navigate", "instance.read", "account.bind", "page.open", "page.navigate", ...managedInteractionOperations, ...managedFileOperations, ...managedTaskOperations].includes(op) && targetOrigin === undefined) return fail("managed_access_origin_required");
       if ((managedInteractionOperations as readonly string[]).includes(op) && (!targetOrigin || !profile.controlled_interaction_origins?.includes(targetOrigin))) return fail("managed_access_controlled_origin_required");
-      return { ...result, profile_policy: profile, authorized_origins };
+      return { ...result, profile_policy: profile, authorized_origins,
+        ...(op === "profile.copy_environment" ? { creation_template: grant.creation_template! } : {}) };
     },
     /**
      * Owner-only, one-time migration of a stopped Profile to the v2 scope
@@ -690,13 +698,37 @@ export function createFileManagedAccessStore(options: { directory: string; clock
     // The caller coordinates Harbor creation with its existing operation/idempotency owner.
     // This short transaction registers the result; it does not reserve quota before a side effect.
     async recordCreatedProfile(value: unknown): Promise<ManagedProfilePolicy> {
-      const input = object(value, ["idempotency_key", "grant_id", "profile_ref"]), grantId = string(input.grant_id), profileRef = string(input.profile_ref);
+      const input = object(value, ["idempotency_key", "grant_id", "profile_ref"], ["operation", "source_profile_ref", "source_policy_snapshot"]), grantId = string(input.grant_id), profileRef = string(input.profile_ref);
+      const profileOperation = input.operation === undefined ? "profile.create" : operation(input.operation);
+      if (profileOperation !== "profile.create" && profileOperation !== "profile.copy_environment") return fail("managed_access_invalid_input");
+      const sourcePolicySnapshot = profileOperation === "profile.copy_environment" ? policy(input.source_policy_snapshot) : undefined;
+      if (profileOperation === "profile.copy_environment" && sourcePolicySnapshot?.profile_ref !== string(input.source_profile_ref)) return fail("managed_access_invalid_input");
       return transaction(state => receipt(state, "recordCreatedProfile", input, () => {
         const grant = state.grants.find(item => item.grant_id === grantId);
-        if (!grant || !grant.creation_template || !grant.allowed_operations.includes("profile.create") || grant.created_profile_refs.length >= grant.max_created_profiles || state.profile_policies.some(item => item.profile_ref === profileRef)) return fail("managed_access_creation_denied");
+        if (!grant || !grant.creation_template || !grant.allowed_operations.includes(profileOperation) || grant.created_profile_refs.length >= grant.max_created_profiles ||
+          state.profile_policies.some(item => item.profile_ref === profileRef)) return fail("managed_access_creation_denied");
         grant.created_profile_refs.push(profileRef);
         if (!grant.profile_refs.includes(profileRef)) grant.profile_refs.push(profileRef);
-        const profile = { profile_ref: profileRef, ...structuredClone(grant.creation_template.permission_ceiling) };
+        let profile: ManagedProfilePolicy;
+        if (profileOperation === "profile.copy_environment") {
+          const sourceProfileRef = string(input.source_profile_ref);
+          const source = sourcePolicySnapshot;
+          if (!source || !grant.profile_refs.includes(sourceProfileRef) || !source.allowed_operations.includes(profileOperation)) return fail("managed_access_creation_denied");
+          const templateCeiling = grant.creation_template.permission_ceiling;
+          profile = {
+            profile_ref: profileRef,
+            allowed_operations: source.allowed_operations.filter(item => templateCeiling.allowed_operations.includes(item) && grant.allowed_operations.includes(item)),
+            allowed_origins: source.allowed_origins.filter(item => templateCeiling.allowed_origins.includes(item) && grant.allowed_origins.includes(item)),
+            controlled_interaction_origins: (source.controlled_interaction_origins ?? []).filter(item =>
+              templateCeiling.allowed_origins.includes(item) &&
+              source.allowed_origins.includes(item) &&
+              (templateCeiling.controlled_interaction_origins ?? []).includes(item) &&
+              grant.allowed_origins.includes(item)),
+            ...(state.schema_version !== "webenvoy.managed-access.v0" ? { scope_semantics: scopeSemantics(source.scope_semantics) } : {})
+          };
+        } else {
+          profile = { profile_ref: profileRef, ...structuredClone(grant.creation_template.permission_ceiling) };
+        }
         state.profile_policies.push(profile); return profile;
       }));
     },

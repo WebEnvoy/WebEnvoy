@@ -1,0 +1,52 @@
+{
+  "schema": "profile-lifecycle-mutation-request.schema.json",
+  "cases": [
+    {
+      "name": "template expectation must be a fixed object when provided",
+      "instance": {
+        "operation": "copy_environment",
+        "idempotency_key": "copy-key",
+        "identity_environment_ref": "identity-env:source",
+        "expected_environment_template": null
+      }
+    },
+    {
+      "name": "dynamic Provider cannot define a safe-copy template",
+      "instance": {
+        "operation": "copy_environment",
+        "idempotency_key": "copy-key",
+        "identity_environment_ref": "identity-env:source",
+        "expected_environment_template": {
+          "provider_id": null,
+          "site": { "site_id": "example", "origin": "https://example.com", "display_name": "Example" },
+          "language": "en-US",
+          "timezone": "UTC"
+        }
+      }
+    },
+    {
+      "name": "caller cannot assign a target ref",
+      "instance": {
+        "operation": "copy_environment",
+        "idempotency_key": "copy-key",
+        "identity_environment_ref": "identity-env:source",
+        "expected_environment_template": {
+          "provider_id": "chrome_official",
+          "site": { "site_id": "example", "origin": "https://example.com", "display_name": "Example" },
+          "language": "en-US",
+          "timezone": "UTC"
+        },
+        "target": { "profile_ref": "profile:caller-chosen" }
+      }
+    },
+    {
+      "name": "delete confirmation is a fixed request intent",
+      "instance": {
+        "operation": "delete",
+        "idempotency_key": "delete-key",
+        "identity_environment_ref": "identity-env:source",
+        "confirmation": true
+      }
+    }
+  ]
+}

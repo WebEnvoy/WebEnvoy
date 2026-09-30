@@ -41,10 +41,99 @@ try {
   await store.registerPrincipal({ idempotency_key: "other-principal", display_name: "other", credential_hash: otherDigest });
   const otherConnection = await store.connect(otherDigest);
   await rejected(store.checkAccess(otherDigest, { ...access, connection_id: otherConnection.connection_id }), "managed_access_denied");
-  const quotaGrant = await store.createGrant({ idempotency_key: "quota-grant", principal_id: principal.principal_id, profile_refs: [], allowed_operations: ["profile.create"], allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), creation_template: template, max_created_profiles: 1 });
-  const concurrent = await Promise.allSettled(["c", "d"].map(id => reloaded.recordCreatedProfile({ idempotency_key: `quota-${id}`, grant_id: quotaGrant.grant_id, profile_ref: `profile:${id}` })));
+  const quotaTemplate: ManagedCreationTemplate = {
+    ...template,
+    permission_ceiling: { allowed_operations: ["profile.copy_environment", "profile.read"], allowed_origins: ["https://example.com"] }
+  };
+  await store.setProfilePolicy({ idempotency_key: "quota-copy-source-policy", profile_ref: "profile:quota-copy-source", allowed_operations: ["profile.copy_environment"], allowed_origins: [] });
+  const quotaGrant = await store.createGrant({ idempotency_key: "quota-grant", principal_id: principal.principal_id, profile_refs: ["profile:quota-copy-source"], allowed_operations: ["profile.create", "profile.copy_environment"], allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), creation_template: quotaTemplate, max_created_profiles: 1 });
+  const quotaCopySourcePolicy = (await store.checkAccess(digest, {
+    connection_id: connection.connection_id,
+    grant_id: quotaGrant.grant_id,
+    operation: "profile.copy_environment",
+    profile_ref: "profile:quota-copy-source",
+    template_ref: quotaTemplate.template_ref,
+    task_scope: { operations: ["profile.copy_environment"], profile_refs: ["profile:quota-copy-source"], origins: [] }
+  })).profile_policy!;
+  const concurrent = await Promise.allSettled([
+    reloaded.recordCreatedProfile({ idempotency_key: "quota-create", grant_id: quotaGrant.grant_id, profile_ref: "profile:quota-created" }),
+    reloaded.recordCreatedProfile({ idempotency_key: "quota-copy", grant_id: quotaGrant.grant_id, operation: "profile.copy_environment", source_profile_ref: "profile:quota-copy-source", source_policy_snapshot: quotaCopySourcePolicy, profile_ref: "profile:quota-copied" })
+  ]);
   assert.equal(concurrent.filter(item => item.status === "fulfilled").length, 1);
   assert.equal(concurrent.filter(item => item.status === "rejected" && item.reason.code === "managed_access_creation_denied").length, 1);
+
+  const copyTemplate: ManagedCreationTemplate = {
+    template_ref: "template:copy",
+    provider_id: "camoufox",
+    site: { site_id: "example", origin: "https://example.com", display_name: "Example" },
+    language: "en-US",
+    timezone: "UTC",
+    permission_ceiling: {
+      allowed_operations: ["profile.copy_environment", "profile.read", "instance.start", "instance.click"],
+      allowed_origins: ["https://example.com", "https://template-only.example"],
+      controlled_interaction_origins: ["https://example.com"]
+    }
+  };
+  await store.setProfilePolicy({
+    idempotency_key: "copy-source-policy",
+    profile_ref: "profile:copy-source",
+    allowed_operations: ["profile.copy_environment", "profile.read", "instance.start", "instance.stop", "instance.click"],
+    allowed_origins: ["https://example.com", "https://source-only.example"],
+    controlled_interaction_origins: ["https://example.com", "https://source-only.example"]
+  });
+  const copyGrant = await store.createGrant({
+    idempotency_key: "copy-grant",
+    principal_id: principal.principal_id,
+    profile_refs: ["profile:copy-source"],
+    allowed_operations: ["profile.copy_environment", "profile.read", "instance.start", "instance.stop", "instance.click"],
+    allowed_origins: ["https://example.com"],
+    expires_at: new Date(Date.now() + 60_000).toISOString(),
+    creation_template: copyTemplate,
+    max_created_profiles: 1
+  });
+  const copyAccess: ManagedAccessRequest = {
+    connection_id: connection.connection_id,
+    grant_id: copyGrant.grant_id,
+    operation: "profile.copy_environment",
+    profile_ref: "profile:copy-source",
+    template_ref: copyTemplate.template_ref,
+    task_scope: { operations: ["profile.copy_environment"], profile_refs: ["profile:copy-source"], origins: [] }
+  };
+  const copySourcePolicySnapshot = (await store.checkAccess(digest, copyAccess)).profile_policy!;
+  assert.equal((await store.checkAccess(digest, copyAccess)).creation_template?.template_ref, "template:copy");
+  await rejected(store.checkAccess(digest, { ...copyAccess, task_scope: { ...copyAccess.task_scope, profile_refs: ["profile:elsewhere"] } }), "managed_access_creation_denied");
+  const copiedPolicy = await store.recordCreatedProfile({
+    idempotency_key: "copy-created",
+    grant_id: copyGrant.grant_id,
+    operation: "profile.copy_environment",
+    source_profile_ref: "profile:copy-source",
+    source_policy_snapshot: copySourcePolicySnapshot,
+    profile_ref: "profile:copy-target"
+  });
+  assert.deepEqual(copiedPolicy.allowed_operations, ["profile.copy_environment", "profile.read", "instance.start", "instance.click"]);
+  assert.deepEqual(copiedPolicy.allowed_origins, ["https://example.com"]);
+  assert.deepEqual(copiedPolicy.controlled_interaction_origins, ["https://example.com"]);
+  await rejected(store.recordCreatedProfile({
+    idempotency_key: "copy-out-of-quota",
+    grant_id: copyGrant.grant_id,
+    operation: "profile.copy_environment",
+    source_profile_ref: "profile:copy-source",
+    source_policy_snapshot: copySourcePolicySnapshot,
+    profile_ref: "profile:copy-target-2"
+  }), "managed_access_creation_denied");
+  const v2CopyGrant = await store.createGrant({ idempotency_key: "copy-v2-store-grant", principal_id: principal.principal_id,
+    profile_refs: ["profile:copy-source"], allowed_operations: ["profile.copy_environment", "profile.read"],
+    allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), creation_template: copyTemplate, max_created_profiles: 1 });
+  const copyStatePath = join(directory, "managed-access.json"), copyStateOriginal = await readFile(copyStatePath, "utf8"), copyState = JSON.parse(copyStateOriginal);
+  copyState.schema_version = "webenvoy.managed-access.v2";
+  copyState.profile_policies.find((item: { profile_ref: string }) => item.profile_ref === "profile:copy-source").scope_semantics = "agent_operations_v2";
+  copyState.grants.find((item: { grant_id: string }) => item.grant_id === v2CopyGrant.grant_id).scope_semantics = "agent_operations_v2";
+  await writeFile(copyStatePath, JSON.stringify(copyState));
+  const v2CopySnapshot = (await reloaded.checkAccess(digest, { ...copyAccess, grant_id: v2CopyGrant.grant_id })).profile_policy!;
+  await reloaded.recordCreatedProfile({ idempotency_key: "copy-v2-store-created", grant_id: v2CopyGrant.grant_id,
+    operation: "profile.copy_environment", source_profile_ref: "profile:copy-source", source_policy_snapshot: v2CopySnapshot, profile_ref: "profile:copy-v2-target" });
+  assert.equal((await reloaded.list()).profile_policies.find(item => item.profile_ref === "profile:copy-v2-target")?.scope_semantics, "agent_operations_v2");
+  await writeFile(copyStatePath, copyStateOriginal);
   await store.revokeGrant({ idempotency_key: "revoke", grant_id: grant.grant_id });
   const reconnect = await reloaded.connect(digest);
   await rejected(reloaded.checkAccess(digest, { ...access, connection_id: reconnect.connection_id, profile_ref: "profile:b" }), "managed_access_grant_unavailable");

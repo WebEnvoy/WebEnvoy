@@ -1,0 +1,12 @@
+{
+  "$schema": "../schemas/profile-lifecycle-mutation-request.schema.json",
+  "operation": "copy_environment",
+  "idempotency_key": "managed-run-original-key",
+  "identity_environment_ref": "identity-env:source",
+  "expected_environment_template": {
+    "provider_id": "chrome_official",
+    "site": { "site_id": "example", "origin": "https://example.com", "display_name": "Example" },
+    "language": "en-US",
+    "timezone": "UTC"
+  }
+}
