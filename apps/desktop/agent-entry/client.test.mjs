@@ -244,6 +244,20 @@ test('MCP guidance exposes instance.start origin admission', async () => {
     assert.equal(validateOperation({ ...snapshotSchemaFixture, idempotency_key: 'schema-diagnostics-limit', operation: 'instance.diagnostics', task_scope: { ...snapshotSchemaFixture.task_scope, operations: ['instance.diagnostics'] }, limit: 64 }), true, JSON.stringify(validateOperation.errors));
     assert.equal(validateOperation({ ...snapshotSchemaFixture, idempotency_key: 'schema-diagnostics-over-limit', operation: 'instance.diagnostics', task_scope: { ...snapshotSchemaFixture.task_scope, operations: ['instance.diagnostics'] }, limit: 65 }), false);
     assert.equal(validateOperation({ ...snapshotSchemaFixture, idempotency_key: 'schema-observe-limit', operation: 'instance.observe', task_scope: { ...snapshotSchemaFixture.task_scope, operations: ['instance.observe'] }, limit: 1 }), false);
+    const importTemplateRef = 'lode://account-system/github@1.0.0';
+    const importSchemaFixture = { idempotency_key: 'schema-account-system-import', grant_id: 'grant:account-system-import', operation: 'account_system.import_template',
+      task_scope: { operations: ['account_system.import_template'], template_refs: [importTemplateRef] }, template_ref: importTemplateRef };
+    assert.equal(validateOperation(importSchemaFixture), true, JSON.stringify(validateOperation.errors));
+    assert.equal(validateOperation({ ...importSchemaFixture, task_scope: { operations: ['account_system.import_template'], profile_refs: [], origins: [], template_refs: [importTemplateRef] } }), false,
+      'Core AccountSystem import must not require or accept the legacy Profile/origin scope');
+    const accountBindingScope = { profile_ref: 'profile:github', account_system_ref: 'account-system:github', account_ref: `account:sha256:${'a'.repeat(64)}` };
+    const bindSchemaFixture = { idempotency_key: 'schema-account-bind', grant_id: 'grant:account-bind', operation: 'account.bind',
+      task_scope: { operations: ['account.bind'], profile_refs: ['profile:github'], origins: ['https://github.com'], account_binding_scopes: [accountBindingScope] },
+      profile_ref: 'profile:github', origin: 'https://github.com', runtime_session_ref: 'session:github', page_id: 'page:github', page_ref: 'page-ref:github',
+      document_generation: 1, observation_ref: 'observation:github', account_system_ref: accountBindingScope.account_system_ref, account_ref: accountBindingScope.account_ref };
+    assert.equal(validateOperation(bindSchemaFixture), true, JSON.stringify(validateOperation.errors));
+    assert.equal(validateOperation({ ...bindSchemaFixture, task_scope: { operations: ['account.bind'], profile_refs: ['profile:github'], origins: ['https://github.com'] } }), false,
+      'Account binding requires the exact task binding tuple');
     const operationConditions = operation.inputSchema.allOf.filter(condition => condition.if?.properties?.operation?.const);
     for (const definition of definitions.operations.filter(item => item.exposure === 'exposed')) {
       const condition = operationConditions.find(item => item.if.properties.operation.const === definition.id);
@@ -275,8 +289,14 @@ test('MCP guidance exposes instance.start origin admission', async () => {
     assert.ok(operation.inputSchema.properties.task_scope.properties.file_refs);
     assert.match(operation.inputSchema.properties.task_scope.description, /single submitted operation/);
     assert.match(operation.inputSchema.properties.task_scope.properties.operations.description, /current operation/);
-    assert.equal(fileScopeCondition.else.properties.task_scope.properties.file_refs, undefined);
-    assert.equal(fileScopeCondition.else.properties.task_scope.additionalProperties, false);
+    const coreScopeConditions = fileScopeCondition.else;
+    assert.equal(coreScopeConditions.if.properties.operation.const, 'account_system.import_template');
+    assert.deepEqual(coreScopeConditions.then.properties.task_scope.required, ['operations', 'template_refs']);
+    const bindScopeCondition = coreScopeConditions.else;
+    assert.equal(bindScopeCondition.if.properties.operation.const, 'account.bind');
+    assert.deepEqual(bindScopeCondition.then.properties.task_scope.required, ['operations', 'profile_refs', 'origins', 'account_binding_scopes']);
+    assert.equal(bindScopeCondition.else.properties.task_scope.properties.file_refs, undefined);
+    assert.equal(bindScopeCondition.else.properties.task_scope.additionalProperties, false);
     assert.ok(fileScopeCondition.then.properties.task_scope.properties.file_refs);
     assert.match(fileScopeCondition.then.properties.task_scope.properties.file_refs.description, /Omit this field for every non-file operation/);
     assert.equal(fileScopeCondition.then.properties.task_scope.additionalProperties, false);

@@ -117,7 +117,18 @@ const managedOperationProperties = Object.fromEntries([
   ['idempotency_key', { type: 'string', description: 'A new idempotency key for this submitted operation.' }],
   ['grant_id', { type: 'string', description: 'The one owner-issued Grant for this submitted operation.' }],
   ['operation', { type: 'string', enum: managedOperationIds, pattern: capabilityDefinitions.operation_pattern, description: 'One exposed operation name.' }],
-  ['task_scope', { ...managedTaskScopeSchema('file'), description: 'Authorization scope for this single submitted operation.' }],
+  // The selected operation's allOf branch below supplies the closed scope
+  // shape. Keeping this property open here lets Core-only scopes participate
+  // in that same conditional instead of intersecting the legacy browser shape.
+  ['task_scope', { type: 'object', description: 'Authorization scope for this single submitted operation.', properties: {
+    ...managedTaskScopeProperties,
+    file_refs: { type: 'array', description: 'File refs for the current file operation only.', items: { type: 'string', pattern: '^attachment:runtime/[0-9a-f-]{36}$' } },
+    template_refs: { type: 'array', items: { type: 'string', pattern: '^lode://account-system/[a-z0-9][a-z0-9._-]*@[0-9]+\\.[0-9]+\\.[0-9]+$' } },
+    account_binding_scopes: { type: 'array', items: { type: 'object', required: ['profile_ref', 'account_system_ref', 'account_ref'], properties: {
+      profile_ref: { type: 'string', minLength: 1 }, account_system_ref: { type: 'string', pattern: '^account-system:[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' },
+      account_ref: { type: 'string', pattern: '^account:sha256:[a-f0-9]{64}$' }
+    }, additionalProperties: false } }
+  } }],
   ...Object.entries(capabilityDefinitions.fields).map(([name, schema]) => [name, { ...schema }])
 ]);
 const forbiddenFor = definition => Object.keys(capabilityDefinitions.fields).filter(field => !definition.allowed.includes(field));
@@ -168,7 +179,15 @@ const managedOperationSchema = {
     {
       if: { required: ['operation'], properties: { operation: { enum: managedFileOperationIds } } },
       then: { properties: { task_scope: { ...managedTaskScopeSchema('file'), description: 'Authorization scope for this single submitted operation. file_refs is allowed only for the current file.upload or file.download operation; upload carries one ref equal to file_ref and download carries []. Omit this field for every non-file operation.' } } },
-      else: { properties: { task_scope: managedTaskScopeSchema(undefined) } }
+      else: {
+        if: { required: ['operation'], properties: { operation: { const: 'account_system.import_template' } } },
+        then: { properties: { task_scope: managedTaskScopeSchema(undefined, 'account_system.import_template') } },
+        else: {
+          if: { required: ['operation'], properties: { operation: { const: 'account.bind' } } },
+          then: { properties: { task_scope: managedTaskScopeSchema(undefined, 'account.bind') } },
+          else: { properties: { task_scope: managedTaskScopeSchema(undefined) } }
+        }
+      }
     },
     {
       if: { required: ['operation'], properties: { operation: { enum: ['file.upload'] } } },

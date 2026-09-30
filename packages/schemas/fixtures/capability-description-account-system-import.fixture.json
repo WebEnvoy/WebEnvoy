@@ -1,0 +1,15 @@
+{
+  "$schema": "capability-description-request.schema.json",
+  "operation": "account_system.import_template",
+  "connection_id": "connection:example",
+  "context": {
+    "grant_id": "grant:account-system-import",
+    "task_scope": {
+      "operations": ["account_system.import_template"],
+      "template_refs": ["lode://account-system/github@1.0.0"]
+    }
+  },
+  "arguments": {
+    "template_ref": "lode://account-system/github@1.0.0"
+  }
+}

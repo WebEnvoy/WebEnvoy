@@ -256,7 +256,7 @@ export async function handleManagedAccessApi(request: IncomingMessage, response:
     // submit returns admitted Run failures itself; access errors escaping it precede dispatch.
     const managedTaskRequest = path === "/managed-tasks/operations" && request.method === "POST";
     const notDispatched = (path === "/managed-browser/operations" && request.method === "POST" || managedTaskRequest) && error instanceof ManagedAccessError && (code.startsWith("managed_access_") || code.startsWith("managed_task_"));
-    const conflict = code === "managed_access_idempotency_conflict" || code === "managed_access_scope_conflict" || code === "managed_access_grant_conflict" || code === "managed_access_policy_conflict";
+    const conflict = code === "managed_browser_idempotency_conflict" || code === "managed_access_idempotency_conflict" || code === "managed_access_scope_conflict" || code === "managed_access_grant_conflict" || code === "managed_access_policy_conflict";
     const managedTaskStatus = managedTaskRequest
       ? code === "managed_task_operation_unavailable" ? 404
         : code === "managed_task_invalid_input" || code === "managed_task_version_unsupported" ? 400

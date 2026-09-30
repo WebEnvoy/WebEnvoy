@@ -1549,7 +1549,7 @@ export function createManagedBrowserService(options: {
       if (input.operation === "account_system.import_template") {
         const accountSystemService = options.accountSystemService;
         if (!accountSystemService) return fail("managed_account_system_unavailable");
-        return withFileOwnershipLock(join(directory, `${digest(`${input.grant_id}:account-system-import`)}.lock`), 5000, async () => {
+        return withFileOwnershipLock(join(directory, `${runId}.lock`), 5000, async () => {
           const previous = await store.getRunRecord(runId);
           if (previous) {
             if (previous.public_result_summary?.request_hash !== requestHash) return fail("managed_browser_idempotency_conflict");
@@ -1557,21 +1557,27 @@ export function createManagedBrowserService(options: {
           }
           await options.accessStore.checkAccess(credentialHash, accessRequest(input));
           const summary = { principal_id: principal.principal_id, grant_id: input.grant_id, operation: input.operation,
-            template_ref: input.template_ref, request_hash: requestHash };
+            template_ref: input.template_ref, request_hash: requestHash, dispatch_state: "not_dispatched" };
           await store.createRunRecord({ run_id: runId, task_intent_ref: `managed-intent:${runId}`, capability_ref: "core:account-system", status: "admitted",
             admission: { decision: "accepted", action_risk: "write" }, public_result_summary: summary });
           await store.updateRunRecord(runId, { status: "running" });
+          let dispatchState: "not_dispatched" | "dispatched" = "not_dispatched";
           try {
             await options.accessStore.checkAccess(credentialHash, accessRequest(input));
+            const current = (await store.getRunRecord(runId))!;
+            await store.updateRunRecord(runId, { public_result_summary: { ...current.public_result_summary, dispatch_state: "dispatched" } });
+            dispatchState = "dispatched";
             const result = await accountSystemService.importTemplate(input.template_ref!);
             await options.accessStore.checkAccess(credentialHash, accessRequest(input));
             await store.updateRunRecord(runId, { evidence_refs: [result.local_revision_ref] });
             await completeRunWithResult(store, runId, { result_ref: `managed-result:${runId}`, result_kind: "account_system_import", data: result,
               evidence_refs: [result.local_revision_ref], persisted_public_summary: { ...summary, result } });
           } catch (error) {
-            const known = error instanceof ManagedAccessError && error.code !== "account_system_definition_unavailable";
+            const known = dispatchState === "not_dispatched";
             await completeRunWithFailure(store, runId, { status: known ? "failed" : "unknown_outcome",
-              failure: { category: "runtime_execution", code: error instanceof ManagedAccessError ? error.code : "managed_browser_outcome_unknown", phase: "execution", recovery_hint: "query_operation_without_replay" } });
+              failure: { category: known ? "runtime_execution" : "write_outcome",
+                code: dispatchState === "dispatched" ? "managed_browser_outcome_unknown" : error instanceof ManagedAccessError ? error.code : "managed_browser_execution_failed",
+                phase: "execution", recovery_hint: "query_operation_without_replay" } });
           }
           return response((await store.getRunRecord(runId))!);
         });
