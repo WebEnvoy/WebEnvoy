@@ -1151,7 +1151,7 @@ export function createManagedBrowserService(options: {
   async function describeBusinessTargetContext(
     credentialHash: string,
     connection: Awaited<ReturnType<FileManagedAccessStore["checkConnection"]>>,
-    context: DescribeContext,
+    context: { grant_id: string; profile_ref: string; task_scope: ManagedAccessRequest["task_scope"] },
     target: Request,
     assessment: ReturnType<typeof describeInputAssessment>,
     visibilitySnapshot: string,
@@ -1357,9 +1357,6 @@ export function createManagedBrowserService(options: {
     const profileContext = { ...context, profile_ref: context.profile_ref, task_scope: context.task_scope as unknown as ManagedAccessRequest["task_scope"] };
     const target = { idempotency_key: "describe", connection_id: connection.connection.connection_id, operation: input.operation,
       grant_id: context.grant_id, profile_ref: context.profile_ref, task_scope: context.task_scope, ...(input.arguments ?? {}) } as Request;
-    if (isBusinessTargetOperation(input.operation)) {
-      return describeBusinessTargetContext(credentialHash, connection, context, target, assessment, visibilitySnapshot, result, finish);
-    }
     let targetAccess: Awaited<ReturnType<FileManagedAccessStore["checkAccess"]>> | undefined;
     let targetAuthorizationAssessed = false;
     let targetAuthorizationState: "allowed" | "denied" | "unknown" | undefined;
@@ -1392,6 +1389,9 @@ export function createManagedBrowserService(options: {
       visible = await readProfileVisibility(credentialHash, connection.connection.connection_id, profileContext);
     }
     const visibilitySnapshot = accessFingerprint(visible);
+    if (isBusinessTargetOperation(input.operation)) {
+      return describeBusinessTargetContext(credentialHash, connection, profileContext, target, assessment, visibilitySnapshot, result, finish);
+    }
     if (!targetAuthorizationAssessed && !assessment.invalid.some(item => item.path.includes("file_ref")) && !assessment.missing.some(path => path.includes("file_refs"))) {
       targetAuthorizationAssessed = true;
       try {

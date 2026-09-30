@@ -1177,22 +1177,35 @@ try {
   const observed = await service.submit(credentialHash, { ...navigation, idempotency_key: "observe-one", operation: "instance.observe", url: undefined });
   assert.equal(observed.status, "succeeded", JSON.stringify(observed));
   assert.equal((observed.result as { observation: { page: { current_url: string } } }).observation.page.current_url, "https://example.com/one");
-  const accountSystemRef = "account-system:github";
+  const bindingAccountSystemRef = "account-system:github";
   const accountRef = `account:sha256:${"a".repeat(64)}`;
   const accountRef2 = `account:sha256:${"b".repeat(64)}`;
   const accountBindingScopes = [
-    { profile_ref: "profile:1", account_system_ref: accountSystemRef, account_ref: accountRef },
-    { profile_ref: "profile:1", account_system_ref: accountSystemRef, account_ref: accountRef2 }
+    { profile_ref: "profile:1", account_system_ref: bindingAccountSystemRef, account_ref: accountRef },
+    { profile_ref: "profile:1", account_system_ref: bindingAccountSystemRef, account_ref: accountRef2 }
   ];
   await accessStore.setProfilePolicy({ idempotency_key: "account-bind-policy", profile_ref: "profile:1", allowed_operations: ["account.bind"], allowed_origins: ["https://example.com"] });
   const accountBindGrant = await accessStore.createGrant({ idempotency_key: "account-bind-grant", principal_id: principal.principal_id,
     profile_refs: ["profile:1"], allowed_operations: ["account.bind"], allowed_origins: ["https://example.com"],
     expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 0, creation_template: null,
     account_binding_scopes: accountBindingScopes });
+  const grantStoreAfterBindingGrant = JSON.parse(await readFile(join(directory, "access", "managed-access.json"), "utf8")) as { schema_version?: string };
+  assert.equal(grantStoreAfterBindingGrant.schema_version, "webenvoy.managed-access.v2", "adding a #605 binding Grant must preserve the v2 BusinessTarget tuple store version");
+  const reloadedGrantState = await accessStore.list();
+  const persistedBusinessTargetGrant = reloadedGrantState.grants.find(item => item.grant_id === businessTargetGrant.grant_id);
+  assert.equal(persistedBusinessTargetGrant?.scope_semantics, "agent_operations_v2");
+  assert.deepEqual(persistedBusinessTargetGrant?.business_target_account_scopes, businessTargetGrant.business_target_account_scopes,
+    "adding an Account binding Grant must preserve the existing #602 BusinessTarget tuple after a store reload");
+  assert.deepEqual(reloadedGrantState.grants.find(item => item.grant_id === accountBindGrant.grant_id)?.account_binding_scopes, accountBindingScopes);
+  await assert.rejects(accessStore.checkAccess(credentialHash, {
+    connection_id: connection.connection_id, grant_id: publicGrant.grant_id, operation: "instance.read", profile_ref: "profile:1", origin: "https://example.com",
+    account_system_ref: bindingAccountSystemRef, account_ref: accountRef,
+    task_scope: { operations: ["instance.read"], profile_refs: ["profile:1"], origins: ["https://example.com"] }
+  }), /managed_access_invalid_input/, "Account tuple fields are invalid on an unrelated shared access operation");
   const accountBindRequest = { idempotency_key: "account-bind-lost-response", connection_id: connection.connection_id, grant_id: accountBindGrant.grant_id,
     operation: "account.bind", profile_ref: "profile:1", origin: "https://example.com", runtime_session_ref: "session:one",
     page_id: "page-id:one", page_ref: "page:one", document_generation: 1, observation_ref: "observation:trusted",
-    account_system_ref: accountSystemRef, account_ref: accountRef,
+    account_system_ref: bindingAccountSystemRef, account_ref: accountRef,
     task_scope: { operations: ["account.bind"], profile_refs: ["profile:1"], origins: ["https://example.com"], account_binding_scopes: [accountBindingScopes[0]!] } };
   malformedAccountBindingResponse = true;
   const lostBindingResponse = await service.submit(credentialHash, accountBindRequest);

@@ -448,7 +448,7 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       if (parsed.allowed_operations.some(isBusinessTargetOperation)) return fail("managed_access_scope_confirmation_required");
       return transaction(state => receipt(state, "createGrant", input, () => {
         if (!state.principals.some(item => item.principal_id === parsed.principal_id && item.revoked_at === null) || Date.parse(parsed.expires_at) <= Date.parse(now())) return fail("managed_access_grant_unavailable");
-        if (parsed.account_system_scope !== undefined || parsed.account_binding_scopes !== undefined) state.schema_version = "webenvoy.managed-access.v1";
+        if (parsed.account_system_scope !== undefined || parsed.account_binding_scopes !== undefined) ensureV1State(state);
         const grant: ManagedGrant = { ...parsed, max_created_profiles: parsed.max_created_profiles, grant_id: `grant:${randomUUID()}`, revoked_at: null, created_profile_refs: [] };
         state.grants.push(grant);
         return grant;
@@ -599,7 +599,8 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       const requestedAccountRef = input.account_ref === undefined ? undefined : string(input.account_ref);
       const businessTargetRef = input.business_target_ref === undefined ? undefined : string(input.business_target_ref);
       const businessTargetOperation = isBusinessTargetOperation(op);
-      if ((requestedAccountSystemRef !== undefined || requestedAccountRef !== undefined || businessTargetRef !== undefined) && !businessTargetOperation) return fail("managed_access_invalid_input");
+      const accountBind = op === "account.bind";
+      if ((requestedAccountSystemRef !== undefined || requestedAccountRef !== undefined || businessTargetRef !== undefined) && !businessTargetOperation && !accountBind) return fail("managed_access_invalid_input");
       if ((requestedAccountSystemRef === undefined) !== (requestedAccountRef === undefined)) return fail("managed_access_invalid_input");
       if (requestedAccountSystemRef !== undefined && !businessTargetAccountSystemRef.test(requestedAccountSystemRef) || requestedAccountRef !== undefined && !businessTargetAccountRef.test(requestedAccountRef)) return fail("managed_access_invalid_input");
       if (businessTargetOperation && (["business_target.create", "business_target.list"].includes(op)
@@ -608,7 +609,6 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       const skillOperation = (managedSkillOperations as readonly string[]).includes(op);
       const taskOperation = (managedTaskOperations as readonly string[]).includes(op);
       const accountSystemImport = op === "account_system.import_template";
-      const accountBind = op === "account.bind";
       const scope = accountSystemImport
         ? object(input.task_scope, ["operations", "template_refs"])
         : skillOperation
@@ -673,7 +673,7 @@ export function createFileManagedAccessStore(options: { directory: string; clock
           requestedFileRefs !== undefined || task.file_refs !== undefined || templateRef !== undefined) return fail("managed_access_denied");
       }
       if (!taskOperation && (skillRef !== undefined || sourceRef !== undefined || revisionRef !== undefined)) return fail("managed_access_invalid_input");
-      if (!accountBind && (accountSystemRef !== undefined || accountRef !== undefined || task.account_binding_scopes !== undefined || task.template_refs !== undefined)) return fail("managed_access_invalid_input");
+      if (!accountBind && !businessTargetOperation && (accountSystemRef !== undefined || accountRef !== undefined || task.account_binding_scopes !== undefined || task.template_refs !== undefined)) return fail("managed_access_invalid_input");
       if (requestedFileRefs !== undefined && ![...requestedFileRefs].every(ref => (task.file_refs ?? []).includes(ref))) return fail("managed_access_denied");
       if (managedFileOperations.includes(op as typeof managedFileOperations[number])) {
         const filePermission = grant.file_scope;
