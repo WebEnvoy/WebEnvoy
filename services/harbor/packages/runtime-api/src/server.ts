@@ -261,7 +261,7 @@ async function route(
   if (method === "GET" && url.pathname === "/runtime/identity-environments") {
     writeJson(response, 200, {
       schema_version: "harbor-runtime-api-identity-environments/v0",
-      identity_environments: runtime.listLocalIdentityEnvironments()
+      identity_environments: runtime.listManagedIdentityEnvironmentProfiles()
     });
     return;
   }

@@ -13,7 +13,8 @@ import {
   type LocalIdentityEnvironmentManagerOptions,
   type LocalIdentityEnvironmentPublicRecord,
   type LocalIdentityEnvironmentStateUpdate,
-  type ManagedLocalIdentityEnvironmentInput
+  type ManagedLocalIdentityEnvironmentInput,
+  type ManagedIdentityEnvironmentReadRecord
 } from "./identity-environment-manager.js";
 import type { IdentityEnvironmentMutationRequest, IdentityEnvironmentMutationResult, MaterializedIdentityEnvironmentMutationRequest } from "./identity-environment-mutation-types.js";
 import { materializeIdentityEnvironmentMutation } from "./identity-environment-mutations.js";
@@ -1252,6 +1253,10 @@ export class HarborRuntime {
 
   listLocalIdentityEnvironments(): LocalIdentityEnvironmentPublicRecord[] {
     return this.identityEnvironments.list();
+  }
+
+  listManagedIdentityEnvironmentProfiles(): ManagedIdentityEnvironmentReadRecord[] {
+    return this.identityEnvironments.listForManagedRead(identity_environment_ref => this.runtimeSessions.currentManagedObservation(identity_environment_ref));
   }
 
   async readProfileEnvironment(identity_environment_ref: string) {

@@ -16,6 +16,7 @@ import { createManagedRecoveryService } from "./profile-recovery.js";
 const directory = await mkdtemp(join(tmpdir(), "managed-browser-check-"));
 const profiles: Record<string, unknown>[] = [];
 let creates = 0;
+let identityEnvironmentReads = 0;
 let navigations = 0, observations = 0, sessionReads = 0;
 let diagnostics = 0, lockAttempts = 0, dropDiagnosticsResponse = false;
 let capabilityDescriptions = 0;
@@ -164,7 +165,7 @@ const server = createServer((req, res) => { void (async () => {
     if (dropResponse) { req.socket.destroy(); return; }
     }
   } else if (req.url?.startsWith("/runtime/identity-environment-mutations/")) value = receipts.get(decodeURIComponent(req.url.split("/").at(-1)!)) ?? environmentReceipts.get(decodeURIComponent(req.url.split("/").at(-1)!));
-  else if (req.url === "/runtime/identity-environments") { await afterProfileList?.(); value = { identity_environments: profiles }; }
+  else if (req.url === "/runtime/identity-environments") { identityEnvironmentReads++; await afterProfileList?.(); value = { identity_environments: profiles }; }
   else if (req.url === "/runtime/identity-environments/identity%3A1/environment") {
     if (req.method === "GET") {
       environmentReads++;
@@ -318,10 +319,51 @@ try {
   assert.deepEqual(await service.submit(credentialHash, request), first);
   assert.equal(creates, 1);
   assert.equal(requestedProviders[0], "camoufox");
+  profiles[0]!.identity_ownership = {
+    schema_version: "webenvoy.profile-identity-ownership/v1",
+    current: { status: "conflict", observed_at: "2026-09-30T07:30:00.000Z", account_system_ref: "account-system:example", account_ref: "account:sha256:current" },
+    history: { bindings: [{ status: "bound", verification: "verified_at_binding", account_system_ref: "account-system:example", account_ref: "account:sha256:bound", bound_at: "2026-09-01T07:30:00.000Z" }], declared: null },
+    ownership: { status: "conflict" }
+  };
+  profiles.push({ refs: { profile_ref: "profile:outside" }, identity_environment_ref: "identity:outside", site: { display_name: "OUTSIDE_PROFILE_SECRET" }, identity_ownership: { malformed: true } });
   await assert.rejects(service.submit(credentialHash, { ...request, template_ref: "template:wider" }), /idempotency_conflict/);
   const listed = await service.submit(credentialHash, { ...request, idempotency_key: "list", operation: "profile.list", template_ref: undefined });
   assert.equal(listed.ok, true, JSON.stringify(listed));
   assert.equal((listed.result as { profiles: unknown[] }).profiles.length, 1);
+  assert.equal(JSON.stringify(listed.result).includes("OUTSIDE_PROFILE_SECRET"), false, "out-of-scope Profile details must be filtered before projection");
+  const listedProfile = ((listed.result as { profiles: Record<string, unknown>[] }).profiles[0]!);
+  assert.equal(((listedProfile.identity_ownership as Record<string, unknown>).current as Record<string, unknown>).status, "conflict");
+  assert.equal(JSON.stringify(listedProfile.identity_ownership).includes("identity:outside"), false);
+  const readConflict = await service.submit(credentialHash, { ...request, idempotency_key: "read-conflict", operation: "profile.read", template_ref: undefined, profile_ref: "profile:1" });
+  assert.equal(readConflict.ok, true, "identity conflict does not block public Profile reads");
+  assert.equal((((readConflict.result as { profile: Record<string, unknown> }).profile.identity_ownership as Record<string, unknown>).ownership as Record<string, unknown>).status, "conflict");
+  const savedProjection = profiles[0]!.identity_ownership;
+  const malformedOwnershipCases: Array<(projection: Record<string, unknown>) => void> = [
+    projection => { (projection.current as Record<string, unknown>).account_ref = "account: bad"; },
+    projection => { ((projection.history as Record<string, unknown>).bindings as Array<Record<string, unknown>>)[0]!.account_ref = "x".repeat(257); },
+    projection => { ((projection.history as Record<string, unknown>).bindings as Array<Record<string, unknown>>)[0]!.account_ref = null; },
+    projection => { (projection.history as Record<string, unknown>).declared = { status: "declared", account_system_ref: "account-system:example", account_ref: "account declared" }; },
+    projection => { (projection.history as Record<string, unknown>).declared = { status: "declared", account_system_ref: null, account_ref: "account:legacy" }; },
+    projection => { (projection.current as Record<string, unknown>).observed_at = null; }
+  ];
+  for (const [index, corrupt] of malformedOwnershipCases.entries()) {
+    const malformed = structuredClone(savedProjection) as Record<string, unknown>;
+    corrupt(malformed);
+    profiles[0]!.identity_ownership = malformed;
+    const rejected = await service.submit(credentialHash, { ...request, idempotency_key: `malformed-identity-${index}`, operation: "profile.read", template_ref: undefined, profile_ref: "profile:1" });
+    assert.equal(rejected.failure?.code, "managed_browser_runtime_invalid", `malformed Harbor identity projection ${index} must fail closed`);
+  }
+  profiles[0]!.identity_ownership = savedProjection;
+  delete profiles[0]!.identity_ownership;
+  const readLegacyHarbor = await service.submit(credentialHash, { ...request, idempotency_key: "read-legacy-harbor", operation: "profile.read", template_ref: undefined, profile_ref: "profile:1" });
+  const legacyIdentity = (readLegacyHarbor.result as { profile: Record<string, unknown> }).profile.identity_ownership as Record<string, unknown>;
+  assert.equal(readLegacyHarbor.ok, true);
+  assert.equal((legacyIdentity.current as Record<string, unknown>).status, "unknown");
+  assert.equal((legacyIdentity.ownership as Record<string, unknown>).status, "unknown", "missing Harbor projection must not infer ownership from bindings");
+  profiles[0]!.identity_ownership = savedProjection;
+  const beforeOutOfScopeRead = identityEnvironmentReads;
+  await assert.rejects(service.submit(credentialHash, { ...request, idempotency_key: "read-outside", operation: "profile.read", template_ref: undefined, profile_ref: "profile:outside" }), /managed_access_denied/);
+  assert.equal(identityEnvironmentReads, beforeOutOfScopeRead, "out-of-scope read must be rejected before Harbor identity data is read");
   const fixedConflict = await service.submit(credentialHash, { ...request, idempotency_key: "fixed-conflict", provider_id: "chrome_official" });
   assert.equal(fixedConflict.failure?.code, "managed_browser_template_provider_conflict");
   assert.equal(creates, 1);
@@ -334,7 +376,7 @@ try {
   const reconnect = await accessStore.connect(credentialHash);
   await assert.rejects(service.submit(credentialHash, { ...request, idempotency_key: "after-revoke", connection_id: reconnect.connection_id }), /grant_unavailable/);
   assert.deepEqual(await service.query(credentialHash, second.run_id), second);
-  assert.equal((await runRecordStore.listRunRecords()).filter(run => run.status === "succeeded").length, 3);
+  assert.equal((await runRecordStore.listRunRecords()).filter(run => run.status === "succeeded").length, 5);
   const recoveryGrant = await accessStore.createGrant({ idempotency_key: "recovery-grant", principal_id: principal.principal_id, profile_refs: [], allowed_operations: grant.allowed_operations, allowed_origins: grant.allowed_origins, expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 2, creation_template: grant.creation_template });
   afterCreate = undefined; dropResponse = true;
   const unknown = await service.submit(credentialHash, { ...request, idempotency_key: "lost-response", grant_id: recoveryGrant.grant_id });

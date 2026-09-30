@@ -1,0 +1,14 @@
+{
+  "$schema": "../schemas/profile-identity-ownership.schema.json",
+  "schema_version": "webenvoy.profile-identity-ownership/v1",
+  "current": { "status": "unknown", "observed_at": null, "account_system_ref": null, "account_ref": null },
+  "history": {
+    "bindings": [{
+      "status": "bound", "verification": "verified_at_binding",
+      "account_system_ref": "account-system:xiaohongshu", "account_ref": "account:sha256:0123456789abcdef",
+      "bound_at": "2026-09-01T12:00:00.000Z"
+    }],
+    "declared": null
+  },
+  "ownership": { "status": "unique" }
+}

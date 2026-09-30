@@ -28,9 +28,54 @@ function controlledLauncher(state: { id: string | null; opens: number; observe?:
   };
 }
 
+function managedPageLauncher(state: { id: string | null }): LocalProviderLauncher {
+  const fixture = createFixtureLauncher("ready");
+  return async input => {
+    const ready = await fixture(input);
+    if (ready.status !== "ready") throw new Error("fixture unavailable");
+    let pageNumber = 0;
+    const pages: LocalProviderPageState[] = [{ provider_page_ref: `provider:${input.profile_ref}`, current_url: input.url, title: "Creator", status: "ready", facts: [], active: true, document_generation: 1 }];
+    const controller: LocalProviderPageController = {
+      listPages: async () => structuredClone(pages),
+      openPage: async url => {
+        const page: LocalProviderPageState = { provider_page_ref: `provider:${input.profile_ref}:${++pageNumber}`, current_url: url ?? "https://creator.xiaohongshu.com/publish/publish", title: "Creator", status: "ready", facts: [], active: false, document_generation: 1 };
+        pages.push(page);
+        return structuredClone(page);
+      },
+      activatePage: async provider_page_ref => {
+        for (const page of pages) page.active = page.provider_page_ref === provider_page_ref;
+        return structuredClone(pages.find(page => page.provider_page_ref === provider_page_ref)!);
+      },
+      closePage: async provider_page_ref => {
+        const index = pages.findIndex(page => page.provider_page_ref === provider_page_ref);
+        if (index >= 0) pages.splice(index, 1);
+        return structuredClone(pages);
+      },
+      navigatePage: async (provider_page_ref, action, url) => {
+        const page = pages.find(item => item.provider_page_ref === provider_page_ref)!;
+        if (action === "navigate" && url) page.current_url = url;
+        page.document_generation = (page.document_generation ?? 1) + 1;
+        return structuredClone(page);
+      }
+    };
+    return {
+      ...ready,
+      execution_surface: "local_provider",
+      page: pages[0]!,
+      pages,
+      pageController: controller,
+      observePage: trustManagedPageObserver(async operation => {
+        const page = pages.find(item => item.provider_page_ref === operation?.provider_page_ref);
+        if (!page) throw new Error("provider page missing");
+        return { ...normalizeManagedProviderObservation({ current_url: page.current_url, title: page.title, ready_state: "complete", stable_id: state.id, document_generation: page.document_generation }), provider_page_ref: page.provider_page_ref };
+      })
+    };
+  };
+}
+
 test("same-instance observation discovers without binding, rejects unknown/conflicting/stale identities and preserves ownership", async () => {
   const state = { id: "account-a" as string | null, opens: 0 };
-  const runtime = new HarborRuntime(controlledLauncher(state));
+  const runtime = new HarborRuntime(managedPageLauncher(state));
   for (const name of ["a", "b"]) runtime.createLocalIdentityEnvironment(identityInput(`identity:${name}`, `profile:${name}`));
   const a = await runtime.openManagedIdentityEnvironmentSession({ identity_environment_ref: "identity:a", url: "https://creator.xiaohongshu.com/publish/publish", control_owner: "core_task", holder_ref: "principal:one", operation_scope: "profile_management" });
   const b = await runtime.openManagedIdentityEnvironmentSession({ identity_environment_ref: "identity:b", url: "https://creator.xiaohongshu.com/publish/publish", control_owner: "core_task", holder_ref: "principal:one", operation_scope: "profile_management" });
@@ -47,16 +92,32 @@ test("same-instance observation discovers without binding, rejects unknown/confl
     assert.equal(JSON.stringify(first).includes("secret"), false);
     assert.equal(state.opens, 0);
     assert.deepEqual(runtime.getManagedLocalIdentityEnvironment("identity:a")?.account_bindings, []);
+    const discovered = runtime.listManagedIdentityEnvironmentProfiles().find(profile => profile.identity_environment_ref === "identity:a")!;
+    assert.equal(discovered.identity_ownership.current.status, "discovered");
+    assert.equal(discovered.identity_ownership.ownership.status, "unknown");
+    assert.deepEqual(discovered.identity_ownership.history.bindings, []);
     const input = { observation_ref: first.observation_ref, account_system_ref: first.account.account_system_ref, account_ref: first.account.account_ref, idempotency_key: "bind-a", holder_ref: "principal:one" };
     const bound = await runtime.bindManagedAccount("identity:a", input);
     assert.ok("account_bindings" in bound && bound.account_bindings.length === 1);
     assert.deepEqual(await runtime.bindManagedAccount("identity:a", input), bound);
+    const owned = runtime.listManagedIdentityEnvironmentProfiles().find(profile => profile.identity_environment_ref === "identity:a")!;
+    assert.equal(owned.identity_ownership.current.status, "verified");
+    assert.equal(owned.identity_ownership.history.bindings[0]?.verification, "verified_at_binding");
+    assert.equal(owned.identity_ownership.ownership.status, "unique");
     const second = await runtime.observeManagedSession(b.runtime_session_ref, { holder_ref: "principal:one" });
     if (second.status !== "completed") throw new Error("observation unavailable");
+    const conflicted = runtime.listManagedIdentityEnvironmentProfiles().find(profile => profile.identity_environment_ref === "identity:b")!;
+    assert.equal(conflicted.identity_ownership.current.status, "conflict");
+    assert.equal(conflicted.identity_ownership.ownership.status, "unknown");
+    assert.equal(JSON.stringify(conflicted.identity_ownership).includes("identity:a"), false, "account conflict must not expose the other Profile reference");
     assert.equal((await runtime.bindManagedAccount("identity:b", { ...input, observation_ref: second.observation_ref, idempotency_key: "bind-b" }) as { failure_class?: string }).failure_class, "account_binding_conflict");
     state.id = "account-other";
     const changed = await observe();
     if (changed.status !== "completed") throw new Error("observation unavailable");
+    const changedProjection = runtime.listManagedIdentityEnvironmentProfiles().find(profile => profile.identity_environment_ref === "identity:a")!;
+    assert.equal(changedProjection.identity_ownership.current.status, "conflict");
+    assert.equal(changedProjection.identity_ownership.history.bindings[0]?.account_ref, first.account.account_ref);
+    assert.equal(changedProjection.identity_ownership.ownership.status, "unique", "current login identity does not replace persistent owner binding");
     assert.equal((await runtime.bindManagedAccount("identity:a", { ...input, observation_ref: changed.observation_ref, account_ref: changed.account.account_ref, idempotency_key: "bind-other" }) as { failure_class?: string }).failure_class, "account_binding_conflict");
     assert.equal((await runtime.bindManagedAccount("identity:a", { ...input, idempotency_key: "stale" }) as { failure_class?: string }).failure_class, "account_observation_changed");
     state.id = null;
@@ -78,6 +139,11 @@ test("same-instance observation discovers without binding, rejects unknown/confl
     assert.ok(resumed.status === "completed" && resumed.control_generation > first.control_generation && resumed.runtime_session_ref === first.runtime_session_ref);
     assert.equal(state.opens, 0);
   } finally { await runtime.stopSession(a.runtime_session_ref); await runtime.stopSession(b.runtime_session_ref); }
+  const stopped = runtime.listManagedIdentityEnvironmentProfiles().find(profile => profile.identity_environment_ref === "identity:a")!;
+  assert.equal(stopped.identity_ownership.current.status, "unknown");
+  assert.equal(stopped.identity_ownership.current.observed_at, null);
+  assert.equal(stopped.identity_ownership.history.bindings[0]?.verification, "verified_at_binding");
+  assert.equal(stopped.identity_ownership.ownership.status, "unique");
 });
 
 test("v2 owner binding rechecks the observed Page and persists only after a fresh same-Page observation", async () => {
@@ -209,6 +275,32 @@ test("shared persisted binding owner protects direct creation/import and exposes
     assert.equal(copied.record?.site.account_ref, null);
     assert.deepEqual(copied.record?.account_bindings, []);
     assert.equal(copied.record?.status.login_state, "logged_out");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("legacy imported account refs outside the public projection bounds remain owner data", () => {
+  const dir = mkdtempSync(join(tmpdir(), "managed-legacy-account-ref-"));
+  try {
+    const manager = new LocalIdentityEnvironmentManager({ persistence_path: join(dir, "identities.json") });
+    const account_ref = ` legacy ${"x".repeat(260)}`;
+    const imported = manager.importIdentityEnvironment({
+      ...identityInput("legacy:long-ref", "legacy:profile-long-ref"),
+      site: { site_id: "xiaohongshu", origin: "https://www.xiaohongshu.com", account_ref }
+    });
+    const projection = manager.listForManagedRead(() => null).find(item => item.identity_environment_ref === imported.identity_environment_ref);
+    assert.equal(projection?.identity_ownership.history.declared, null, "unrepresentable legacy declaration is omitted from the bounded Agent projection");
+    assert.equal(manager.getFacts(imported.identity_environment_ref)?.site_binding.account_ref, account_ref, "the original imported declaration remains persisted");
+    assert.throws(() => manager.importIdentityEnvironment({
+      ...identityInput("legacy:long-ref-duplicate", "legacy:profile-long-ref-duplicate"),
+      site: { site_id: "xiaohongshu", origin: "https://www.xiaohongshu.com", account_ref }
+    }), /account_binding_conflict/, "omitted declarations still participate in Harbor's existing ownership conflict predicate");
+    const overlongSystemRef = manager.importIdentityEnvironment({
+      ...identityInput("legacy:long-site-id", "legacy:profile-long-site-id"),
+      site: { site_id: "s".repeat(250), origin: "https://www.xiaohongshu.com", account_ref: "account:valid" }
+    });
+    const systemRefProjection = manager.listForManagedRead(() => null).find(item => item.identity_environment_ref === overlongSystemRef.identity_environment_ref);
+    assert.equal(systemRefProjection?.identity_ownership.history.declared, null, "an overlong derived AccountSystem ref is omitted");
+    assert.equal(manager.getFacts(overlongSystemRef.identity_environment_ref)?.site_binding.site_id, "s".repeat(250), "the original Site ID remains persisted");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

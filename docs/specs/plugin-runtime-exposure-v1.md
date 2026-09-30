@@ -53,6 +53,12 @@ The request must provide at least one of `name` or `tags`. A name is a non-empty
 
 Core requires a current Grant with the explicit `profile.metadata.update` operation, the same operation in task scope, and the selected Profile in both Grant and task scope; task scope has `origins: []`. The operation has no Provider, browser session, or Profile-storage ownership-lock prerequisite. It changes no site/account identity, authentication, Provider, environment, Profile storage, or running Instance. The Harbor mutation receipt is returned through the Core Run and may report `completed`, `rejected`, or `repair_required`; a completed receipt confirms the metadata mutation only, not any downstream user goal. After a lost response, query the original Run/key; if reconciliation returns `reconciliation: completed`, that confirms the receipt was reconciled, while the original Run retains its historical `unknown_outcome` and is not thereby reclassified as successful. Query never posts the mutation again. Reusing a key with changed wire input is an idempotency conflict, even when the new values would normalize to the same display metadata.
 
+### #492 Profile identity and ownership projection
+
+`profile.read` 与 `profile.list` 在各自现有 Profile 可见范围内附带 `identity_ownership`，形状见 [Profile Identity Ownership Schema](../../packages/schemas/schemas/profile-identity-ownership.schema.json)。`current` 只引用 Harbor 单一活动 Runtime Session 的最新可信观察；观察须不超过 30 秒、仍属当前控制代，并与当前 Page/document binding 完全匹配。没有新鲜且匹配的观察时为 `unknown`。`history.bindings` 记录 owner 已持久化绑定及 `verified_at_binding` 时间，`history.declared` 单独记录旧 `site.account_ref` 声明；两者都不代替当前观察。`ownership` 只从至少一条 durable account binding 得出，使用 Harbor 既有 `hasManagedBindingConflict` 规则；无持久绑定时为 `unknown`。冲突摘要只返回 `unique`、`conflict` 或 `unknown`，不返回其他 Profile 的 ref、名称或数量。冲突只影响依赖账户身份的操作，公开 Profile 读取继续可用；读取不创建绑定、不增加 Grant dimension，`account.bind` 仍是 owner-only。
+
+Core 在映射前按已授权 Profile refs 过滤 Harbor records；profile.list 只投影当前 Grant 可见的行，profile.read 的 Profile ref 先由现有 Grant 检查。旧 Harbor 响应未附 identity projection 时 Core 返回 `current=unknown`、`ownership=unknown`，不把历史 binding 或声明推成当前身份。
+
 ### #563 site-task execution projection
 
 `webenvoy_skills.skill.inspect` 仍是 site SKILL task 的唯一 metadata entrypoint。它保持

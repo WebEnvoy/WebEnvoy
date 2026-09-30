@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/core/profile-identity-ownership.v1.schema.json",
+  "title": "WebEnvoy Agent Profile identity and ownership projection",
+  "description": "Bounded distinction between a current trusted identity observation, historical bindings, a legacy declaration, and durable ownership uniqueness.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "current", "history", "ownership"],
+  "properties": {
+    "schema_version": { "const": "webenvoy.profile-identity-ownership/v1" },
+    "current": { "$ref": "#/$defs/current" },
+    "history": { "$ref": "#/$defs/history" },
+    "ownership": {
+      "type": "object", "additionalProperties": false, "required": ["status"],
+      "properties": { "status": { "enum": ["unique", "conflict", "unknown"] } }
+    }
+  },
+  "$defs": {
+    "ref": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[A-Za-z0-9:_./-]+$" },
+    "current": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "observed_at", "account_system_ref", "account_ref"],
+      "properties": {
+        "status": { "enum": ["verified", "discovered", "conflict", "unknown"] },
+        "observed_at": { "oneOf": [{ "type": "null" }, { "type": "string", "format": "date-time" }] },
+        "account_system_ref": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/ref" }] },
+        "account_ref": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/ref" }] }
+      },
+      "oneOf": [
+        { "properties": { "status": { "const": "unknown" }, "account_system_ref": { "type": "null" }, "account_ref": { "type": "null" } } },
+        { "properties": { "status": { "enum": ["verified", "discovered", "conflict"] }, "observed_at": { "type": "string", "format": "date-time" }, "account_system_ref": { "$ref": "#/$defs/ref" }, "account_ref": { "$ref": "#/$defs/ref" } } }
+      ]
+    },
+    "binding": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "verification", "account_system_ref", "account_ref", "bound_at"],
+      "properties": {
+        "status": { "const": "bound" },
+        "verification": { "const": "verified_at_binding" },
+        "account_system_ref": { "$ref": "#/$defs/ref" },
+        "account_ref": { "$ref": "#/$defs/ref" },
+        "bound_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "declared": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "account_system_ref", "account_ref"],
+      "properties": {
+        "status": { "const": "declared" },
+        "account_system_ref": { "$ref": "#/$defs/ref" },
+        "account_ref": { "$ref": "#/$defs/ref" }
+      }
+    },
+    "history": {
+      "type": "object", "additionalProperties": false, "required": ["bindings", "declared"],
+      "properties": {
+        "bindings": { "type": "array", "maxItems": 1024, "items": { "$ref": "#/$defs/binding" } },
+        "declared": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/declared" }] }
+      }
+    }
+  },
+  "oneOf": [
+    { "properties": { "ownership": { "properties": { "status": { "const": "unknown" } } }, "history": { "properties": { "bindings": { "maxItems": 0 } } } }, "required": ["ownership", "history"] },
+    { "properties": { "ownership": { "properties": { "status": { "enum": ["unique", "conflict"] } } }, "history": { "properties": { "bindings": { "minItems": 1 } } } }, "required": ["ownership", "history"] }
+  ],
+  "x-webenvoy": {
+    "owner": "Harbor durable account binding owner; Core Agent profile projection",
+    "status": "accepted-v1",
+    "schema_version": "webenvoy.profile-identity-ownership/v1",
+    "compatibility_boundary": "Current identity is a fresh exact Harbor observation; history records binding-time verification and legacy declaration separately. Persistent ownership is unknown without a durable binding and never authorizes binding or account-dependent actions.",
+    "source_adrs": ["docs/adr/0012-runtime-capability-plane-and-plugin-first.md"],
+    "field_owners": { "current": "Harbor current Runtime Session observation", "history": "Harbor persisted account binding and legacy declaration", "ownership": "Harbor persisted account binding conflict predicate" }
+  }
+}
