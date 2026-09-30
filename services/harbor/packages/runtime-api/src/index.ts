@@ -577,6 +577,7 @@ export class HarborRuntime {
     });
     this.runtimeSessions = new RuntimeSessionStore(this.viewerControls, launcher, {
       resolve_proxy: ownerOptions.resolve_proxy,
+      profile_lifecycle_state_for_start: refs => this.identityEnvironments.lifecycleStateForStart(refs),
       on_session_closed: (runtimeSessionRef) => {
         this.detailReadTargets.clearSession(runtimeSessionRef);
         try {
@@ -1369,6 +1370,7 @@ export class HarborRuntime {
   }
 
   async openManagedIdentityEnvironmentSession(input: Omit<OpenIdentityEnvironmentSessionInput, "identity_environment"> & { identity_environment_ref: string; operation_scope?: "profile_management" }): Promise<RuntimeSessionFacts | RuntimeSessionUnavailable> {
+    if (this.identityEnvironments.lifecycleState(input.identity_environment_ref) === "archived") return profileArchivedUnavailable();
     if (input.operation_scope !== "profile_management" && this.requiresPersistedAuthenticationRecovery(input.identity_environment_ref, input)) return persistedAuthenticationUnavailable();
     const identity_environment = this.identityEnvironments.getFacts(input.identity_environment_ref);
     if (!identity_environment) {
@@ -1396,6 +1398,7 @@ export class HarborRuntime {
   }
 
   async openManagedDefaultSiteSession(input: Omit<OpenIdentityEnvironmentSessionInput, "identity_environment" | "url"> & { identity_environment_ref: string; operation_scope?: "profile_management" }): Promise<RuntimeSessionFacts | RuntimeSessionUnavailable> {
+    if (this.identityEnvironments.lifecycleState(input.identity_environment_ref) === "archived") return profileArchivedUnavailable();
     if (input.operation_scope !== "profile_management" && this.requiresPersistedAuthenticationRecovery(input.identity_environment_ref, input)) return persistedAuthenticationUnavailable();
     const identity_environment = this.identityEnvironments.getFacts(input.identity_environment_ref);
     if (!identity_environment) {
@@ -2264,6 +2267,12 @@ function profileScopeTransitionUnavailable(): RuntimeSessionUnavailable {
     retryable: true,
     current_error: { code: "profile_locked", message, retryable: true }
   };
+}
+
+function profileArchivedUnavailable(): RuntimeSessionUnavailable {
+  const message = "Archived Profiles cannot be started.";
+  return { status: "unavailable", failure_class: "profile_archived", message, retryable: false,
+    current_error: { code: "profile_archived", message, retryable: false } };
 }
 
 function persistedAuthenticationCleanupFailure(): RuntimeSessionUnavailable {

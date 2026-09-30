@@ -14,6 +14,7 @@
     "tags": { "type": "array", "maxItems": 16, "items": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001f\\u007f]*$", "description": "A Profile tag." }, "description": "Profile tags; an empty array clears all tags." },
     "origin": { "type": "string", "format": "webenvoy-public-origin", "maxLength": 512, "description": "The exact authorized target origin; task_scope.origins is only the allowed set and is not a substitute." },
     "template_ref": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001f\\u007f]*$", "description": "The owner-registered Profile creation template reference." },
+    "confirmation": { "type": "string", "enum": ["delete_local_data"], "description": "Explicit intent to delete this Profile's local data; it does not grant permission." },
     "url": { "type": "string", "format": "webenvoy-public-http-target", "minLength": 1, "maxLength": 512, "description": "An HTTP(S) target on the selected authorized origin." },
     "runtime_session_ref": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001f\\u007f]*$", "description": "The current Runtime Session reference; file.upload/file.download must use the original Instance." },
     "observation_ref": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001f\\u007f]*$", "description": "A fresh observation reference for the selected Page and target; required by file.upload/file.download." },
@@ -34,6 +35,9 @@
   },
   "operations": [
     { "id": "profile.create", "definition": "defined", "exposure": "exposed", "capability": "profile_management", "context": "unsupported", "allowed": ["template_ref", "provider_id"], "required": ["template_ref"], "summary": "Create a Profile from the owner-registered template." },
+    { "id": "profile.copy_environment", "definition": "defined", "exposure": "exposed", "capability": "profile_management", "context": "profile", "allowed": ["profile_ref", "template_ref"], "required": ["profile_ref", "template_ref"], "summary": "Copy only the fixed Provider, site, language, and timezone approved by this Grant's template from this exact active Profile; cookies, browser storage, login state, Account bindings, credentials, permissions, Runs, decisions, and history are excluded." },
+    { "id": "profile.archive", "definition": "defined", "exposure": "exposed", "capability": "profile_management", "context": "profile", "allowed": ["profile_ref"], "required": ["profile_ref"], "summary": "Archive this stopped Profile while retaining its data, bindings, and history; archived Profiles cannot be started." },
+    { "id": "profile.delete", "definition": "defined", "exposure": "exposed", "capability": "profile_management", "context": "profile", "allowed": ["profile_ref", "confirmation"], "required": ["profile_ref", "confirmation"], "summary": "Delete this stopped Profile's local data under its exact owner-granted scope and an ExecutionPolicy that allows destructive actions; confirmation expresses intent but does not grant permission." },
     { "id": "profile.list", "definition": "defined", "exposure": "exposed", "capability": "profile_management", "context": "profile", "allowed": ["profile_ref"], "required": [], "summary": "List visible Profiles with sanitized current identity, binding history and Harbor ownership conclusions; conflicting or unknown identity does not block the read." },
     { "id": "profile.read", "definition": "defined", "exposure": "exposed", "capability": "profile_management", "context": "profile", "allowed": ["profile_ref"], "required": ["profile_ref"], "summary": "Read one visible Profile with its sanitized current identity, binding history and Harbor ownership conclusion." },
     { "id": "profile.metadata.update", "definition": "defined", "exposure": "exposed", "capability": "profile_management", "context": "profile", "allowed": ["profile_ref", "name", "tags"], "required": ["profile_ref"], "conditions": [{ "kind": "conditional_fields", "when": { "field": "name", "absent": true }, "required": ["tags"], "summary": "Provide name, tags, or both." }, { "kind": "conditional_fields", "when": { "field": "tags", "absent": true }, "required": ["name"], "summary": "Provide name, tags, or both." }], "summary": "Update organization-facing Profile name and tags without changing site identity or browser storage." },
@@ -78,6 +82,20 @@
     "profile.create": {
       "template_ref": "template:example",
       "provider_id": "camoufox",
+      "illustrative_only": true
+    },
+    "profile.copy_environment": {
+      "profile_ref": "profile:source",
+      "template_ref": "template:example",
+      "illustrative_only": true
+    },
+    "profile.archive": {
+      "profile_ref": "profile:example",
+      "illustrative_only": true
+    },
+    "profile.delete": {
+      "profile_ref": "profile:example",
+      "confirmation": "delete_local_data",
       "illustrative_only": true
     },
     "profile.list": {

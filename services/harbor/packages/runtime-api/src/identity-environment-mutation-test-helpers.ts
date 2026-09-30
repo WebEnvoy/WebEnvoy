@@ -32,6 +32,8 @@ export function identityInput(identityRef: string, profileRef: string): ManagedL
     is_executable: (path) => path === chromePath,
     read_text: () => null,
     requested_provider_id: "chrome_official",
+    language: "en-US",
+    timezone: "UTC",
     identity_environment_ref: identityRef,
     execution_identity_ref: `${identityRef}:execution`,
     profile_ref: profileRef,
@@ -42,6 +44,8 @@ export function identityInput(identityRef: string, profileRef: string): ManagedL
 export function createMutationInput(): IdentityEnvironmentCreateInput {
   return {
     requested_provider_id: "chrome_official",
+    language: "en-US",
+    timezone: "UTC",
     site: { site_id: "xiaohongshu", origin: "https://www.xiaohongshu.com", display_name: "小红书" }
   };
 }
@@ -53,13 +57,21 @@ export function importMutationInput(profileStorageRef: string): IdentityEnvironm
 export function copyRequest(
   source: string,
   key: string,
-  operation: "copy_full" | "copy_environment" = "copy_environment"
+  operation: "copy_full" | "copy_environment" = "copy_environment",
+  expected_environment_template = {
+    provider_id: "chrome_official" as const,
+    site: { site_id: "xiaohongshu", origin: "https://www.xiaohongshu.com", display_name: "小红书" },
+    language: "en-US",
+    timezone: "UTC"
+  }
 ): IdentityEnvironmentMutationRequest {
-  return {
+  if (operation === "copy_environment") return {
     operation,
     idempotency_key: key,
-    identity_environment_ref: source
+    identity_environment_ref: source,
+    expected_environment_template
   };
+  return { operation, idempotency_key: key, identity_environment_ref: source };
 }
 
 export function copyTarget(request: IdentityEnvironmentMutationRequest): {

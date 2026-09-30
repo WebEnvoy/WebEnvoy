@@ -331,6 +331,7 @@ export class RuntimeSessionStore {
     private readonly launcher: LocalProviderLauncher,
     private readonly launchOptions: {
       resolve_proxy?: (proxy_ref: string) => string | null;
+      profile_lifecycle_state_for_start?: (refs: { identity_environment_ref?: string; profile_ref?: string; profile_storage_ref?: string }) => "active" | "archived" | null;
       on_session_closed?: (runtime_session_ref: string) => void;
     } = {}
   ) {}
@@ -350,6 +351,9 @@ export class RuntimeSessionStore {
       if (input.identity_environment_ref) this.openingIdentityEnvironmentRefs.add(input.identity_environment_ref);
       if (input.profile_storage_ref) this.openingProfileStorageRefs.add(input.profile_storage_ref);
       try {
+        if (this.launchOptions.profile_lifecycle_state_for_start?.(input) === "archived") {
+          return { status: "unavailable" as const, error: error("profile_archived", "Archived Profiles cannot be started.", false), facts: [] };
+        }
         if (input.profile_storage_ref) {
           try {
             profileOwnership = acquireProfileStorageOwnership([input.profile_storage_ref]);
@@ -360,6 +364,11 @@ export class RuntimeSessionStore {
             profileOwnership.release();
             profileOwnership = null;
             return { status: "unavailable" as const, error: error("profile_locked", "Profile storage is locked by an external browser.", true), facts: [] };
+          }
+          if (this.launchOptions.profile_lifecycle_state_for_start?.(input) === "archived") {
+            profileOwnership.release();
+            profileOwnership = null;
+            return { status: "unavailable" as const, error: error("profile_archived", "Archived Profiles cannot be started.", false), facts: [] };
           }
           try { assertNoUnfinishedProfileRecovery(input.profile_storage_ref, profile_ref); }
           catch {
@@ -656,6 +665,11 @@ export class RuntimeSessionStore {
     const identityEnvironment = isLocalIdentityEnvironmentFacts(input.identity_environment)
       ? input.identity_environment
       : createLocalIdentityEnvironmentFacts(input.identity_environment);
+    if (this.launchOptions.profile_lifecycle_state_for_start?.({
+      identity_environment_ref: identityEnvironment.identity_environment_ref,
+      profile_ref: identityEnvironment.profile_ref,
+      profile_storage_ref: identityEnvironment.browser_storage.profile_storage_ref
+    }) === "archived") return unavailableSession("profile_archived", error("profile_archived", "Archived Profiles cannot be started.", false));
     if (input.provider_id && input.provider_id !== identityEnvironment.provider_binding.selected_provider_id) {
       return unavailableSession("identity_environment_unavailable", error(
         "identity_environment_unavailable",

@@ -4,9 +4,9 @@ import type { ManagedScopeSemantics } from "./managed-scope-semantics.js";
 
 export const managedOperationCatalog = {
   schema_version: "webenvoy.harbor-operation-catalog.v0",
-  catalog_ref: "harbor://managed-operations", catalog_version: "9",
-  operations: [...["profile.list", "profile.read", "profile.create", "profile.metadata.update", "instance.start", "instance.stop", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "instance.navigate", "instance.read", "instance.handoff", "account.bind", "recovery.inspect", "recovery.request", "recovery.status", "page.list", "page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward"].map(operation_id => ({
-    operation_id, category: operation_id === "environment.update" || operation_id === "recovery.request" ? "prepare" : ["profile.create", "profile.metadata.update", "account.bind"].includes(operation_id) ? "commit" : ["page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward"].includes(operation_id) ? "prepare" : "read",
+  catalog_ref: "harbor://managed-operations", catalog_version: "10",
+  operations: [...["profile.list", "profile.read", "profile.create", "profile.copy_environment", "profile.archive", "profile.delete", "profile.metadata.update", "instance.start", "instance.stop", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "instance.navigate", "instance.read", "instance.handoff", "account.bind", "recovery.inspect", "recovery.request", "recovery.status", "page.list", "page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward"].map(operation_id => ({
+    operation_id, category: operation_id === "environment.update" || operation_id === "recovery.request" ? "prepare" : operation_id === "profile.delete" ? "destructive" : ["profile.create", "profile.copy_environment", "profile.archive", "profile.metadata.update", "account.bind"].includes(operation_id) ? "commit" : ["page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward"].includes(operation_id) ? "prepare" : "read",
     target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: ["harbor://managed-profile"]
   })),
   ...["provider.preference.read", "provider.preference.set", "provider.preference.clear"].map(operation_id => ({
@@ -121,6 +121,7 @@ export function hasManagedBindingConflict(records: Iterable<import("./identity-e
   if (bindings.some((binding, index) => bindings.slice(0, index).some(other => binding.account_system_ref === other.account_system_ref && binding.account_ref !== other.account_ref))) return true;
   for (const record of records) {
     if (record.identity_environment.identity_environment_ref === candidate.identity_environment.identity_environment_ref) continue;
+    if ((record.lifecycle_state ?? "active") === "archived") continue;
     if (effectiveManagedBindings(record).some(other => bindings.some(binding => binding.account_system_ref === other.account_system_ref && binding.account_ref === other.account_ref))) return true;
   }
   return false;

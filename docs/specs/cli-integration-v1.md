@@ -403,7 +403,7 @@ agent operation、已安装 Plugin webenvoy_operation 和直接 API consumer 使
 
 | 类型 | operation |
 | --- | --- |
-| Profile | profile.create、profile.list、profile.read |
+| Profile | profile.create、profile.copy_environment、profile.archive、profile.delete、profile.list、profile.read、profile.metadata.update |
 | Provider preference | provider.preference.read、provider.preference.set、provider.preference.clear |
 | Instance／environment | instance.start、instance.observe、instance.diagnostics、environment.read、environment.update、instance.navigate、instance.read、instance.snapshot、instance.click、instance.input、instance.press、instance.scroll、instance.wait、instance.handoff、instance.stop |
 | Page | page.list、page.open、page.activate、page.close、page.navigate、page.reload、page.back、page.forward |

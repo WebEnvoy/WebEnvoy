@@ -37,7 +37,8 @@ import {
 } from "./identity-environment-store.js";
 import { acquireFileOwnership } from "./profile-storage.js";
 
-export const HARBOR_LOCAL_IDENTITY_ENVIRONMENT_STORE_SCHEMA = "harbor-local-identity-environment-store/v0";
+export const HARBOR_LOCAL_IDENTITY_ENVIRONMENT_STORE_SCHEMA = "harbor-local-identity-environment-store/v1";
+const LEGACY_LOCAL_IDENTITY_ENVIRONMENT_STORE_SCHEMA = "harbor-local-identity-environment-store/v0";
 
 export type ManagedSiteId = "xiaohongshu" | "boss" | string;
 export type LocalIdentityEnvironmentOperation = "created" | "imported" | "updated";
@@ -69,7 +70,8 @@ export interface LocalIdentityEnvironmentStateUpdate {
 }
 
 export interface StoredLocalIdentityEnvironmentRecord {
-  schema_version: typeof HARBOR_LOCAL_IDENTITY_ENVIRONMENT_STORE_SCHEMA;
+  schema_version: typeof HARBOR_LOCAL_IDENTITY_ENVIRONMENT_STORE_SCHEMA | typeof LEGACY_LOCAL_IDENTITY_ENVIRONMENT_STORE_SCHEMA;
+  lifecycle_state?: "active" | "archived";
   operation: LocalIdentityEnvironmentOperation;
   created_at: string;
   updated_at: string;
@@ -98,6 +100,7 @@ export interface StoredLocalIdentityEnvironmentRecord {
 export interface LocalIdentityEnvironmentPublicRecord {
   account_bindings: ManagedAccountBinding[];
   schema_version: typeof HARBOR_LOCAL_IDENTITY_ENVIRONMENT_STORE_SCHEMA;
+  lifecycle_state: "active" | "archived";
   identity_environment_ref: string;
   created_at: string;
   updated_at: string;
@@ -312,6 +315,22 @@ export class LocalIdentityEnvironmentManager {
     this.refresh();
     const record = this.records.get(identity_environment_ref);
     return record ? publicRecord(record) : null;
+  }
+
+  lifecycleState(identity_environment_ref: string): "active" | "archived" | null {
+    this.refresh();
+    const record = this.records.get(identity_environment_ref);
+    return record ? record.lifecycle_state ?? "active" : null;
+  }
+
+  lifecycleStateForStart(refs: { identity_environment_ref?: string; profile_ref?: string; profile_storage_ref?: string }): "active" | "archived" | null {
+    this.refresh();
+    const matches = Array.from(this.records.values()).filter(record =>
+      refs.identity_environment_ref === record.identity_environment.identity_environment_ref ||
+      refs.profile_ref === record.identity_environment.profile_ref ||
+      refs.profile_storage_ref === record.local_material_refs.profile_storage_ref);
+    if (!matches.length) return null;
+    return matches.some(record => (record.lifecycle_state ?? "active") === "archived") ? "archived" : "active";
   }
 
   getMutationResult(idempotency_key: string): IdentityEnvironmentMutationResult | null {
@@ -542,7 +561,7 @@ export class LocalIdentityEnvironmentManager {
     const receipts = new Map<string, StoredIdentityEnvironmentMutationReceipt>();
     const repairs = new Map<string, StoredIdentityEnvironmentRepair>();
     for (const record of parsed.records ?? []) {
-      if (record.schema_version === HARBOR_LOCAL_IDENTITY_ENVIRONMENT_STORE_SCHEMA && record.identity_environment.schema_version === HARBOR_LOCAL_IDENTITY_ENVIRONMENT_SCHEMA) {
+      if ((record.schema_version === HARBOR_LOCAL_IDENTITY_ENVIRONMENT_STORE_SCHEMA || record.schema_version === LEGACY_LOCAL_IDENTITY_ENVIRONMENT_STORE_SCHEMA) && record.identity_environment.schema_version === HARBOR_LOCAL_IDENTITY_ENVIRONMENT_SCHEMA) {
         const identityEnvironment = snapshot(record.identity_environment);
         const persistedSessionRef = record.user_confirmed_session_ref ?? null;
         const authenticationProvenance = storedAuthenticationProvenance(record);
@@ -561,6 +580,8 @@ export class LocalIdentityEnvironmentManager {
         });
         records.set(identityEnvironment.identity_environment_ref, {
           ...record,
+          schema_version: HARBOR_LOCAL_IDENTITY_ENVIRONMENT_STORE_SCHEMA,
+          lifecycle_state: record.lifecycle_state ?? "active",
           identity_environment: identityEnvironment,
           consistency,
           authentication_provenance: authenticationProvenance,
@@ -640,6 +661,7 @@ function publicRecord(record: StoredLocalIdentityEnvironmentRecord): LocalIdenti
   const facts = record.identity_environment;
   return {
     schema_version: HARBOR_LOCAL_IDENTITY_ENVIRONMENT_STORE_SCHEMA,
+    lifecycle_state: record.lifecycle_state ?? "active",
     account_bindings: snapshot(record.account_bindings ?? []),
     identity_environment_ref: facts.identity_environment_ref,
     created_at: record.created_at,

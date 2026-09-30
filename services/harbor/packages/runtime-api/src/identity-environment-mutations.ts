@@ -56,7 +56,8 @@ export function createStoredIdentityRecord(
   assertNoSensitiveMaterialInput(input);
   const facts = createLocalIdentityEnvironmentFacts(input);
   return {
-    schema_version: "harbor-local-identity-environment-store/v0",
+    schema_version: "harbor-local-identity-environment-store/v1",
+    lifecycle_state: "active",
     operation,
     created_at,
     updated_at: new Date().toISOString(),
@@ -137,6 +138,8 @@ export function executeIdentityEnvironmentMutation(
       case "copy_full":
       case "copy_environment":
         return copy(materializedRequest, hash, store, options);
+      case "archive":
+        return archive(materializedRequest, hash, store);
       case "remove":
         return remove(materializedRequest, hash, store);
       case "delete":
@@ -303,6 +306,19 @@ function copy(
 ): IdentityEnvironmentMutationResult {
   const source = store.records.get(request.identity_environment_ref);
   if (!source) return rejected(request.operation, request.target.identity_environment_ref, "identity_environment_missing", true, ["refresh_identity_list"]);
+  if ((source.lifecycle_state ?? "active") === "archived") return rejected(request.operation, request.target.identity_environment_ref, "profile_archived", false, []);
+  if (source.repair_state === "repair_required" || store.repairs.has(request.identity_environment_ref)) return rejected(request.operation, request.target.identity_environment_ref, "repair_required", true, ["query_original_mutation"]);
+  if (request.operation === "copy_environment") {
+    const expected = request.expected_environment_template;
+    if (expected) {
+      const facts = source.identity_environment;
+      if (facts.provider_binding.selected_provider_id !== expected.provider_id || facts.site_binding.site_id !== expected.site.site_id ||
+          facts.site_binding.origin !== expected.site.origin || facts.site_binding.display_name !== expected.site.display_name ||
+          facts.environment.language !== expected.language || facts.environment.timezone !== expected.timezone) {
+        return rejected(request.operation, request.target.identity_environment_ref, "copy_template_mismatch", false, []);
+      }
+    }
+  }
   const full = request.operation === "copy_full";
   const material = stageCopiedLocalMaterial(source, request.target, full, options);
   if ("failure" in material) return rejected(request.operation, request.target.identity_environment_ref, material.failure, false, ["configure_local_material_adapter", "retry"]);
@@ -320,6 +336,30 @@ function copy(
     return profileFailure(request.operation, request.target.identity_environment_ref, error);
   }
   return commitProfileCopy(request, hash, store, record, combineTransactions(transaction, material.transaction));
+}
+function archive(
+  request: Extract<IdentityEnvironmentMutationRequest, { operation: "archive" }>,
+  hash: string,
+  store: IdentityEnvironmentMutationStore
+): IdentityEnvironmentMutationResult {
+  const current = store.records.get(request.identity_environment_ref);
+  if (!current) return rejected(request.operation, request.identity_environment_ref, "identity_environment_missing", true, ["refresh_identity_list"]);
+  if (current.repair_state === "repair_required" || store.repairs.has(request.identity_environment_ref)) {
+    return rejected(request.operation, request.identity_environment_ref, "repair_required", true, ["query_original_mutation"]);
+  }
+  if ((current.lifecycle_state ?? "active") === "archived") {
+    return commitSimple(store, request.idempotency_key, hash,
+      completed(request.operation, store.public_record(current), request.identity_environment_ref, "unchanged", "unchanged", "unchanged"),
+      new Map(store.records));
+  }
+  const record: StoredLocalIdentityEnvironmentRecord = {
+    ...current,
+    lifecycle_state: "archived",
+    updated_at: new Date().toISOString()
+  };
+  return commitSimple(store, request.idempotency_key, hash,
+    completed(request.operation, store.public_record(record), request.identity_environment_ref, "updated", "unchanged", "unchanged"),
+    new Map(store.records).set(request.identity_environment_ref, record));
 }
 function remove(
   request: Extract<IdentityEnvironmentMutationRequest, { operation: "remove" }>,
@@ -342,6 +382,7 @@ function deleteIdentity(
   if (request.confirmation !== "delete_local_data") return rejected("delete", request.identity_environment_ref, "invalid_request", false, []);
   const current = store.records.get(request.identity_environment_ref);
   if (!current) return rejected("delete", request.identity_environment_ref, "identity_environment_missing", true, ["refresh_identity_list"]);
+  if (current.repair_state === "repair_required" || store.repairs.has(request.identity_environment_ref)) return rejected("delete", request.identity_environment_ref, "repair_required", true, ["query_original_mutation"]);
   if (hasLocalMaterialRefs(current.local_material_refs) && !options.delete_local_material) {
     return rejected("delete", request.identity_environment_ref, "local_material_cleanup_unavailable", false, ["configure_local_material_adapter", "retry"]);
   }
@@ -373,9 +414,22 @@ function copiedRecord(
     facts.browser_storage.local_storage_state = "cleared";
     facts.browser_storage.indexeddb_state = "cleared";
     facts.credential_recovery.account_identifier = null;
+    facts.credential_recovery.login_method = "unknown";
     facts.credential_recovery.credential_ref = null;
     facts.credential_recovery.keychain_ref = null;
     facts.credential_recovery.local_secret_ref = null;
+    facts.credential_recovery.recovery_actions = ["manual_login"];
+    facts.environment.proxy = { state: "missing", proxy_ref: null, label: null };
+    facts.environment.geoip_mode = null;
+    facts.environment.region = null;
+    facts.environment.viewport = null;
+    facts.environment.user_agent_summary = null;
+    facts.environment.hardware_concurrency = null;
+    facts.environment.device_memory_gb = null;
+    facts.environment.gpu_profile = null;
+    facts.environment.interaction_preset = null;
+    facts.environment.fingerprint_strategy = null;
+    facts.environment.fingerprint_summary = "not_configured";
   } else {
     facts.login_state.reason = "full_copy_unverified";
     facts.credential_recovery.credential_ref = null;
@@ -385,6 +439,8 @@ function copiedRecord(
   const now = new Date().toISOString();
   return {
     ...source,
+    schema_version: "harbor-local-identity-environment-store/v1",
+    lifecycle_state: "active",
     name: target.profile_ref,
     tags: [],
     account_bindings: full ? source.account_bindings ?? [] : [],
@@ -402,7 +458,7 @@ function copiedRecord(
       keychain_ref: null,
       local_secret_ref: null
     },
-    imported_from: source.identity_environment.identity_environment_ref,
+    imported_from: full ? source.identity_environment.identity_environment_ref : null,
     authentication_provenance: "unknown",
     user_confirmed_session_ref: null,
     repair_state: "clean",

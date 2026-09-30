@@ -149,9 +149,11 @@ export function redactPublicManualAuthenticationResponse(text: string): Record<s
     const identityEnvironmentRef = publicReference(record?.identity_environment_ref, "identity_environment_ref");
     const executionIdentityRef = publicReference(refs?.execution_identity_ref, "execution_identity_ref");
     const profileRef = publicReference(refs?.profile_ref, "profile_ref");
+    const storeSchemaVersion = record?.schema_version;
     if (
       !record ||
-      record.schema_version !== "harbor-local-identity-environment-store/v0" ||
+      (storeSchemaVersion !== "harbor-local-identity-environment-store/v0" &&
+        storeSchemaVersion !== "harbor-local-identity-environment-store/v1") ||
       !status ||
       !siteId ||
       !identityEnvironmentRef ||
@@ -168,7 +170,7 @@ export function redactPublicManualAuthenticationResponse(text: string): Record<s
     }
 
     return {
-      schema_version: "harbor-local-identity-environment-store/v0",
+      schema_version: storeSchemaVersion,
       identity_environment_ref: identityEnvironmentRef,
       site: { site_id: siteId, origin: publicSiteOrigins[siteId] },
       refs: { execution_identity_ref: executionIdentityRef, profile_ref: profileRef },
