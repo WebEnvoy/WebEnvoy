@@ -44,7 +44,7 @@ const isInteraction = (operation: string) => (managedInteractionOperations as re
 const isPageMutation = (operation: string) => (managedPageOperations as readonly string[]).includes(operation) && operation !== "page.list";
 const isObservation = (operation: string) => ["instance.observe", "instance.read", "instance.snapshot", "instance.wait"].includes(operation);
 const isInput = (operation: string) => ["instance.click", "instance.input", "instance.press", "instance.scroll"].includes(operation);
-const isEnvironment = (operation: string) => ["environment.read", "environment.update"].includes(operation);
+const isEnvironment = (operation: string) => ["environment.read", "environment.update", "environment.proxy.update"].includes(operation);
 const isRecovery = (operation: string) => ["recovery.inspect", "recovery.request", "recovery.status"].includes(operation);
 const isProviderPreference = (operation: string) => ["provider.preference.read", "provider.preference.set", "provider.preference.clear"].includes(operation);
 const isBusinessTargetOperation = (operation: string) => (managedBusinessTargetOperations as readonly string[]).includes(operation);
@@ -55,7 +55,7 @@ function discoveryExecutionChecks(operation: string): string[] {
   if (isBusinessTargetOperation(operation)) return checks;
   if (["instance.observe", "instance.read", "instance.snapshot", "instance.click", "instance.input", "instance.press", "instance.scroll", "instance.wait", "instance.diagnostics", "page.list", "page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward", "file.upload", "file.download"].includes(operation)) checks.push("verify_page_and_target");
   if (["file.upload", "file.download"].includes(operation)) checks.push("verify_file_material");
-  if (["instance.click", "instance.input", "instance.press", "instance.scroll", "instance.wait", "page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward", "file.upload", "file.download", "instance.stop", "instance.handoff", "environment.update", "provider.preference.set", "provider.preference.clear"].includes(operation)) checks.push("acquire_control_if_required");
+  if (["instance.click", "instance.input", "instance.press", "instance.scroll", "instance.wait", "page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward", "file.upload", "file.download", "instance.stop", "instance.handoff", "environment.update", "environment.proxy.update", "provider.preference.set", "provider.preference.clear"].includes(operation)) checks.push("acquire_control_if_required");
   if (!["profile.list", "profile.read", "profile.metadata.update", "profile.migrate.request", "provider.preference.read", "provider.preference.set", "provider.preference.clear"].includes(operation)) checks.push("check_provider_runtime");
   return [...new Set(checks)];
 }
@@ -73,7 +73,7 @@ class ScopeBoundaryFailure extends ManagedAccessError {
 }
 class CreationReceiptFailure extends ManagedAccessError {}
 const harborIdentityEnvironmentMutationSchema = "harbor-identity-environment-mutation/v1";
-const profileMutationOperations = new Set(["create", "copy_environment", "archive", "delete", "profile.metadata.update"]);
+const profileMutationOperations = new Set(["create", "copy_environment", "archive", "delete", "edit", "profile.metadata.update"]);
 function profileMutationReceipt(value: unknown, operation: string): ObjectValue {
   const invalid = () => { throw new CreationReceiptFailure("managed_browser_profile_mutation_unknown"); };
   if (!value || typeof value !== "object" || Array.isArray(value)) return invalid();
@@ -425,10 +425,12 @@ function parseDescribe(value: unknown): DescribeInput {
       const allowFileRefs = definition?.file_scope !== undefined;
       const allowProfileSources = input.operation === "profile.migrate.request";
       const allowAccountBindingScopes = definition?.id === "account.bind";
-      if (Object.keys(scope).some(key => !["operations", "profile_refs", "origins", ...(allowFileRefs ? ["file_refs"] : []), ...(allowAccountBindingScopes ? ["account_binding_scopes"] : []), ...(allowProfileSources ? ["profile_source_refs"] : [])].includes(key)) ||
+      const allowProxyRefs = input.operation === "environment.proxy.update";
+      if (Object.keys(scope).some(key => !["operations", "profile_refs", "origins", ...(allowFileRefs ? ["file_refs"] : []), ...(allowAccountBindingScopes ? ["account_binding_scopes"] : []), ...(allowProfileSources ? ["profile_source_refs"] : []), ...(allowProxyRefs ? ["proxy_refs", "allow_proxy_clear"] : [])].includes(key)) ||
         !describeStrings(scope.operations) || !describeStrings(scope.profile_refs) || !describeStrings(scope.origins) || scope.origins.some(origin => !publicOrigin(origin)) ||
         allowFileRefs && scope.file_refs !== undefined && !describeStrings(scope.file_refs) ||
         allowAccountBindingScopes && scope.account_binding_scopes === undefined ||
+        allowProxyRefs && (!describeStrings(scope.proxy_refs) || scope.proxy_refs.length > 1 || typeof scope.allow_proxy_clear !== "boolean") ||
         allowProfileSources && (!Array.isArray(scope.profile_source_refs) || scope.profile_source_refs.length !== 0)) return fail("managed_browser_invalid_input");
       const fileRefs = scope.file_refs as string[] | undefined;
       context = { grant_id: text(raw.grant_id), profile_ref: text(raw.profile_ref), task_scope: {
@@ -437,6 +439,7 @@ function parseDescribe(value: unknown): DescribeInput {
         origins: scope.origins as string[],
         ...(fileRefs === undefined ? {} : { file_refs: fileRefs }),
         ...(allowProfileSources ? { profile_source_refs: [] } : {}),
+        ...(allowProxyRefs ? { proxy_refs: scope.proxy_refs as string[], allow_proxy_clear: scope.allow_proxy_clear as boolean } : {}),
         ...(allowAccountBindingScopes ? { account_binding_scopes: describeAccountBindingScopes(scope.account_binding_scopes) } : {})
       } };
     }
@@ -1094,6 +1097,18 @@ export function createManagedBrowserService(options: {
     if (input.operation === "environment.update") return await runtimeHarbor(`/runtime/identity-environments/${identity}/environment`, {
       idempotency_key: runId, configuration: input.configuration!
     });
+    if (input.operation === "environment.proxy.update") {
+      const receipt = await runtimeHarbor("/runtime/identity-environment-mutations", {
+        operation: "edit", idempotency_key: runId, identity_environment_ref: identityEnvironmentRef, configuration: { proxy_ref: input.proxy_ref! }
+      });
+      if (receipt.status === "rejected") {
+        const failure = receipt.failure && typeof receipt.failure === "object" ? object(receipt.failure) : {};
+        return fail(typeof failure.code === "string" ? failure.code : "managed_browser_runtime_refused");
+      }
+      if (receipt.status !== "completed" || receipt.operation !== "edit" || receipt.identity_environment_ref !== identityEnvironmentRef) throw new CreationReceiptFailure("managed_browser_environment_mutation_unknown");
+      const environment = await runtimeHarbor(`/runtime/identity-environments/${identity}/environment`);
+      return { receipt, environment, authorization_decision_ref: access.decision_ref };
+    }
     const active = await runtimeHarbor(`/runtime/identity-environments/${identity}/session`);
     const activeSession = active.runtime_session === null ? undefined : object(active.runtime_session);
     let session = activeSession;
@@ -1751,7 +1766,7 @@ export function createManagedBrowserService(options: {
             ...(input.file_ref === undefined ? {} : { file_ref: input.file_ref })
           } : {}) };
         await store.createRunRecord({ run_id: runId, task_intent_ref: `managed-intent:${runId}`, capability_ref: "harbor:managed-browser", status: "admitted",
-          admission: { decision: "accepted", action_risk: input.operation === "profile.delete" ? "destructive" : (["profile.create", "profile.import", "profile.copy_environment", "profile.archive", "profile.metadata.update", "provider.preference.set", "provider.preference.clear", "account.bind", "environment.update", "business_target.create", "business_target.metadata.update", "business_target.disable"].includes(input.operation) || isInput(input.operation) || isPageMutation(input.operation) || managedFileOperations.includes(input.operation as typeof managedFileOperations[number])) ? "write" : "read" }, public_result_summary: summary });
+          admission: { decision: "accepted", action_risk: input.operation === "profile.delete" ? "destructive" : (["profile.create", "profile.import", "profile.copy_environment", "profile.archive", "profile.metadata.update", "provider.preference.set", "provider.preference.clear", "account.bind", "environment.update", "environment.proxy.update", "business_target.create", "business_target.metadata.update", "business_target.disable"].includes(input.operation) || isInput(input.operation) || isPageMutation(input.operation) || managedFileOperations.includes(input.operation as typeof managedFileOperations[number])) ? "write" : "read" }, public_result_summary: summary });
         await store.updateRunRecord(runId, { status: "running" });
         try {
           const result = await execute(credentialHash, input, runId);
@@ -1880,7 +1895,7 @@ export function createManagedBrowserService(options: {
           return response((await store.getRunRecord(runId))!);
         });
       }
-      if (["running", "admitted", "unknown_outcome"].includes(run.status) && run.public_result_summary?.operation === "environment.update" && !run.public_result_summary?.reconciliation) {
+      if (["running", "admitted", "unknown_outcome"].includes(run.status) && ["environment.update", "environment.proxy.update"].includes(String(run.public_result_summary?.operation)) && !run.public_result_summary?.reconciliation) {
         await mkdir(directory, { recursive: true, mode: 0o700 });
         const profileRef = typeof run.public_result_summary?.profile_ref === "string" ? run.public_result_summary.profile_ref : runId;
         return withFileOwnershipLock(join(directory, `${digest(text(profileRef))}.lock`), 5000, async () => {

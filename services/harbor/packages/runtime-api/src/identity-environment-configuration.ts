@@ -98,6 +98,7 @@ export function validateIdentityEnvironmentConfiguration(
   if (proxy.proxy_ref) {
     const validation = options.validate_proxy?.(proxy.proxy_ref);
     if (!validation) return "proxy_validation_unavailable";
+    if (validation === "unavailable") return "proxy_reference_unavailable";
     if (validation === "incompatible") return "proxy_policy_incompatible";
     if (validation === "unreachable") return "proxy_unreachable";
     const resolved = resolveProxyServer(proxy.proxy_ref, options.resolve_proxy);
@@ -157,12 +158,12 @@ function resolveProxyServer(
   }
 }
 
-function validProxyServer(value: string): boolean {
+export function validProxyServer(value: string): boolean {
   if (!value.trim() || value.length > 2048 || /[\r\n\0]/.test(value)) return false;
   try {
     const parsed = new URL(value);
     return ["http:", "https:", "socks4:", "socks5:"].includes(parsed.protocol) &&
-      Boolean(parsed.hostname) && !parsed.username && !parsed.password && parsed.pathname === "/" && !parsed.search && !parsed.hash;
+      Boolean(parsed.hostname) && !parsed.username && !parsed.password && (parsed.pathname === "" || parsed.pathname === "/") && !parsed.search && !parsed.hash;
   } catch {
     return false;
   }

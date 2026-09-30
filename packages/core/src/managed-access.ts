@@ -10,7 +10,7 @@ export const managedSkillOperations = ["skill.list", "skill.inspect", "skill.ins
 export const managedTaskOperations = ["task.submit", "task.query", "task.stop"] as const;
 export const managedFileOperations = ["file.upload", "file.download"] as const;
 export const managedBusinessTargetOperations = ["business_target.create", "business_target.list", "business_target.read", "business_target.metadata.update", "business_target.disable"] as const;
-export const managedOperations = ["profile.list", "profile.read", "profile.create", "profile.import", "profile.migrate.request", "profile.copy_environment", "profile.archive", "profile.delete", "profile.metadata.update", "provider.preference.read", "provider.preference.set", "provider.preference.clear", "account_system.import_template", "instance.start", "instance.stop", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "instance.navigate", "instance.read", "instance.handoff", "account.bind", "recovery.inspect", "recovery.request", "recovery.status", ...managedPageOperations, ...managedInteractionOperations, ...managedFileOperations, ...managedSkillOperations, ...managedTaskOperations, ...managedBusinessTargetOperations] as const;
+export const managedOperations = ["profile.list", "profile.read", "profile.create", "profile.import", "profile.migrate.request", "profile.copy_environment", "profile.archive", "profile.delete", "profile.metadata.update", "provider.preference.read", "provider.preference.set", "provider.preference.clear", "account_system.import_template", "instance.start", "instance.stop", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "environment.proxy.update", "instance.navigate", "instance.read", "instance.handoff", "account.bind", "recovery.inspect", "recovery.request", "recovery.status", ...managedPageOperations, ...managedInteractionOperations, ...managedFileOperations, ...managedSkillOperations, ...managedTaskOperations, ...managedBusinessTargetOperations] as const;
 export type ManagedOperation = typeof managedOperations[number];
 export type ManagedSkillOperation = typeof managedSkillOperations[number];
 export type ManagedTaskOperation = typeof managedTaskOperations[number];
@@ -20,7 +20,7 @@ export type ManagedScopeSemantics = typeof managedScopeSemantics[number];
 export const managedScopeConfirmationSchemaVersion = "webenvoy.agent-operations-v2-confirmation.v1" as const;
 export type ManagedPrincipal = { principal_id: string; display_name: string; revoked_at: string | null };
 export type ManagedConnection = { connection_id: string; principal_id: string; connected_at: string; revoked_at: string | null };
-export type ManagedProfilePolicy = { profile_ref: string; allowed_operations: ManagedOperation[]; allowed_origins: string[]; controlled_interaction_origins?: string[]; scope_semantics?: ManagedScopeSemantics };
+export type ManagedProfilePolicy = { profile_ref: string; allowed_operations: ManagedOperation[]; allowed_origins: string[]; controlled_interaction_origins?: string[]; proxy_refs?: string[]; allow_proxy_clear?: boolean; scope_semantics?: ManagedScopeSemantics };
 export type ManagedSkillScope = { skill_refs: string[]; source_refs: string[] };
 export type ManagedAccountSystemScope = { template_refs: string[] };
 export type ManagedAccountBindingScope = { profile_ref: string; account_system_ref: string; account_ref: string };
@@ -52,13 +52,15 @@ export type ManagedGrant = {
   business_target_account_scopes?: ManagedBusinessTargetAccountScope[];
   account_system_scope?: ManagedAccountSystemScope;
   account_binding_scopes?: ManagedAccountBindingScope[];
+  proxy_refs?: string[];
+  allow_proxy_clear?: boolean;
   scope_semantics?: ManagedScopeSemantics;
 };
-export type ManagedTaskScope = { operations: ManagedOperation[]; profile_refs: string[]; origins: string[]; file_refs?: string[]; skill_refs?: string[]; source_refs?: string[]; profile_source_refs?: string[]; template_refs?: string[]; account_binding_scopes?: ManagedAccountBindingScope[] };
+export type ManagedTaskScope = { operations: ManagedOperation[]; profile_refs: string[]; origins: string[]; file_refs?: string[]; skill_refs?: string[]; source_refs?: string[]; profile_source_refs?: string[]; template_refs?: string[]; account_binding_scopes?: ManagedAccountBindingScope[]; proxy_refs?: string[]; allow_proxy_clear?: boolean };
 export type ManagedAccessRequest = {
   connection_id: string; grant_id: string; operation: ManagedOperation;
   profile_ref?: string; origin?: string; template_ref?: string; target_provider_id?: string; profile_source_ref?: string; confirmation?: "delete_local_data"; skill_ref?: string; source_ref?: string; revision_ref?: string; file_refs?: string[];
-  account_system_ref?: string; account_ref?: string; business_target_ref?: string; task_scope: ManagedTaskScope;
+  account_system_ref?: string; account_ref?: string; business_target_ref?: string; proxy_ref?: string | null; task_scope: ManagedTaskScope;
   created_profile_ref?: string; creation_reservation_ref?: string;
 };
 export type ManagedAccess = {
@@ -68,7 +70,7 @@ export type ManagedAccess = {
 export type ManagedScopeTransitionResult = { scope_semantics: "agent_operations_v2"; source_grant_id: string; confirmation_ref: string; grant: ManagedGrant; profile_policy: ManagedProfilePolicy };
 type StoredPrincipal = ManagedPrincipal & { credential_hash: string };
 type State = {
-  schema_version: "webenvoy.managed-access.v0" | "webenvoy.managed-access.v1" | "webenvoy.managed-access.v2";
+  schema_version: "webenvoy.managed-access.v0" | "webenvoy.managed-access.v1" | "webenvoy.managed-access.v2" | "webenvoy.managed-access.v3";
   principals: StoredPrincipal[]; connections: ManagedConnection[]; grants: ManagedGrant[];
   profile_policies: ManagedProfilePolicy[];
   receipts: { key_hash: string; request_hash: string; result: unknown }[];
@@ -121,11 +123,18 @@ function credential(value: unknown): string {
   return value;
 }
 function ceiling(value: unknown): ManagedCreationTemplate["permission_ceiling"] {
-  const obj = object(value, ["allowed_operations", "allowed_origins"], ["controlled_interaction_origins", "scope_semantics"]);
+  const obj = object(value, ["allowed_operations", "allowed_origins"], ["controlled_interaction_origins", "proxy_refs", "allow_proxy_clear", "scope_semantics"]);
   const allowed_origins = strings(obj.allowed_origins, origin);
   const controlled = obj.controlled_interaction_origins === undefined ? undefined : strings(obj.controlled_interaction_origins, origin);
   if (controlled?.some(item => !allowed_origins.includes(item))) return fail("managed_access_invalid_input");
-  return { allowed_operations: operations(obj.allowed_operations), allowed_origins, ...(controlled === undefined ? {} : { controlled_interaction_origins: controlled }), ...(obj.scope_semantics === undefined ? {} : { scope_semantics: scopeSemantics(obj.scope_semantics) }) };
+  if (obj.allow_proxy_clear !== undefined && typeof obj.allow_proxy_clear !== "boolean") return fail("managed_access_invalid_input");
+  const scopedProxyRefs = obj.proxy_refs === undefined ? undefined : proxyRefs(obj.proxy_refs);
+  const allowProxyClear = obj.allow_proxy_clear as boolean | undefined;
+  const parsedOperations = operations(obj.allowed_operations);
+  if (!parsedOperations.includes("environment.proxy.update") && ((scopedProxyRefs?.length ?? 0) > 0 || allowProxyClear === true)) return fail("managed_access_invalid_input");
+  return { allowed_operations: parsedOperations, allowed_origins, ...(controlled === undefined ? {} : { controlled_interaction_origins: controlled }),
+    ...(scopedProxyRefs === undefined ? {} : { proxy_refs: scopedProxyRefs }), ...(allowProxyClear === undefined ? {} : { allow_proxy_clear: allowProxyClear }),
+    ...(obj.scope_semantics === undefined ? {} : { scope_semantics: scopeSemantics(obj.scope_semantics) }) };
 }
 function skillScope(value: unknown): ManagedSkillScope {
   const obj = object(value, ["skill_refs", "source_refs"]);
@@ -154,6 +163,12 @@ function accountBindingScopes(value: unknown): ManagedAccountBindingScope[] {
 function profileSourceRefs(value: unknown): string[] {
   const refs = strings(value);
   if (refs.length > 64 || refs.some(ref => !/^profile-source:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(ref))) return fail("managed_access_invalid_input");
+  return refs;
+}
+const managedProxyRef = /^proxy-ref:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+function proxyRefs(value: unknown): string[] {
+  const refs = strings(value);
+  if (refs.length > 128 || refs.some(ref => !managedProxyRef.test(ref))) return fail("managed_access_invalid_input");
   return refs;
 }
 const managedFileMimeTypes = new Set(["image/png", "image/jpeg", "application/pdf", "text/plain", "text/csv"]);
@@ -221,7 +236,7 @@ function template(value: unknown): ManagedCreationTemplate | null {
     language: string(obj.language), timezone: string(obj.timezone), permission_ceiling: ceiling(obj.permission_ceiling) };
 }
 function policy(value: unknown): ManagedProfilePolicy {
-  const obj = object(value, ["profile_ref", "allowed_operations", "allowed_origins"], ["controlled_interaction_origins", "scope_semantics"]);
+  const obj = object(value, ["profile_ref", "allowed_operations", "allowed_origins"], ["controlled_interaction_origins", "proxy_refs", "allow_proxy_clear", "scope_semantics"]);
   const { profile_ref, ...limits } = obj;
   return { profile_ref: string(profile_ref), ...ceiling(limits) };
 }
@@ -238,6 +253,8 @@ function policySnapshot(value: ManagedProfilePolicy): Record<string, unknown> {
     allowed_operations: value.allowed_operations,
     allowed_origins: value.allowed_origins,
     controlled_interaction_origins: value.controlled_interaction_origins ?? [],
+    ...(value.proxy_refs === undefined ? {} : { proxy_refs: value.proxy_refs }),
+    ...(value.allow_proxy_clear === undefined ? {} : { allow_proxy_clear: value.allow_proxy_clear }),
     scope_semantics: scopeSemantics(value.scope_semantics)
   };
 }
@@ -259,6 +276,8 @@ function grantSnapshot(value: ManagedGrant): Record<string, unknown> {
     ...(value.business_target_account_scopes === undefined ? {} : { business_target_account_scopes: value.business_target_account_scopes }),
     ...(value.account_system_scope === undefined ? {} : { account_system_scope: value.account_system_scope }),
     ...(value.account_binding_scopes === undefined ? {} : { account_binding_scopes: value.account_binding_scopes }),
+    ...(value.proxy_refs === undefined ? {} : { proxy_refs: value.proxy_refs }),
+    ...(value.allow_proxy_clear === undefined ? {} : { allow_proxy_clear: value.allow_proxy_clear }),
     scope_semantics: scopeSemantics(value.scope_semantics)
   };
 }
@@ -276,9 +295,11 @@ type ParsedGrant = {
   file_scope?: ManagedFileScope;
   account_system_scope?: ManagedAccountSystemScope;
   account_binding_scopes?: ManagedAccountBindingScope[];
+  proxy_refs?: string[];
+  allow_proxy_clear?: boolean;
 };
 function grantFields(value: unknown): ParsedGrant {
-  const input = object(value, ["principal_id", "profile_refs", "allowed_operations", "allowed_origins", "expires_at", "creation_template", "max_created_profiles"], ["skill_scope", "profile_source_refs", "file_scope", "account_system_scope", "account_binding_scopes"]);
+  const input = object(value, ["principal_id", "profile_refs", "allowed_operations", "allowed_origins", "expires_at", "creation_template", "max_created_profiles"], ["skill_scope", "profile_source_refs", "file_scope", "account_system_scope", "account_binding_scopes", "proxy_refs", "allow_proxy_clear"]);
   const parsed = { principal_id: string(input.principal_id), profile_refs: strings(input.profile_refs), allowed_operations: operations(input.allowed_operations),
     allowed_origins: strings(input.allowed_origins, origin), expires_at: timestamp(input.expires_at), creation_template: template(input.creation_template), max_created_profiles: input.max_created_profiles,
     ...(input.skill_scope === undefined ? {} : { skill_scope: skillScope(input.skill_scope) }),
@@ -286,6 +307,12 @@ function grantFields(value: unknown): ParsedGrant {
     ...(input.file_scope === undefined ? {} : { file_scope: fileScope(input.file_scope) }) } as ParsedGrant;
   if (input.account_system_scope !== undefined) parsed.account_system_scope = accountSystemScope(input.account_system_scope);
   if (input.account_binding_scopes !== undefined) parsed.account_binding_scopes = accountBindingScopes(input.account_binding_scopes);
+  if (input.proxy_refs !== undefined) parsed.proxy_refs = proxyRefs(input.proxy_refs);
+  if (input.allow_proxy_clear !== undefined) {
+    if (typeof input.allow_proxy_clear !== "boolean") return fail("managed_access_invalid_input");
+    parsed.allow_proxy_clear = input.allow_proxy_clear;
+  }
+  if (!parsed.allowed_operations.includes("environment.proxy.update") && ((parsed.proxy_refs?.length ?? 0) > 0 || parsed.allow_proxy_clear === true)) return fail("managed_access_invalid_input");
   if (!Number.isSafeInteger(parsed.max_created_profiles) || parsed.max_created_profiles < 0 || parsed.max_created_profiles > 1024 ||
     (!parsed.creation_template && parsed.max_created_profiles !== 0)) return fail("managed_access_invalid_input");
   if ((parsed.allowed_operations.includes("account_system.import_template") && !parsed.account_system_scope?.template_refs.length) ||
@@ -293,6 +320,8 @@ function grantFields(value: unknown): ParsedGrant {
       (parsed.account_system_scope !== undefined && !parsed.allowed_operations.includes("account_system.import_template")) ||
       (parsed.account_binding_scopes !== undefined && (!parsed.allowed_operations.includes("account.bind") || parsed.account_binding_scopes.some(item => !parsed.profile_refs.includes(item.profile_ref))))) return fail("managed_access_invalid_input");
   if (parsed.creation_template && parsed.creation_template.permission_ceiling.scope_semantics === "agent_operations_v2") return fail("managed_access_scope_confirmation_required");
+  if (parsed.creation_template && (parsed.creation_template.permission_ceiling.allowed_operations.includes("environment.proxy.update") ||
+      Object.hasOwn(parsed.creation_template.permission_ceiling, "proxy_refs") || Object.hasOwn(parsed.creation_template.permission_ceiling, "allow_proxy_clear"))) return fail("managed_access_invalid_input");
   return parsed;
 }
 function subset(values: readonly string[], allowed: readonly string[]): boolean { return values.every(value => allowed.includes(value)); }
@@ -323,7 +352,7 @@ export function createFileManagedAccessStore(options: { directory: string; clock
   async function read(): Promise<State> {
     try {
       const raw = JSON.parse(await readFile(path, "utf8")) as Partial<State>;
-      if (raw.schema_version !== "webenvoy.managed-access.v0" && raw.schema_version !== "webenvoy.managed-access.v1" && raw.schema_version !== "webenvoy.managed-access.v2") return fail("managed_access_store_invalid");
+      if (raw.schema_version !== "webenvoy.managed-access.v0" && raw.schema_version !== "webenvoy.managed-access.v1" && raw.schema_version !== "webenvoy.managed-access.v2" && raw.schema_version !== "webenvoy.managed-access.v3") return fail("managed_access_store_invalid");
       if (Object.keys(raw).some(key => !["schema_version", "principals", "connections", "grants", "profile_policies", "receipts"].includes(key))) return fail("managed_access_store_invalid");
       if (![(raw as State).principals, (raw as State).connections, (raw as State).grants, (raw as State).profile_policies, (raw as State).receipts].every(Array.isArray)) return fail("managed_access_store_invalid");
       const state = raw as State;
@@ -338,7 +367,7 @@ export function createFileManagedAccessStore(options: { directory: string; clock
         if (entry.revoked_at !== null) timestamp(entry.revoked_at);
       }
       for (const entry of state.grants) {
-        object(entry, ["grant_id", "principal_id", "profile_refs", "allowed_operations", "allowed_origins", "expires_at", "revoked_at", "creation_template", "max_created_profiles", "created_profile_refs"], ["skill_scope", "profile_source_refs", "file_scope", ...(state.schema_version === "webenvoy.managed-access.v0" ? [] : ["scope_semantics", "account_system_scope", "account_binding_scopes"]), ...(state.schema_version === "webenvoy.managed-access.v2" ? ["business_target_account_scopes"] : [])]);
+        object(entry, ["grant_id", "principal_id", "profile_refs", "allowed_operations", "allowed_origins", "expires_at", "revoked_at", "creation_template", "max_created_profiles", "created_profile_refs"], ["skill_scope", "profile_source_refs", "file_scope", ...(state.schema_version === "webenvoy.managed-access.v0" ? [] : ["scope_semantics", "account_system_scope", "account_binding_scopes"]), ...(state.schema_version === "webenvoy.managed-access.v2" || state.schema_version === "webenvoy.managed-access.v3" ? ["business_target_account_scopes"] : []), ...(state.schema_version === "webenvoy.managed-access.v3" ? ["proxy_refs", "allow_proxy_clear"] : [])]);
         string(entry.grant_id); string(entry.principal_id); strings(entry.profile_refs);
         operations(entry.allowed_operations); strings(entry.allowed_origins, origin); timestamp(entry.expires_at); template(entry.creation_template);
         if (state.schema_version === "webenvoy.managed-access.v0" && (Object.hasOwn(entry, "scope_semantics") ||
@@ -348,7 +377,7 @@ export function createFileManagedAccessStore(options: { directory: string; clock
         if (entry.profile_source_refs !== undefined) profileSourceRefs(entry.profile_source_refs);
         if (entry.file_scope !== undefined) fileScope(entry.file_scope);
         if (entry.business_target_account_scopes !== undefined) {
-          if (state.schema_version !== "webenvoy.managed-access.v2") return fail("managed_access_store_invalid");
+          if (state.schema_version !== "webenvoy.managed-access.v2" && state.schema_version !== "webenvoy.managed-access.v3") return fail("managed_access_store_invalid");
           const scopes = businessTargetAccountScopes(entry.business_target_account_scopes);
           if (scopes.some(scope => !entry.profile_refs.includes(scope.profile_ref))) return fail("managed_access_store_invalid");
         }
@@ -356,6 +385,9 @@ export function createFileManagedAccessStore(options: { directory: string; clock
         if (hasBusinessTargetOperation !== (entry.business_target_account_scopes !== undefined)) return fail("managed_access_store_invalid");
         if (entry.account_system_scope !== undefined) accountSystemScope(entry.account_system_scope);
         if (entry.account_binding_scopes !== undefined) accountBindingScopes(entry.account_binding_scopes);
+        if (entry.proxy_refs !== undefined) proxyRefs(entry.proxy_refs);
+        if (entry.allow_proxy_clear !== undefined && typeof entry.allow_proxy_clear !== "boolean") return fail("managed_access_store_invalid");
+        if (entry.allowed_operations.includes("environment.proxy.update") && state.schema_version !== "webenvoy.managed-access.v3") return fail("managed_access_store_invalid");
         if (entry.revoked_at !== null) timestamp(entry.revoked_at);
         strings(entry.created_profile_refs);
         if (!Number.isSafeInteger(entry.max_created_profiles) || entry.max_created_profiles < entry.created_profile_refs.length ||
@@ -363,6 +395,7 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       }
       state.profile_policies.forEach(item => {
         if (state.schema_version === "webenvoy.managed-access.v0" && Object.hasOwn(item, "scope_semantics")) return fail("managed_access_store_invalid");
+        if (state.schema_version !== "webenvoy.managed-access.v3" && (Object.hasOwn(item, "proxy_refs") || Object.hasOwn(item, "allow_proxy_clear"))) return fail("managed_access_store_invalid");
         policy(item);
       });
       for (const entry of state.receipts) {
@@ -458,6 +491,7 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       const input = object(value, ["idempotency_key", "principal_id", "profile_refs", "allowed_operations", "allowed_origins", "expires_at", "creation_template", "max_created_profiles"], ["skill_scope", "profile_source_refs", "file_scope", "account_system_scope", "account_binding_scopes"]);
       const parsed = grantFields(Object.fromEntries(Object.keys(input).filter(key => key !== "idempotency_key").map(key => [key, input[key]])));
       if (parsed.allowed_operations.some(isBusinessTargetOperation)) return fail("managed_access_scope_confirmation_required");
+      if (parsed.allowed_operations.includes("environment.proxy.update")) return fail("managed_access_scope_confirmation_required");
       return transaction(state => receipt(state, "createGrant", input, () => {
         if (!state.principals.some(item => item.principal_id === parsed.principal_id && item.revoked_at === null) || Date.parse(parsed.expires_at) <= Date.parse(now())) return fail("managed_access_grant_unavailable");
         if (parsed.account_system_scope !== undefined || parsed.account_binding_scopes !== undefined) ensureV1State(state);
@@ -467,7 +501,7 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       }));
     },
     async issueAgentOperationsV2Grant(value: unknown, resolveBusinessTargetAccountScopes?: (profileRef: string, selections: ManagedBusinessTargetAccountSelection[]) => Promise<ManagedBusinessTargetAccountScope[]>): Promise<ManagedGrant> {
-      const input = object(value, ["idempotency_key", "principal_id", "profile_refs", "policy_digest", "allowed_operations", "allowed_origins", "expires_at"], ["source_grant_id", "source_grant_digest", "replaces_grant_id", "replaces_grant_digest", "skill_scope", "profile_source_refs", "file_scope", "account_scope_selections", "account_system_scope", "account_binding_scopes"]);
+      const input = object(value, ["idempotency_key", "principal_id", "profile_refs", "policy_digest", "allowed_operations", "allowed_origins", "expires_at"], ["source_grant_id", "source_grant_digest", "replaces_grant_id", "replaces_grant_digest", "skill_scope", "profile_source_refs", "file_scope", "account_scope_selections", "account_system_scope", "account_binding_scopes", "proxy_refs", "allow_proxy_clear"]);
       const principalId = string(input.principal_id), policyDigest = string(input.policy_digest);
       if (!/^[a-f0-9]{64}$/.test(policyDigest)) return fail("managed_access_invalid_input");
       const profileRefs = strings(input.profile_refs);
@@ -483,6 +517,10 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       const parsedSkillScope = input.skill_scope === undefined ? undefined : skillScope(input.skill_scope);
       const parsedProfileSourceRefs = input.profile_source_refs === undefined ? undefined : profileSourceRefs(input.profile_source_refs);
       const parsedFileScope = input.file_scope === undefined ? undefined : fileScope(input.file_scope);
+      const parsedProxyRefs = input.proxy_refs === undefined ? undefined : proxyRefs(input.proxy_refs);
+      if (input.allow_proxy_clear !== undefined && typeof input.allow_proxy_clear !== "boolean") return fail("managed_access_invalid_input");
+      const parsedAllowProxyClear = input.allow_proxy_clear as boolean | undefined;
+      if (!parsedOperations.includes("environment.proxy.update") && ((parsedProxyRefs?.length ?? 0) > 0 || parsedAllowProxyClear === true)) return fail("managed_access_scope_confirmation_expands_scope");
       const targetOperationsIncluded = parsedOperations.some(isBusinessTargetOperation);
       const accountScopeSelections = input.account_scope_selections === undefined ? undefined : businessTargetAccountSelections(input.account_scope_selections);
       if (targetOperationsIncluded !== (accountScopeSelections !== undefined)) return fail("managed_access_invalid_input");
@@ -503,7 +541,11 @@ export function createFileManagedAccessStore(options: { directory: string; clock
         if (hash(canonical(policySnapshot(profilePolicy))) !== policyDigest) return fail("managed_access_policy_conflict");
         if (Date.parse(expiresAt) <= Date.parse(now()) || parsedOperations.includes("profile.create") ||
           !operationSubset(parsedOperations, profilePolicy.allowed_operations) || !subset(parsedOrigins, profilePolicy.allowed_origins)) return fail("managed_access_scope_confirmation_expands_scope");
+        const policyProxyRefs = profilePolicy.proxy_refs ?? [];
+        const policyAllowsProxyClear = profilePolicy.allow_proxy_clear === true;
+        if ((parsedProxyRefs ?? []).some(ref => !policyProxyRefs.includes(ref)) || parsedAllowProxyClear === true && !policyAllowsProxyClear) return fail("managed_access_scope_confirmation_expands_scope");
         if (parsedProfileSourceRefs && sourceGrant && !subset(parsedProfileSourceRefs, sourceGrant.profile_source_refs ?? [])) return fail("managed_access_scope_confirmation_expands_scope");
+        if (parsedProxyRefs && sourceGrant && !subset(parsedProxyRefs, sourceGrant.proxy_refs ?? []) || parsedAllowProxyClear === true && sourceGrant && sourceGrant.allow_proxy_clear !== true) return fail("managed_access_scope_confirmation_expands_scope");
         const replacement = replaceGrantId === undefined ? undefined : state.grants.find(item => item.grant_id === replaceGrantId);
         if (replaceGrantId !== undefined && (!replacement || replacement.principal_id !== principalId || replacement.profile_refs.length !== 1 || replacement.profile_refs[0] !== profileRef || scopeSemantics(replacement.scope_semantics) !== "agent_operations_v2" || sourceGrant && (sourceGrant.profile_refs.length !== 1 || sourceGrant.revoked_at !== null || Date.parse(sourceGrant.expires_at) <= Date.parse(now())) || replacement.revoked_at !== null || Date.parse(replacement.expires_at) <= Date.parse(now()))) return fail("managed_access_v2_grant_replacement_invalid");
         if (replacement && replaceGrantDigest !== undefined && grantDigest(replacement) !== replaceGrantDigest) return fail("managed_access_grant_conflict");
@@ -529,10 +571,15 @@ export function createFileManagedAccessStore(options: { directory: string; clock
           ...(businessTargetAccountScopes === undefined ? {} : { business_target_account_scopes: businessTargetAccountScopes }),
           ...(parsedAccountSystemScope === undefined ? {} : { account_system_scope: parsedAccountSystemScope }),
           ...(parsedAccountBindingScopes === undefined ? {} : { account_binding_scopes: parsedAccountBindingScopes }),
+          ...(parsedProxyRefs === undefined ? {} : { proxy_refs: parsedProxyRefs }),
+          ...(parsedAllowProxyClear === undefined ? {} : { allow_proxy_clear: parsedAllowProxyClear }),
           scope_semantics: "agent_operations_v2"
         };
-        if (businessTargetAccountScopes === undefined) ensureV1State(state);
-        else state.schema_version = "webenvoy.managed-access.v2";
+        if (parsedOperations.includes("environment.proxy.update") || parsedProxyRefs !== undefined || parsedAllowProxyClear !== undefined) state.schema_version = "webenvoy.managed-access.v3";
+        else if (state.schema_version !== "webenvoy.managed-access.v3") {
+          if (businessTargetAccountScopes !== undefined) state.schema_version = "webenvoy.managed-access.v2";
+          else ensureV1State(state);
+        }
         state.grants.push(grant);
         if (replacement) replacement.revoked_at ??= now();
         return grant;
@@ -567,6 +614,7 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       const { idempotency_key: _key, ...limits } = input;
       const parsed = policy(limits);
       if (parsed.scope_semantics === "agent_operations_v2") return fail("managed_access_scope_confirmation_required");
+      if (parsed.allowed_operations.includes("environment.proxy.update")) return fail("managed_access_scope_confirmation_required");
       return transaction(state => receipt(state, "setProfilePolicy", input, () => {
         const existing = state.profile_policies.find(item => item.profile_ref === parsed.profile_ref);
         // A legacy-shaped owner update must not silently downgrade a v2
@@ -577,11 +625,11 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       }));
     },
     async updateAgentOperationsV2ProfilePolicy(value: unknown): Promise<ManagedProfilePolicy> {
-      const input = object(value, ["idempotency_key", "profile_ref", "current_policy_digest", "allowed_operations", "allowed_origins", "controlled_interaction_origins"]);
+      const input = object(value, ["idempotency_key", "profile_ref", "current_policy_digest", "allowed_operations", "allowed_origins", "controlled_interaction_origins"], ["proxy_refs", "allow_proxy_clear"]);
       const idempotencyKey = string(input.idempotency_key), profileRef = string(input.profile_ref);
       const currentPolicyDigest = string(input.current_policy_digest);
       if (!/^[a-f0-9]{64}$/.test(currentPolicyDigest)) return fail("managed_access_invalid_input");
-      const proposed = v2Policy({ profile_ref: profileRef, allowed_operations: input.allowed_operations, allowed_origins: input.allowed_origins, ...(input.controlled_interaction_origins === undefined ? {} : { controlled_interaction_origins: input.controlled_interaction_origins }) }, profileRef);
+      const proposed = v2Policy({ profile_ref: profileRef, allowed_operations: input.allowed_operations, allowed_origins: input.allowed_origins, ...(input.controlled_interaction_origins === undefined ? {} : { controlled_interaction_origins: input.controlled_interaction_origins }), ...(input.proxy_refs === undefined ? {} : { proxy_refs: input.proxy_refs }), ...(input.allow_proxy_clear === undefined ? {} : { allow_proxy_clear: input.allow_proxy_clear }) }, profileRef);
       const previous = await completedReceipt<ManagedProfilePolicy>("updateAgentOperationsV2ProfilePolicy", input);
       if (previous !== undefined) return previous;
       if (!options.withStoppedProfile) return fail("managed_access_profile_state_unavailable");
@@ -590,14 +638,15 @@ export function createFileManagedAccessStore(options: { directory: string; clock
         if (!existing || scopeSemantics(existing.scope_semantics) !== "agent_operations_v2") return fail("managed_access_scope_confirmation_required");
         const actualSnapshot = policySnapshot(existing);
         if (hash(canonical(actualSnapshot)) !== currentPolicyDigest) return fail("managed_access_policy_conflict");
-        ensureV1State(state);
+        if (proposed.allowed_operations.includes("environment.proxy.update") || Object.hasOwn(input, "proxy_refs") || Object.hasOwn(input, "allow_proxy_clear") || state.schema_version === "webenvoy.managed-access.v3") state.schema_version = "webenvoy.managed-access.v3";
+        else ensureV1State(state);
         state.profile_policies = state.profile_policies.filter(item => item.profile_ref !== profileRef);
         state.profile_policies.push(proposed);
         return proposed;
       })));
     },
     async checkAccess(credentialHash: unknown, value: unknown): Promise<ManagedAccess> {
-      const input = object(value, ["connection_id", "grant_id", "operation", "task_scope"], ["profile_ref", "origin", "template_ref", "target_provider_id", "profile_source_ref", "confirmation", "skill_ref", "source_ref", "revision_ref", "file_refs", "account_system_ref", "account_ref", "business_target_ref", "created_profile_ref", "creation_reservation_ref"]);
+      const input = object(value, ["connection_id", "grant_id", "operation", "task_scope"], ["profile_ref", "origin", "template_ref", "target_provider_id", "profile_source_ref", "confirmation", "skill_ref", "source_ref", "revision_ref", "file_refs", "account_system_ref", "account_ref", "business_target_ref", "proxy_ref", "created_profile_ref", "creation_reservation_ref"]);
       const connectionId = string(input.connection_id), grantId = string(input.grant_id), op = operation(input.operation);
       const profileRef = input.profile_ref === undefined ? undefined : string(input.profile_ref);
       const targetOrigin = input.origin === undefined ? undefined : origin(input.origin);
@@ -606,6 +655,10 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       if (op === "profile.delete" ? confirmation !== "delete_local_data" : confirmation !== undefined) return fail("managed_access_invalid_input");
       const accountSystemRef = input.account_system_ref === undefined ? undefined : string(input.account_system_ref);
       const accountRef = input.account_ref === undefined ? undefined : string(input.account_ref);
+      const proxyRef = input.proxy_ref === undefined ? undefined : input.proxy_ref === null ? null : string(input.proxy_ref);
+      if (proxyRef !== undefined && proxyRef !== null && !managedProxyRef.test(proxyRef)) return fail("managed_access_invalid_input");
+      const proxyOperation = op === "environment.proxy.update";
+      if (proxyOperation ? proxyRef === undefined : proxyRef !== undefined) return fail("managed_access_invalid_input");
       const targetProviderId = input.target_provider_id === undefined ? undefined : string(input.target_provider_id);
       const skillRef = input.skill_ref === undefined ? undefined : string(input.skill_ref);
       const sourceRef = input.source_ref === undefined ? undefined : string(input.source_ref);
@@ -633,7 +686,9 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       const profileTransferOperation = op === "profile.import" || op === "profile.migrate.request";
       if (profileSourceRef !== undefined && op !== "profile.import" || targetProviderId !== undefined && op !== "profile.migrate.request") return fail("managed_access_invalid_input");
       const accountSystemImport = op === "account_system.import_template";
-      const scope = accountSystemImport
+      const scope = proxyOperation
+        ? object(input.task_scope, ["operations", "profile_refs", "origins", "proxy_refs", "allow_proxy_clear"])
+        : accountSystemImport
         ? object(input.task_scope, ["operations", "template_refs"])
         : skillOperation
         ? object(input.task_scope, ["operations", "skill_refs", "source_refs"], ["file_refs"])
@@ -644,7 +699,9 @@ export function createFileManagedAccessStore(options: { directory: string; clock
           : accountBind
             ? object(input.task_scope, ["operations", "profile_refs", "origins", "account_binding_scopes"])
             : object(input.task_scope, ["operations", "profile_refs", "origins"], ["file_refs"]);
-      const task = (accountSystemImport
+      const task = (proxyOperation
+        ? { operations: operations(scope.operations), profile_refs: strings(scope.profile_refs), origins: strings(scope.origins, origin), proxy_refs: proxyRefs(scope.proxy_refs), allow_proxy_clear: scope.allow_proxy_clear }
+        : accountSystemImport
         ? { operations: operations(scope.operations), profile_refs: [] as string[], origins: [] as string[], template_refs: strings(scope.template_refs, value => {
           const ref = string(value);
           if (!/^lode:\/\/account-system\/[a-z0-9][a-z0-9._-]*@[0-9]+\.[0-9]+\.[0-9]+$/.test(ref)) return fail("managed_access_invalid_input");
@@ -659,6 +716,8 @@ export function createFileManagedAccessStore(options: { directory: string; clock
           : { operations: operations(scope.operations), profile_refs: strings(scope.profile_refs), origins: strings(scope.origins, origin),
             ...(scope.file_refs === undefined ? {} : { file_refs: fileRefs(scope.file_refs) }),
             ...(scope.account_binding_scopes === undefined ? {} : { account_binding_scopes: accountBindingScopes(scope.account_binding_scopes) }) }) as ManagedTaskScope;
+      if (proxyOperation && (typeof task.allow_proxy_clear !== "boolean" || task.operations.length !== 1 || task.operations[0] !== op || !profileRef || task.profile_refs.length !== 1 || task.profile_refs[0] !== profileRef || !targetOrigin || task.origins.length !== 1 || task.origins[0] !== targetOrigin ||
+          (proxyRef === null ? task.proxy_refs?.length !== 0 || task.allow_proxy_clear !== true : task.proxy_refs?.length !== 1 || task.proxy_refs[0] !== proxyRef || task.allow_proxy_clear !== false))) return fail("managed_access_denied");
       const state = await read(), principal = authenticated(state, credentialHash);
       const connection = state.connections.find(item => item.connection_id === connectionId && item.principal_id === principal.principal_id && item.revoked_at === null);
       if (!connection) return fail("managed_access_connection_unavailable");
@@ -762,6 +821,13 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       if (["profile.archive", "profile.delete"].includes(op) && (targetOrigin !== undefined || task.origins.length !== 0 || task.profile_refs.length !== 1 || task.profile_refs[0] !== profileRef)) return fail("managed_access_denied");
       const authorized_origins = [...new Set(grant.allowed_origins.filter(item => profile.allowed_origins.includes(item) && task.origins.includes(item)))];
       if (targetOrigin !== undefined && !authorized_origins.includes(targetOrigin)) return fail("managed_access_denied");
+      if (proxyOperation) {
+        if (grantScope !== "agent_operations_v2") return fail("managed_access_denied");
+        if (proxyRef === undefined) return fail("managed_access_invalid_input");
+        if (proxyRef === null) {
+          if (profile.allow_proxy_clear !== true || grant.allow_proxy_clear !== true || task.allow_proxy_clear !== true) return fail("managed_access_denied");
+        } else if (!profile.proxy_refs?.includes(proxyRef) || !grant.proxy_refs?.includes(proxyRef) || !task.proxy_refs?.includes(proxyRef)) return fail("managed_access_denied");
+      }
       if (accountBind) {
         const tuple = { profile_ref: profileRef, account_system_ref: accountSystemRef, account_ref: accountRef };
         const taskBindingScopes = task.account_binding_scopes ?? [];
@@ -770,7 +836,7 @@ export function createFileManagedAccessStore(options: { directory: string; clock
             taskBindingScopes.length !== 1 || canonical(taskBindingScopes[0]) !== canonical(tuple) ||
             !(grant.account_binding_scopes ?? []).some(item => canonical(item) === canonical(tuple))) return fail("managed_access_denied");
       }
-      if (["instance.start", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "instance.navigate", "instance.read", "account.bind", "page.open", "page.navigate", ...managedInteractionOperations, ...managedFileOperations, ...managedTaskOperations].includes(op) && targetOrigin === undefined) return fail("managed_access_origin_required");
+      if (["instance.start", "instance.observe", "instance.diagnostics", "environment.read", "environment.update", "environment.proxy.update", "instance.navigate", "instance.read", "account.bind", "page.open", "page.navigate", ...managedInteractionOperations, ...managedFileOperations, ...managedTaskOperations].includes(op) && targetOrigin === undefined) return fail("managed_access_origin_required");
       if ((managedInteractionOperations as readonly string[]).includes(op) && (!targetOrigin || !profile.controlled_interaction_origins?.includes(targetOrigin))) return fail("managed_access_controlled_origin_required");
       return { ...result, profile_policy: profile, authorized_origins,
         ...(op === "profile.copy_environment" ? { creation_template: grant.creation_template! } : {}) };
@@ -786,9 +852,11 @@ export function createFileManagedAccessStore(options: { directory: string; clock
       const confirmation = scopeConfirmation(input.confirmation, idempotencyKey, profileRef);
       const newGrant = grantFields(input.new_grant);
       if (newGrant.allowed_operations.some(isBusinessTargetOperation)) return fail("managed_access_scope_confirmation_required");
+      if (newGrant.allowed_operations.includes("environment.proxy.update") || Object.hasOwn(input.new_grant as object, "proxy_refs") || Object.hasOwn(input.new_grant as object, "allow_proxy_clear")) return fail("managed_access_scope_confirmation_required");
       if (!input.new_profile_policy || typeof input.new_profile_policy !== "object" || Array.isArray(input.new_profile_policy)) return fail("managed_access_invalid_input");
       const rawPolicy = input.new_profile_policy as Record<string, unknown>;
       if (Object.hasOwn(rawPolicy, "scope_semantics")) return fail("managed_access_scope_confirmation_invalid");
+      if (rawPolicy.allowed_operations instanceof Array && rawPolicy.allowed_operations.includes("environment.proxy.update") || Object.hasOwn(rawPolicy, "proxy_refs") || Object.hasOwn(rawPolicy, "allow_proxy_clear")) return fail("managed_access_scope_confirmation_required");
       const newPolicy = policy(rawPolicy);
       if (newPolicy.profile_ref !== profileRef || scopeSemantics(newPolicy.scope_semantics) !== "legacy_request_guard_v1") return fail("managed_access_scope_confirmation_invalid");
       const previous = await completedReceipt<ManagedScopeTransitionResult>("confirmAgentOperationsV2", input);

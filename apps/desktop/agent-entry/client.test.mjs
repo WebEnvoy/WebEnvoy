@@ -260,6 +260,25 @@ test('MCP guidance exposes instance.start origin admission', async () => {
     assert.equal(validateOperation(bindSchemaFixture), true, JSON.stringify(validateOperation.errors));
     assert.equal(validateOperation({ ...bindSchemaFixture, task_scope: { operations: ['account.bind'], profile_refs: ['profile:github'], origins: ['https://github.com'] } }), false,
       'Account binding requires the exact task binding tuple');
+    assert.deepEqual(operation.inputSchema.properties.proxy_ref.type, ['string', 'null']);
+    const proxyRef = 'proxy-ref:11111111-1111-4111-8111-111111111111';
+    const proxyUpdateFixture = {
+      idempotency_key: 'proxy-select', grant_id: 'grant:fixture', operation: 'environment.proxy.update',
+      task_scope: { operations: ['environment.proxy.update'], profile_refs: ['profile:fixture'], origins: ['https://example.com'], proxy_refs: [proxyRef], allow_proxy_clear: false },
+      profile_ref: 'profile:fixture', origin: 'https://example.com', proxy_ref: proxyRef
+    };
+    const proxyClearFixture = { ...proxyUpdateFixture, idempotency_key: 'proxy-clear', proxy_ref: null,
+      task_scope: { ...proxyUpdateFixture.task_scope, proxy_refs: [], allow_proxy_clear: true } };
+    assert.equal(validateOperation(proxyUpdateFixture), true, JSON.stringify(validateOperation.errors));
+    assert.equal(validateOperation(proxyClearFixture), true, JSON.stringify(validateOperation.errors));
+    assert.equal(validateOperation({ ...proxyUpdateFixture, proxy_endpoint: 'socks5://127.0.0.1:1080' }), false);
+    assert.equal(validateOperation({ ...proxyUpdateFixture, task_scope: { ...proxyUpdateFixture.task_scope, proxy_refs: [] } }), false);
+    assert.equal(validateOperation({ ...proxyUpdateFixture, task_scope: { ...proxyUpdateFixture.task_scope, proxy_refs: [], allow_proxy_clear: true } }), false);
+    assert.equal(validateOperation({ ...proxyClearFixture, task_scope: { ...proxyClearFixture.task_scope, proxy_refs: [proxyRef] } }), false);
+    assert.equal(validateOperation({ ...proxyClearFixture, task_scope: { ...proxyClearFixture.task_scope, allow_proxy_clear: false } }), false);
+    assert.doesNotThrow(() => validateOperationRequest(proxyUpdateFixture, definitions));
+    assert.doesNotThrow(() => validateOperationRequest(proxyClearFixture, definitions));
+    assert.throws(() => validateOperationRequest({ ...proxyUpdateFixture, task_scope: { ...proxyUpdateFixture.task_scope, allow_proxy_clear: true } }, definitions), /operation_input_refused/);
     const profileSourceRef = 'profile-source:11111111-1111-4111-8111-111111111111';
     const profileImportFixture = { idempotency_key: 'schema-profile-import', grant_id: 'grant:profile-import', operation: 'profile.import',
       template_ref: 'template:approved', profile_source_ref: profileSourceRef,
@@ -325,8 +344,11 @@ test('MCP guidance exposes instance.start origin admission', async () => {
     assert.deepEqual(transferScopeCondition.if.properties.operation.enum, ['profile.import', 'profile.migrate.request']);
     assert.deepEqual(transferScopeCondition.then.properties.task_scope.required, ['operations', 'profile_refs', 'origins', 'profile_source_refs']);
     assert.equal(transferScopeCondition.then.properties.task_scope.additionalProperties, false);
-    assert.equal(transferScopeCondition.else.properties.task_scope.properties.file_refs, undefined);
-    assert.equal(transferScopeCondition.else.properties.task_scope.additionalProperties, false);
+    const proxyScopeCondition = transferScopeCondition.else;
+    assert.equal(proxyScopeCondition.if.properties.operation.const, 'environment.proxy.update');
+    assert.ok(proxyScopeCondition.then.properties.task_scope.properties.proxy_refs);
+    assert.equal(proxyScopeCondition.else.properties.task_scope.properties.file_refs, undefined);
+    assert.equal(proxyScopeCondition.else.properties.task_scope.additionalProperties, false);
     assert.ok(fileScopeCondition.then.properties.task_scope.properties.file_refs);
     assert.match(fileScopeCondition.then.properties.task_scope.properties.file_refs.description, /Omit this field for every non-file operation/);
     assert.equal(fileScopeCondition.then.properties.task_scope.additionalProperties, false);

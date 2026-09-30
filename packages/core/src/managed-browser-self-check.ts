@@ -63,10 +63,10 @@ let pageLists = 0, pageMutations = 0, dropPageResponse = false;
 const pageReceipts = new Map<string, Record<string, unknown>>();
 let accountBindingPosts = 0, malformedAccountBindingResponse = false;
 const accountBindingReceipts = new Map<string, Record<string, unknown>>();
-let environmentReads = 0, environmentUpdates = 0, dropEnvironmentResponse = false, environmentUnavailable = false;
-let environmentConfigured = { timezone: "UTC", language: "en-US", viewport: "1280x720" };
+let environmentReads = 0, environmentUpdates = 0, proxyUpdates = 0, dropEnvironmentResponse = false, dropProxyResponse = false, environmentUnavailable = false, revokedProxyReference = false;
+let environmentConfigured: Record<string, string | null> = { timezone: "UTC", language: "en-US", viewport: "1280x720", proxy_ref: null };
 let environmentEffective = { ...environmentConfigured };
-let environmentPending: Record<string, string> | null = null;
+let environmentPending: Record<string, string | null> | null = null;
 const environmentReceipts = new Map<string, Record<string, unknown>>();
 let recoveryExpectedProfileRef: string | undefined;
 let afterCreate: (() => Promise<void>) | undefined;
@@ -128,8 +128,8 @@ const server = createServer((req, res) => { void (async () => {
   assert.equal(req.headers.authorization, "Bearer fixture-supervisor");
   let value: unknown;
   if (req.url === "/runtime/managed-operation-catalog") { managedOperationCatalogReads++; value = {
-    schema_version: "webenvoy.harbor-operation-catalog.v0", catalog_ref: "harbor://managed-operations", catalog_version: "10",
-    operations: [...managedOperations.filter(op => !(managedInteractionOperations as readonly string[]).includes(op) && !(managedBusinessTargetOperations as readonly string[]).includes(op) && !op.startsWith("provider.preference.")).map(operation_id => ({ operation_id, category: (managedFileOperations as readonly string[]).includes(operation_id) || operation_id === "environment.update" || operation_id === "recovery.request" || ["page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward"].includes(operation_id) ? "prepare" : operation_id === "profile.delete" ? "destructive" : ["profile.create", "profile.import", "profile.copy_environment", "profile.archive", "profile.metadata.update", "account.bind"].includes(operation_id) ? "commit" : "read", target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: (managedFileOperations as readonly string[]).includes(operation_id) ? ["harbor://managed-profile", "harbor://controlled-page", "harbor://managed-file"] : ["harbor://managed-profile"] })),
+    schema_version: "webenvoy.harbor-operation-catalog.v0", catalog_ref: "harbor://managed-operations", catalog_version: "12",
+    operations: [...managedOperations.filter(op => !(managedInteractionOperations as readonly string[]).includes(op) && !(managedBusinessTargetOperations as readonly string[]).includes(op) && !op.startsWith("provider.preference.")).map(operation_id => ({ operation_id, category: (managedFileOperations as readonly string[]).includes(operation_id) || ["environment.update", "environment.proxy.update", "recovery.request"].includes(operation_id) || ["page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward"].includes(operation_id) ? "prepare" : operation_id === "profile.delete" ? "destructive" : ["profile.create", "profile.import", "profile.copy_environment", "profile.archive", "profile.metadata.update", "account.bind"].includes(operation_id) ? "commit" : "read", target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: (managedFileOperations as readonly string[]).includes(operation_id) ? ["harbor://managed-profile", "harbor://controlled-page", "harbor://managed-file"] : ["harbor://managed-profile"] })),
       ...["provider.preference.read", "provider.preference.set", "provider.preference.clear"].map(operation_id => ({ operation_id, category: operation_id === "provider.preference.read" ? "read" : "commit", target_scope: { target_types: ["provider_preference"] }, resource_requirement_refs: ["harbor://browser-provider-preference"] })),
       ...["controlled-page.observe", "controlled-page.interact"].map(operation_id => ({ operation_id, category: operation_id === "controlled-page.interact" ? "prepare" : "read", target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: ["harbor://managed-profile", "harbor://controlled-page"] }))]
   }; }
@@ -186,6 +186,25 @@ const server = createServer((req, res) => { void (async () => {
       receipts.set(input.idempotency_key, value);
       if (malformedMetadataReply) { res.setHeader("content-type", "application/json"); res.end("[]"); return; }
       if (dropMetadataResponse) { req.socket.destroy(); return; }
+    } else if (input.operation === "edit") {
+      const configuration = input.configuration as Record<string, string | null>;
+      const proxyRef = configuration?.proxy_ref ?? null;
+      proxyUpdates++;
+      const previous = receipts.get(input.idempotency_key);
+      if (previous) value = previous;
+      else if (proxyRef !== null && revokedProxyReference) {
+        value = mutationReceipt({ operation: "edit", status: "rejected", identity_environment_ref: input.identity_environment_ref,
+          failure: { code: "proxy_reference_unavailable", retryable: false, recovery_actions: ["register_proxy_reference"] } });
+        receipts.set(input.idempotency_key, value);
+      } else {
+        environmentConfigured = { ...environmentConfigured, proxy_ref: proxyRef };
+        environmentPending = { ...(environmentPending ?? {}), proxy_ref: proxyRef };
+        value = mutationReceipt({ operation: "edit", status: "completed", identity_environment_ref: input.identity_environment_ref,
+          record: profiles.find(item => item.identity_environment_ref === input.identity_environment_ref),
+          effects: { index: "updated", local_data: "unchanged", login_state: "unchanged" } });
+        receipts.set(input.idempotency_key, value);
+      }
+      if (dropProxyResponse) { req.socket.destroy(); return; }
     } else if (input.operation === "archive") {
       archives++;
       const record = profiles.find(item => item.identity_environment_ref === input.identity_environment_ref);
@@ -532,7 +551,7 @@ try {
   const principal = await accessStore.registerPrincipal({ idempotency_key: "register", display_name: "Fixture Agent", credential_hash: credentialHash });
   principalId = principal.principal_id;
   const connection = await accessStore.connect(credentialHash);
-  const legacyOperations = managedOperations.filter(op => op !== "account.bind" && op !== "account_system.import_template" && !(managedBusinessTargetOperations as readonly string[]).includes(op));
+  const legacyOperations = managedOperations.filter(op => op !== "account.bind" && op !== "account_system.import_template" && op !== "environment.proxy.update" && !(managedBusinessTargetOperations as readonly string[]).includes(op));
   const grant = await accessStore.createGrant({ idempotency_key: "grant", principal_id: principal.principal_id, profile_refs: [], allowed_operations: legacyOperations, allowed_origins: ["https://example.com"], expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 2,
     creation_template: { template_ref: "template:example", provider_id: "camoufox", site: { site_id: "example", origin: "https://example.com", display_name: "Example" }, language: "en-US", timezone: "UTC", permission_ceiling: { allowed_operations: ["profile.list", "profile.read"], allowed_origins: ["https://example.com"] } } });
   const request = { idempotency_key: "create-one", connection_id: connection.connection_id, grant_id: grant.grant_id, operation: "profile.create", template_ref: "template:example", task_scope: { operations: legacyOperations, profile_refs: ["profile:1", "profile:2"], origins: ["https://example.com"] } };
@@ -1685,6 +1704,93 @@ try {
     assert.equal(refused.failure?.code, "managed_access_grant_unavailable");
     assert.deepEqual({ environmentReads, environmentUpdates, configured: environmentConfigured }, before);
   }
+  const proxyAccessStore = createFileManagedAccessStore({ directory: join(directory, "proxy-access"), withStoppedProfile: async (_profileRef, _operationRef, action) => action() });
+  const proxyCredentialHash = createHash("sha256").update("proxy-fixture-agent").digest("hex");
+  const proxyPrincipal = await proxyAccessStore.registerPrincipal({ idempotency_key: "proxy-register", display_name: "Proxy Fixture Agent", credential_hash: proxyCredentialHash });
+  const proxyConnection = await proxyAccessStore.connect(proxyCredentialHash);
+  await proxyAccessStore.setProfilePolicy({ idempotency_key: "proxy-legacy-policy", profile_ref: "profile:1", allowed_operations: environmentOps, allowed_origins: ["https://example.com"] });
+  const proxyLegacyGrant = await proxyAccessStore.createGrant({ idempotency_key: "proxy-legacy-grant", principal_id: proxyPrincipal.principal_id,
+    profile_refs: ["profile:1"], allowed_operations: environmentOps, allowed_origins: ["https://example.com"],
+    expires_at: new Date(Date.now() + 60_000).toISOString(), creation_template: null, max_created_profiles: 0 });
+  const proxyRunRecordStore = createFileRunRecordStore({ directory: join(directory, "proxy-runs") });
+  const proxyAuthorizationDecisionStore = createFileAuthorizationDecisionStore({ directory: join(directory, "proxy-decisions"), runRecordStore: proxyRunRecordStore });
+  const proxyService = createManagedBrowserService({ accessStore: proxyAccessStore, runRecordStore: proxyRunRecordStore, executionPolicyConfigStore,
+    authorizationDecisionStore: proxyAuthorizationDecisionStore, harborBaseUrl: `http://127.0.0.1:${address.port}`, supervisorToken: "fixture-supervisor", recoveryService });
+  const approvedProxyRef = "proxy-ref:33333333-3333-4333-8333-333333333333";
+  const ownerConfirmation = {
+    idempotency_key: "proxy-scope-migration",
+    source_grant_id: proxyLegacyGrant.grant_id,
+    profile_ref: "profile:1",
+    confirmation: { schema_version: managedScopeConfirmationSchemaVersion, confirmation_ref: "confirmation:proxy-scope", profile_ref: "profile:1",
+      confirmed_at: new Date().toISOString(), confirmed_by: "owner", idempotency_key: "proxy-scope-migration", decision: "apply" },
+    new_grant: { principal_id: proxyPrincipal.principal_id, profile_refs: ["profile:1"], allowed_operations: environmentOps,
+      allowed_origins: ["https://example.com"], expires_at: proxyLegacyGrant.expires_at, creation_template: null, max_created_profiles: 0 },
+    new_profile_policy: { profile_ref: "profile:1", allowed_operations: environmentOps, allowed_origins: ["https://example.com"] }
+  };
+  await proxyAccessStore.confirmAgentOperationsV2(ownerConfirmation);
+  await proxyAccessStore.updateAgentOperationsV2ProfilePolicy({
+    idempotency_key: "proxy-policy-enable",
+    profile_ref: "profile:1",
+    current_policy_digest: (await proxyAccessStore.list()).profile_policies.find(item => item.profile_ref === "profile:1")!.policy_digest,
+    allowed_operations: [...environmentOps, "environment.proxy.update"],
+    allowed_origins: ["https://example.com"], controlled_interaction_origins: [], proxy_refs: [approvedProxyRef], allow_proxy_clear: true
+  });
+  const proxyGrant = await proxyAccessStore.issueAgentOperationsV2Grant({
+    idempotency_key: "proxy-grant-select-and-clear", principal_id: proxyPrincipal.principal_id, profile_refs: ["profile:1"],
+    policy_digest: (await proxyAccessStore.list()).profile_policies.find(item => item.profile_ref === "profile:1")!.policy_digest,
+    allowed_operations: ["environment.read", "environment.proxy.update"], allowed_origins: ["https://example.com"],
+    expires_at: new Date(Date.now() + 60_000).toISOString(), proxy_refs: [approvedProxyRef], allow_proxy_clear: true
+  });
+  const proxyTaskScope = { operations: ["environment.proxy.update"], profile_refs: ["profile:1"], origins: ["https://example.com"], proxy_refs: [approvedProxyRef], allow_proxy_clear: false };
+  const proxyUpdate = { idempotency_key: "proxy-select", connection_id: proxyConnection.connection_id, grant_id: proxyGrant.grant_id,
+    operation: "environment.proxy.update", profile_ref: "profile:1", origin: "https://example.com", proxy_ref: approvedProxyRef, task_scope: proxyTaskScope };
+  const beforeProxySessionReads = sessionReads;
+  const selectedProxy = await proxyService.submit(proxyCredentialHash, proxyUpdate);
+  assert.equal(selectedProxy.status, "succeeded", JSON.stringify(selectedProxy));
+  assert.equal(proxyUpdates, 1);
+  assert.equal(sessionReads, beforeProxySessionReads, "proxy configuration edits do not create or require an Instance session");
+  const selectedEnvironment = (selectedProxy.result as { environment: { configured: Record<string, string | null>; effective: Record<string, string | null>; pending: Record<string, string | null> } }).environment;
+  assert.equal(selectedEnvironment.configured.proxy_ref, approvedProxyRef);
+  assert.equal(selectedEnvironment.effective.proxy_ref, null, "configuration does not masquerade as active proxy state");
+  assert.equal(selectedEnvironment.pending.proxy_ref, approvedProxyRef);
+  const wrongProxyRef = "proxy-ref:44444444-4444-4444-8444-444444444444";
+  await assert.rejects(proxyService.submit(proxyCredentialHash, { ...proxyUpdate, idempotency_key: "proxy-select-wrong-ref", proxy_ref: wrongProxyRef,
+    task_scope: { ...proxyTaskScope, proxy_refs: [wrongProxyRef] } }), /managed_access_denied/);
+  const clearDeniedGrant = await proxyAccessStore.issueAgentOperationsV2Grant({
+    idempotency_key: "proxy-grant-no-clear", principal_id: proxyPrincipal.principal_id, profile_refs: ["profile:1"],
+    policy_digest: (await proxyAccessStore.list()).profile_policies.find(item => item.profile_ref === "profile:1")!.policy_digest,
+    allowed_operations: ["environment.proxy.update"], allowed_origins: ["https://example.com"],
+    expires_at: new Date(Date.now() + 60_000).toISOString(), proxy_refs: [approvedProxyRef], allow_proxy_clear: false
+  });
+  const clearRequest = { ...proxyUpdate, idempotency_key: "proxy-clear-denied", grant_id: clearDeniedGrant.grant_id, proxy_ref: null,
+    task_scope: { ...proxyTaskScope, proxy_refs: [], allow_proxy_clear: true } };
+  await assert.rejects(proxyService.submit(proxyCredentialHash, clearRequest), /managed_access_denied/);
+  assert.equal(proxyUpdates, 1, "unauthorized clear is refused before Harbor mutation");
+  revokedProxyReference = true;
+  const unavailableProxy = await proxyService.submit(proxyCredentialHash, { ...proxyUpdate, idempotency_key: "proxy-ref-revoked" });
+  revokedProxyReference = false;
+  assert.equal(unavailableProxy.status, "failed", JSON.stringify(unavailableProxy));
+  assert.equal(unavailableProxy.failure?.code, "proxy_reference_unavailable");
+  assert.equal(proxyUpdates, 2);
+  const allowedClear = await proxyService.submit(proxyCredentialHash, { ...proxyUpdate, idempotency_key: "proxy-clear-allowed", proxy_ref: null,
+    task_scope: { ...proxyTaskScope, proxy_refs: [], allow_proxy_clear: true } });
+  assert.equal(allowedClear.status, "succeeded", JSON.stringify(allowedClear));
+  assert.equal(proxyUpdates, 3);
+  assert.equal((allowedClear.result as { environment: { configured: Record<string, string | null>; effective: Record<string, string | null>; pending: Record<string, string | null> } }).environment.configured.proxy_ref, null);
+  const lostProxy = { ...proxyUpdate, idempotency_key: "proxy-lost-response" };
+  dropProxyResponse = true;
+  const unknownProxy = await proxyService.submit(proxyCredentialHash, lostProxy);
+  assert.equal(unknownProxy.status, "unknown_outcome");
+  assert.equal(proxyUpdates, 4);
+  dropProxyResponse = false;
+  const reconciledProxy = await proxyService.query(proxyCredentialHash, unknownProxy.run_id);
+  assert.equal(reconciledProxy.status, "unknown_outcome");
+  assert.equal(reconciledProxy.reconciliation, "completed");
+  assert.equal((reconciledProxy.result as { environment: { configured: Record<string, string | null> } }).environment.configured.proxy_ref, approvedProxyRef);
+  assert.equal(proxyUpdates, 4, "query reads the original Harbor mutation receipt and never replays the proxy write");
+  assert.deepEqual(await proxyService.submit(proxyCredentialHash, lostProxy), reconciledProxy);
+  assert.equal(proxyUpdates, 4, "duplicate unknown request does not replay the proxy write");
+  await assert.rejects(proxyService.submit(proxyCredentialHash, { ...proxyUpdate, idempotency_key: "proxy-old-grant-denied", grant_id: proxyLegacyGrant.grant_id }), /managed_access_denied/);
   await accessStore.revokeGrant({ idempotency_key: "revoke-environment", grant_id: environmentGrant.grant_id });
   await accessStore.setProfilePolicy({ idempotency_key: "controlled-declaration-after-environment", ...policy, controlled_interaction_origins: [origin] });
   for (const override of [{ task_scope: { ...input.task_scope, operations: ["instance.snapshot"] } }, { profile_ref: "profile:2" }, { origin: "http://127.0.0.1:18795" }]) {

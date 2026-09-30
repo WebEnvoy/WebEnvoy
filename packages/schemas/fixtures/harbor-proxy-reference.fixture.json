@@ -1,0 +1,9 @@
+{
+  "$schema": "harbor-proxy-reference.schema.json",
+  "schema_version": "harbor-proxy-reference/v1",
+  "proxy_ref": "proxy-ref:69ff3032-95ae-47ef-8446-64ad03e2d6f7",
+  "label": "Local test",
+  "registered_at": "2026-10-01T00:00:00.000Z",
+  "revoked_at": null,
+  "availability": "registered"
+}

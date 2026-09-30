@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.webenvoy.dev/harbor-proxy-reference.schema.json",
+  "title": "Harbor public proxy reference",
+  "description": "Owner-managed opaque proxy reference metadata. The resolved endpoint and credentials are never part of this projection.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "proxy_ref", "label", "registered_at", "revoked_at", "availability"],
+  "properties": {
+    "schema_version": { "const": "harbor-proxy-reference/v1" },
+    "proxy_ref": { "type": "string", "pattern": "^proxy-ref:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$" },
+    "label": { "type": ["string", "null"], "maxLength": 128 },
+    "registered_at": { "type": "string", "format": "date-time" },
+    "revoked_at": { "type": ["string", "null"], "format": "date-time" },
+    "availability": { "enum": ["registered", "revoked"] }
+  },
+  "x-webenvoy": {
+    "owner": "Harbor proxy reference registry",
+    "status": "candidate-v1",
+    "schema_version": "harbor-proxy-reference/v1",
+    "compatibility_boundary": "Public owner registration/list/revoke projection only. Endpoints and credentials remain in Harbor's protected store. registered describes reference validity and does not claim network reachability.",
+    "source_adrs": ["docs/specs/profile-environment-v1.md", "docs/specs/grant-wire-contract-v1.md"],
+    "field_owners": { "proxy_ref": "Harbor proxy reference registry", "availability": "Harbor proxy reference registry" }
+  }
+}

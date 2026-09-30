@@ -29,6 +29,7 @@ Commands:
   account     Inspect bindings and explicitly bind a verified observation (owner-only)
   account-system  Import and manage local AccountSystem definitions (owner-only)
   profile-source Register, inspect and revoke a local Profile import source (owner-only)
+  proxy-reference Register, list and revoke owner-approved proxy aliases (owner-only)
   site-task-admission  Review and admit private Git site-task repairs (owner-only)
   recovery    Inspect or apply owner-managed recovery (owner-only)
   instance    Discover and control a Runtime instance (owner-only)
@@ -72,6 +73,12 @@ requires --source-path and emits only an opaque source_ref; list returns active
 source refs and expiry; revoke requires --source-ref. Agent requests cannot
 accept source paths or invoke these owner routes. Only supported public
 bookmarks are imported; login state and other Profile data are never copied.`,
+  'proxy-reference': `Usage: webenvoy proxy-reference <register|list|revoke> --data-dir DIR
+
+Owner-only management of approved proxy aliases. register requires --proxy-endpoint
+and may take --label; list returns only opaque refs and status; revoke requires
+--proxy-ref. Endpoints stay in Harbor's private store and are never returned.
+References remain available until the owner explicitly revokes them.`,
   account: `Usage: webenvoy account <bindings|bind> --data-dir DIR
 
 bindings --identity-environment-ref REF reads current Harbor account bindings.
@@ -179,7 +186,7 @@ const VALUE_FLAGS = new Set([
   '--source-path', '--profile-ref', '--mime-type', '--file-ref', '--destination-path', '--backup-ref', '--plan-file', '--confirmation-file',
   '--client-file', '--request-file', '--run-id', '--runtime-session-ref', '--expected-control-file', '--agent-uid', '--owner-uid', '--agent-endpoint',
   '--template-ref', '--local-definition-ref', '--base-revision-ref', '--draft-ref', '--definition-file', '--conflict-resolutions-file', '--expected-record-version', '--revision-ref',
-  '--identity-environment-ref', '--observation-ref', '--account-system-ref', '--account-ref', '--source-ref',
+  '--identity-environment-ref', '--observation-ref', '--account-system-ref', '--account-ref', '--source-ref', '--proxy-endpoint', '--proxy-ref', '--label',
   '--path', '--repository-ref', '--package-ref', '--task-ref', '--candidate-ref', '--admission-ref'
 ]);
 const COMMAND_FLAGS = new Map([
@@ -212,6 +219,9 @@ const COMMAND_FLAGS = new Map([
   ['profile-source:register', new Set(['--data-dir', '--source-path'])],
   ['profile-source:list', new Set(['--data-dir'])],
   ['profile-source:revoke', new Set(['--data-dir', '--source-ref'])],
+  ['proxy-reference:register', new Set(['--data-dir', '--proxy-endpoint', '--label'])],
+  ['proxy-reference:list', new Set(['--data-dir'])],
+  ['proxy-reference:revoke', new Set(['--data-dir', '--proxy-ref'])],
   ['site-task-admission:select-repository', new Set(['--data-dir', '--path'])],
   ['site-task-admission:list-repositories', new Set(['--data-dir'])],
   ['site-task-admission:inspect-candidate', new Set(['--data-dir', '--repository-ref', '--package-ref', '--base-revision-ref', '--first-admission', '--task-ref'])],
@@ -265,7 +275,7 @@ function validateCliSyntax(name, values) {
     if (topics.length > 3) throw cliError('help_topic_invalid');
     return;
   }
-  const action = ['access', 'files', 'profile-source', 'account', 'account-system', 'site-task-admission', 'recovery', 'instance', 'agent'].includes(name) ? values[0] : undefined;
+  const action = ['access', 'files', 'profile-source', 'proxy-reference', 'account', 'account-system', 'site-task-admission', 'recovery', 'instance', 'agent'].includes(name) ? values[0] : undefined;
   const nestedAgentTask = name === 'agent' && action === 'task';
   const nestedTaskHelp = nestedAgentTask && values[1] === '--help';
   const nestedTaskCommand = nestedAgentTask && !nestedTaskHelp ? values[1] : undefined;
@@ -475,7 +485,7 @@ if (command === 'setup') {
     if (!args.includes('--confirm')) throw new Error('access_confirmation_required');
     const value = await readJsonFile(required('--grant-file'), 'access_v2_grant_file_invalid');
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('access_v2_grant_file_invalid');
-    const allowed = ['idempotency_key', 'source_grant_id', 'source_grant_digest', 'principal_id', 'profile_refs', 'policy_digest', 'allowed_operations', 'allowed_origins', 'expires_at', 'skill_scope', 'profile_source_refs', 'file_scope', 'account_scope_selections', 'account_system_scope', 'account_binding_scopes', 'replaces_grant_id', 'replaces_grant_digest'];
+    const allowed = ['idempotency_key', 'source_grant_id', 'source_grant_digest', 'principal_id', 'profile_refs', 'policy_digest', 'allowed_operations', 'allowed_origins', 'expires_at', 'skill_scope', 'profile_source_refs', 'file_scope', 'account_scope_selections', 'account_system_scope', 'account_binding_scopes', 'proxy_refs', 'allow_proxy_clear', 'replaces_grant_id', 'replaces_grant_digest'];
     if (Object.keys(value).some(key => !allowed.includes(key)) || typeof value.idempotency_key !== 'string' || !value.idempotency_key) throw new Error('access_v2_grant_file_invalid');
     await ensureOwnerRuntime(dataDir);
     result = await requestOwner('/agent-access/v2/grants', value);
@@ -483,7 +493,7 @@ if (command === 'setup') {
     if (!args.includes('--confirm')) throw new Error('access_confirmation_required');
     const value = await readJsonFile(required('--policy-file'), 'access_v2_policy_file_invalid');
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('access_v2_policy_file_invalid');
-    const allowed = ['idempotency_key', 'profile_ref', 'current_policy_digest', 'allowed_operations', 'allowed_origins', 'controlled_interaction_origins'];
+    const allowed = ['idempotency_key', 'profile_ref', 'current_policy_digest', 'allowed_operations', 'allowed_origins', 'controlled_interaction_origins', 'proxy_refs', 'allow_proxy_clear'];
     if (Object.keys(value).some(key => !allowed.includes(key)) || typeof value.idempotency_key !== 'string' || !value.idempotency_key) throw new Error('access_v2_policy_file_invalid');
     await ensureOwnerRuntime(dataDir);
     result = await requestOwner('/agent-access/v2/profile-policies', value);
@@ -535,6 +545,20 @@ if (command === 'setup') {
     await ensureOwnerRuntime(dataDir, { requireHarbor: true });
     result = await ownerWriteRequest(dataDir, '/owner/profile-sources/revoke', { source_ref: required('--source-ref') });
   } else throw new Error('Use profile-source register --source-path PATH, list, or revoke --source-ref REF with --data-dir. This is an owner-only command.');
+  printResult(result);
+} else if (command === 'proxy-reference') {
+  const action = args[0];
+  let result;
+  if (action === 'register') {
+    const endpoint = required('--proxy-endpoint');
+    await ensureOwnerRuntime(dataDir, { requireHarbor: true });
+    result = await ownerWriteRequest(dataDir, '/owner/proxy-references', { endpoint, ...(arg('--label') === undefined ? {} : { label: arg('--label') }) });
+  } else if (action === 'list') {
+    result = await ownerRequest(dataDir, '/owner/proxy-references');
+  } else if (action === 'revoke') {
+    await ensureOwnerRuntime(dataDir, { requireHarbor: true });
+    result = await ownerWriteRequest(dataDir, '/owner/proxy-references/revoke', { proxy_ref: required('--proxy-ref') });
+  } else throw new Error('Use proxy-reference register --proxy-endpoint URL [--label LABEL], list, or revoke --proxy-ref REF with --data-dir. Owner endpoints are never returned.');
   printResult(result);
 } else if (command === 'account') {
   const action = args[0];

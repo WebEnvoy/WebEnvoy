@@ -56,10 +56,11 @@ import {
   type BrowserProviderPreferenceSnapshot
 } from "./provider-preference.js";
 import { opaqueRef } from "./refs.js";
-import { boundedEnvironmentUpdate, environmentUnavailable } from "./profile-environment.js";
+import { boundedEnvironmentUpdate, boundedProxyEnvironmentUpdate, environmentUnavailable } from "./profile-environment.js";
 import { withProfileBackedLocalMaterial } from "./profile-backed-local-material.js";
 import { acquireProfileStorageOwnership, profileStorageHasExternalLock, profileStoragePath, profileStoragePathExists, type ProfileStorageOwnershipLock } from "./profile-storage.js";
 import { mergeBookmarksIntoTarget, ProfileSourceRegistry, type ProfileImportReceipt, type ProfileSourcePublicRecord } from "./profile-import.js";
+import { ProxyReferenceRegistry, type ProxyReferencePublicRecord } from "./proxy-reference.js";
 import {
   consumeManualAuthenticationAuthorizationGrant,
   type ManualAuthenticationAuthorizationGrant
@@ -553,6 +554,7 @@ export class HarborRuntime {
   private readonly viewerControls = new ViewerControlStore();
   private readonly identityEnvironments: LocalIdentityEnvironmentManager;
   private readonly profileSources: ProfileSourceRegistry;
+  private readonly proxyReferences: ProxyReferenceRegistry;
   private readonly browserProviderPreference: BrowserProviderPreferenceManager;
   private readonly runtimeSessions: RuntimeSessionStore;
   private readonly managedFiles: ManagedFileStore;
@@ -565,7 +567,14 @@ export class HarborRuntime {
     identityEnvironmentOptions: LocalIdentityEnvironmentManagerOptions = {},
     providerLifecycleOptions: ManagedProviderLifecycleOptions = {}
   ) {
-    const ownerOptions = withProfileBackedLocalMaterial(identityEnvironmentOptions);
+    this.proxyReferences = new ProxyReferenceRegistry(identityEnvironmentOptions.persistence_path
+      ? `${identityEnvironmentOptions.persistence_path}.proxy-references.json`
+      : undefined);
+    const ownerOptions = withProfileBackedLocalMaterial({
+      ...identityEnvironmentOptions,
+      validate_proxy: identityEnvironmentOptions.validate_proxy ?? (proxyRef => this.proxyReferences.validate(proxyRef)),
+      resolve_proxy: identityEnvironmentOptions.resolve_proxy ?? (proxyRef => this.proxyReferences.resolve(proxyRef))
+    });
     this.profileSources = new ProfileSourceRegistry(identityEnvironmentOptions.persistence_path
       ? `${identityEnvironmentOptions.persistence_path}.profile-sources.json`
       : undefined);
@@ -627,6 +636,12 @@ export class HarborRuntime {
   revokeProfileSource(sourceRef: string): ProfileSourcePublicRecord {
     return this.profileSources.revoke(sourceRef);
   }
+
+  registerProxyReference(endpoint: string, label?: string): ProxyReferencePublicRecord { return this.proxyReferences.register(endpoint, label); }
+  listProxyReferences(): ProxyReferencePublicRecord[] { return this.proxyReferences.list(); }
+  revokeProxyReference(proxyRef: string): ProxyReferencePublicRecord { return this.proxyReferences.revoke(proxyRef); }
+  validateProxyReference(proxyRef: string): "registered" | "unavailable" { return this.proxyReferences.validate(proxyRef); }
+  resolveProxyReference(proxyRef: string): string | null { return this.proxyReferences.resolve(proxyRef); }
 
   inspectProfileSource(sourceRef: string): ProfileSourcePublicRecord {
     return this.profileSources.inspect(sourceRef);
@@ -760,7 +775,7 @@ export class HarborRuntime {
       availability: { state: "unknown", reason_codes: ["runtime_facts_unavailable"], facts_at: profile.updated_at },
       execution_checks: ["reauthorize"]
     };
-    const needsSession = !["profile.list", "profile.read", "profile.create", "profile.metadata.update", "provider.preference.read", "provider.preference.set", "provider.preference.clear", "environment.read", "environment.update", "instance.start"].includes(operation);
+    const needsSession = !["profile.list", "profile.read", "profile.create", "profile.metadata.update", "provider.preference.read", "provider.preference.set", "provider.preference.clear", "environment.read", "environment.update", "environment.proxy.update", "instance.start"].includes(operation);
     const requestedSessionRef = typeof value.runtime_session_ref === "string" ? value.runtime_session_ref : undefined;
     const record = requestedSessionRef ? this.runtimeSessions.getRecord(requestedSessionRef) : (() => {
       const active = this.runtimeSessions.getActiveIdentityEnvironmentSession(profile.identity_environment_ref);
@@ -1404,7 +1419,7 @@ export class HarborRuntime {
     if (request.operation === "profile.metadata.update") return this.identityEnvironments.mutate(request);
     // These edits change only the owner configuration record. Active launch
     // snapshots and browser storage stay untouched until an explicit restart.
-    if (request.operation === "edit" && boundedEnvironmentUpdate(request.configuration) && this.runtimeSessions.isIdentityEnvironmentInUse(request.identity_environment_ref)) return this.identityEnvironments.mutate(request, null, true);
+    if (request.operation === "edit" && (boundedEnvironmentUpdate(request.configuration) || boundedProxyEnvironmentUpdate(request.configuration)) && this.runtimeSessions.isIdentityEnvironmentInUse(request.identity_environment_ref)) return this.identityEnvironments.mutate(request, null, true);
     const materializedRequest = materializeIdentityEnvironmentMutation(request);
     const reservationRefs = this.mutationReservationRefs(materializedRequest);
     const sourceInUse = reservationRefs.source_identity_environment_ref &&

@@ -49,3 +49,14 @@ test("keeps explicit viewport launch validation strict", () => {
     );
   }
 });
+
+test("registered proxy references validate configuration without claiming network reachability", () => {
+  const facts = identityWithViewport("1280x720");
+  let registrationsChecked = 0;
+  const result = validateIdentityEnvironmentConfiguration({ proxy_ref: "proxy-ref:11111111-1111-4111-8111-111111111111" }, facts, {
+    validate_proxy: () => { registrationsChecked++; return "registered"; },
+    resolve_proxy: () => "socks5://127.0.0.1:1080"
+  });
+  assert.equal(result, null);
+  assert.equal(registrationsChecked, 1, "registered means a valid owner reference resolves; this check performs no endpoint probe");
+});

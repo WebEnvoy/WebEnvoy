@@ -14,6 +14,7 @@ const ownerSessionRunStatuses = new Set(['pending', 'admitted', 'running', 'requ
 const safeIdentifier = /^[A-Za-z][A-Za-z0-9._:-]{0,127}$/;
 const safeRunId = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const safeProfileSourceRef = /^profile-source:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const safeProxyRef = /^proxy-ref:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const exactKeys = (value, required, optional = []) => {
   const keys = Object.keys(value);
   return required.every(key => Object.hasOwn(value, key)) && keys.every(key => required.includes(key) || optional.includes(key));
@@ -31,6 +32,16 @@ const projectProfileSource = value => {
       value.bookmark_count < 0 || typeof value.registered_at !== 'string' || !Number.isFinite(Date.parse(value.registered_at)) ||
       typeof value.expires_at !== 'string' || !Number.isFinite(Date.parse(value.expires_at)) ||
       (value.revoked_at !== null && (typeof value.revoked_at !== 'string' || !Number.isFinite(Date.parse(value.revoked_at))))) return undefined;
+  return Object.fromEntries(keys.map(key => [key, value[key]]));
+};
+
+const projectProxyReference = value => {
+  const keys = ['schema_version', 'proxy_ref', 'label', 'registered_at', 'revoked_at', 'availability'];
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !exactKeys(value, keys) ||
+      value.schema_version !== 'harbor-proxy-reference/v1' || typeof value.proxy_ref !== 'string' || !safeProxyRef.test(value.proxy_ref) ||
+      !(value.label === null || typeof value.label === 'string') || typeof value.registered_at !== 'string' || !Number.isFinite(Date.parse(value.registered_at)) ||
+      (value.revoked_at !== null && (typeof value.revoked_at !== 'string' || !Number.isFinite(Date.parse(value.revoked_at)))) ||
+      !['registered', 'revoked'].includes(value.availability)) return undefined;
   return Object.fromEntries(keys.map(key => [key, value[key]]));
 };
 
@@ -114,6 +125,25 @@ export function projectHarborResponse(req, value) {
     if (error) return error;
     const source = projectProfileSource(value?.source);
     return source ? { source } : undefined;
+  }
+  if (pathname === '/owner/proxy-references') {
+    const error = projectHarborError(value);
+    if (error) return error;
+    if (req.method === 'GET') {
+      if (!value || typeof value !== 'object' || Array.isArray(value) || !Array.isArray(value.proxy_references)) return undefined;
+      const references = value.proxy_references.map(projectProxyReference);
+      return references.every(Boolean) ? { proxy_references: references } : undefined;
+    }
+    if (req.method === 'POST') {
+      const reference = projectProxyReference(value?.proxy_reference);
+      return reference ? { proxy_reference: reference } : undefined;
+    }
+  }
+  if (pathname === '/owner/proxy-references/revoke' && req.method === 'POST') {
+    const error = projectHarborError(value);
+    if (error) return error;
+    const reference = projectProxyReference(value?.proxy_reference);
+    return reference ? { proxy_reference: reference } : undefined;
   }
   if (pathname === '/runtime/sessions') {
     if (Array.isArray(value)) {

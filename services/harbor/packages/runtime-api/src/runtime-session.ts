@@ -253,6 +253,7 @@ export function managedOperationOwner(operation: string): ManagedOperationOwner 
       return "file";
     case "environment.read":
     case "environment.update":
+    case "environment.proxy.update":
       return "environment";
     default:
       return managedOperationCatalog.operations.some(item => item.operation_id === operation) ? "runtime" : "unknown";
@@ -283,7 +284,7 @@ export function managedOperationAdapterAvailable(record: RuntimeSessionRecord | 
     case "file":
       return isTrustedLocalProviderFileOperation(record.executeFileOperation);
     case "environment":
-      return operation === "environment.update" || isTrustedEnvironmentProbe(record.readEnvironment);
+      return operation === "environment.update" || operation === "environment.proxy.update" || isTrustedEnvironmentProbe(record.readEnvironment);
     default:
       return undefined;
   }

@@ -79,9 +79,14 @@ function checkedObservationResult(value) {
 }
 const capabilityOperations = capabilityDefinitions.operations.filter(definition => definition.exposure === 'exposed');
 const managedOperationIds = capabilityOperations.map(definition => definition.id);
+const publicFieldSchema = schema => {
+  if (schema.nullable !== true) return { ...schema };
+  const { nullable: _nullable, ...properties } = schema;
+  return { ...properties, type: [schema.type, 'null'] };
+};
 const managedFileOperationIds = capabilityOperations.filter(definition => definition.file_scope).map(definition => definition.id);
 const managedOriginOperationIds = capabilityOperations.filter(definition => definition.required.includes('origin')).map(definition => definition.id);
-const managedOperationDescription = `Submit one authorized operation using the static WebEnvoy input definition. ${capabilityOperations.map(definition => `${definition.id}: ${definition.summary}`).join(' ')} task_scope describes this submitted operation only; submit later workflow steps separately. File upload/download accepts only opaque owner references and a fresh Page target; file_refs is allowed only for the current file.upload or file.download operation and must be omitted for every other operation. Operation-specific origin inputs are significant: ${managedOriginOperationIds.join(', ')} require the exact authorized origin as a top-level origin field; task_scope.origins cannot replace it. Preference, Profile, Page, environment and browser actions never retry; query the original Run when an outcome is unknown. This tool executes only the submitted operation; it does not describe later workflow steps.`;
+const managedOperationDescription = `Submit one authorized operation using the static WebEnvoy input definition. ${capabilityOperations.map(definition => `${definition.id}: ${definition.summary}`).join(' ')} task_scope describes this submitted operation only; submit later workflow steps separately. File upload/download accepts only opaque owner references and a fresh Page target; file_refs is allowed only for the current file.upload or file.download operation and must be omitted for every other operation. Proxy selection accepts only a Grant-scoped opaque owner reference or explicit clear; proxy endpoints and credentials are never accepted. Operation-specific origin inputs are significant: ${managedOriginOperationIds.join(', ')} require the exact authorized origin as a top-level origin field; task_scope.origins cannot replace it. Preference, Profile, Page, environment and browser actions never retry; query the original Run when an outcome is unknown. This tool executes only the submitted operation; it does not describe later workflow steps.`;
 const managedTaskScopeProperties = {
   operations: { type: 'array', description: 'Operations in the scope for this submitted operation; include the current operation and do not use later workflow steps to justify fields in this request.', items: { type: 'string' } },
   profile_refs: { type: 'array', items: { type: 'string' } },
@@ -108,6 +113,15 @@ const managedTaskScopeSchema = (fileScope, operationId) => {
       account_binding_scopes: { type: 'array', minItems: 1, items: { type: 'object', required: ['profile_ref', 'account_system_ref', 'account_ref'],
         properties: { profile_ref: { type: 'string', minLength: 1 }, account_system_ref: { type: 'string', pattern: '^account-system:[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' }, account_ref: { type: 'string', pattern: '^account:sha256:[a-f0-9]{64}$' } }, additionalProperties: false } }
     }, required: ['operations', 'profile_refs', 'origins', 'account_binding_scopes'], additionalProperties: false
+  };
+  if (operationId === 'environment.proxy.update') return {
+    type: 'object', properties: {
+      operations: { type: 'array', minItems: 1, maxItems: 1, items: { const: operationId } },
+      profile_refs: { type: 'array', minItems: 1, maxItems: 1, items: { type: 'string', minLength: 1 } },
+      origins: { type: 'array', minItems: 1, maxItems: 1, items: { type: 'string' } },
+      proxy_refs: { type: 'array', maxItems: 1, items: { type: 'string', pattern: '^proxy-ref:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' } },
+      allow_proxy_clear: { type: 'boolean' }
+    }, required: ['operations', 'profile_refs', 'origins', 'proxy_refs', 'allow_proxy_clear'], additionalProperties: false
   };
   if (operationId === 'profile.import' || operationId === 'profile.migrate.request') {
     const importing = operationId === 'profile.import';
@@ -149,7 +163,7 @@ const managedOperationProperties = Object.fromEntries([
       account_ref: { type: 'string', pattern: '^account:sha256:[a-f0-9]{64}$' }
     }, additionalProperties: false } }
   } }],
-  ...Object.entries(capabilityDefinitions.fields).map(([name, schema]) => [name, { ...schema }])
+    ...Object.entries(capabilityDefinitions.fields).map(([name, schema]) => [name, publicFieldSchema(schema)])
 ]);
 const forbiddenFor = definition => Object.keys(capabilityDefinitions.fields).filter(field => !definition.allowed.includes(field));
 const conditionIf = condition => {
@@ -187,7 +201,7 @@ const operationConditions = capabilityOperations.map(definition => ({
   if: { required: ['operation'], properties: { operation: { const: definition.id } } },
   then: {
     ...conditionThen(definition),
-    ...(['account_system.import_template', 'account.bind', 'profile.import', 'profile.migrate.request'].includes(definition.id)
+    ...(['account_system.import_template', 'account.bind', 'profile.import', 'profile.migrate.request', 'environment.proxy.update'].includes(definition.id)
       ? { properties: { task_scope: managedTaskScopeSchema(undefined, definition.id) } } : {})
   }
 }));
@@ -209,7 +223,11 @@ const managedOperationSchema = {
           else: {
           if: { required: ['operation'], properties: { operation: { enum: ['profile.import', 'profile.migrate.request'] } } },
           then: { properties: { task_scope: managedProfileTransferScopeSchema() } },
-          else: { properties: { task_scope: managedTaskScopeSchema(undefined) } }
+          else: {
+            if: { required: ['operation'], properties: { operation: { const: 'environment.proxy.update' } } },
+            then: { properties: { task_scope: managedTaskScopeSchema(undefined, 'environment.proxy.update') } },
+            else: { properties: { task_scope: managedTaskScopeSchema(undefined) } }
+          }
         }
         }
       }
@@ -227,6 +245,14 @@ const managedOperationSchema = {
       then: { required: ['origin'] }
     },
     ...operationConditions
+    ,{
+      if: { required: ['operation'], properties: { operation: { const: 'environment.proxy.update' } } },
+      then: { allOf: [{
+        if: { required: ['proxy_ref'], properties: { proxy_ref: { type: 'null' } } },
+        then: { properties: { task_scope: { properties: { proxy_refs: { maxItems: 0 }, allow_proxy_clear: { const: true } } } } },
+        else: { properties: { task_scope: { properties: { proxy_refs: { minItems: 1, maxItems: 1 }, allow_proxy_clear: { const: false } } } } }
+      }] }
+    }
     ,{
       if: { required: ['operation'], properties: { operation: { const: 'profile.import' } } },
       then: { properties: { task_scope: { properties: { profile_source_refs: { minItems: 1, maxItems: 1 } } } }, 'x-webenvoy-equals': { left: 'task_scope.profile_source_refs[0]', right: 'profile_source_ref' } }
@@ -258,7 +284,7 @@ const tools = [
         required: ['grant_id', 'task_scope'],
         additionalProperties: false
       },
-      arguments: { type: 'object', description: 'A partial draft of the target operation fields; envelope and context fields are not accepted.', properties: Object.fromEntries(Object.entries(capabilityDefinitions.fields).filter(([name]) => name !== 'profile_ref').map(([name, schema]) => [name, { ...schema }])), additionalProperties: false }
+      arguments: { type: 'object', description: 'A partial draft of the target operation fields; envelope and context fields are not accepted.', properties: Object.fromEntries(Object.entries(capabilityDefinitions.fields).filter(([name]) => name !== 'profile_ref').map(([name, schema]) => [name, publicFieldSchema(schema)])), additionalProperties: false }
     },
     required: ['operation'],
     additionalProperties: false,
