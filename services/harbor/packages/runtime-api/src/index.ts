@@ -1270,6 +1270,9 @@ export class HarborRuntime {
   }
 
   mutateLocalIdentityEnvironment(request: IdentityEnvironmentMutationRequest): IdentityEnvironmentMutationResult {
+    // Profile organization metadata is persisted by the identity owner and does
+    // not touch a Browser, Session, or Profile storage resource.
+    if (request.operation === "profile.metadata.update") return this.identityEnvironments.mutate(request);
     // These edits change only the owner configuration record. Active launch
     // snapshots and browser storage stay untouched until an explicit restart.
     if (request.operation === "edit" && boundedEnvironmentUpdate(request.configuration) && this.runtimeSessions.isIdentityEnvironmentInUse(request.identity_environment_ref)) return this.identityEnvironments.mutate(request, null, true);
