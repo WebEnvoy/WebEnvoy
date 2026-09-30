@@ -87,6 +87,13 @@ const managedTaskScopeProperties = {
   profile_refs: { type: 'array', items: { type: 'string' } },
   origins: { type: 'array', items: { type: 'string' } }
 };
+const managedProfileSourceRefs = { type: 'array', minItems: 0, maxItems: 64, items: { type: 'string', pattern: '^profile-source:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' } };
+const managedProfileTransferScopeSchema = () => ({
+  type: 'object',
+  properties: { ...managedTaskScopeProperties, profile_source_refs: managedProfileSourceRefs },
+  required: ['operations', 'profile_refs', 'origins', 'profile_source_refs'],
+  additionalProperties: false
+});
 const managedTaskScopeSchema = (fileScope, operationId) => {
   if (operationId === 'account_system.import_template') return {
     type: 'object', properties: {
@@ -102,6 +109,19 @@ const managedTaskScopeSchema = (fileScope, operationId) => {
         properties: { profile_ref: { type: 'string', minLength: 1 }, account_system_ref: { type: 'string', pattern: '^account-system:[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' }, account_ref: { type: 'string', pattern: '^account:sha256:[a-f0-9]{64}$' } }, additionalProperties: false } }
     }, required: ['operations', 'profile_refs', 'origins', 'account_binding_scopes'], additionalProperties: false
   };
+  if (operationId === 'profile.import' || operationId === 'profile.migrate.request') {
+    const importing = operationId === 'profile.import';
+    return {
+      type: 'object', properties: {
+        operations: { type: 'array', minItems: 1, maxItems: 1, items: { const: operationId } },
+        profile_refs: { type: 'array', ...(importing ? { maxItems: 0 } : { minItems: 1, maxItems: 1 }), items: { type: 'string', minLength: 1 } },
+        origins: { type: 'array', ...(importing ? { minItems: 1, maxItems: 1 } : { maxItems: 0 }), items: { type: 'string' } },
+        profile_source_refs: { type: 'array', ...(importing ? { minItems: 1, maxItems: 1 } : { maxItems: 0 }), items: managedProfileSourceRefs.items }
+      }, required: ['operations', 'profile_refs', 'origins', 'profile_source_refs'], additionalProperties: false,
+      'x-webenvoy-equals': importing ? { left: 'task_scope.profile_source_refs[0]', right: 'profile_source_ref' }
+        : { left: 'task_scope.profile_refs[0]', right: 'profile_ref' }
+    };
+  }
   return ({
   type: 'object',
   description: 'Authorization scope for this single submitted operation, not an entire multi-step workflow. File refs belong only to the current file operation.',
@@ -167,7 +187,8 @@ const operationConditions = capabilityOperations.map(definition => ({
   if: { required: ['operation'], properties: { operation: { const: definition.id } } },
   then: {
     ...conditionThen(definition),
-    ...(definition.id === 'account_system.import_template' || definition.id === 'account.bind' ? { properties: { task_scope: managedTaskScopeSchema(undefined, definition.id) } } : {})
+    ...(['account_system.import_template', 'account.bind', 'profile.import', 'profile.migrate.request'].includes(definition.id)
+      ? { properties: { task_scope: managedTaskScopeSchema(undefined, definition.id) } } : {})
   }
 }));
 const managedOperationSchema = {
@@ -185,7 +206,11 @@ const managedOperationSchema = {
         else: {
           if: { required: ['operation'], properties: { operation: { const: 'account.bind' } } },
           then: { properties: { task_scope: managedTaskScopeSchema(undefined, 'account.bind') } },
+          else: {
+          if: { required: ['operation'], properties: { operation: { enum: ['profile.import', 'profile.migrate.request'] } } },
+          then: { properties: { task_scope: managedProfileTransferScopeSchema() } },
           else: { properties: { task_scope: managedTaskScopeSchema(undefined) } }
+        }
         }
       }
     },
@@ -202,6 +227,14 @@ const managedOperationSchema = {
       then: { required: ['origin'] }
     },
     ...operationConditions
+    ,{
+      if: { required: ['operation'], properties: { operation: { const: 'profile.import' } } },
+      then: { properties: { task_scope: { properties: { profile_source_refs: { minItems: 1, maxItems: 1 } } } }, 'x-webenvoy-equals': { left: 'task_scope.profile_source_refs[0]', right: 'profile_source_ref' } }
+    },
+    {
+      if: { required: ['operation'], properties: { operation: { const: 'profile.migrate.request' } } },
+      then: { properties: { task_scope: { properties: { profile_source_refs: { minItems: 0, maxItems: 0 } } } } }
+    }
   ]
 };
 const tools = [
@@ -217,7 +250,7 @@ const tools = [
         properties: {
           grant_id: { type: 'string' },
           profile_ref: { type: 'string' },
-          task_scope: { type: 'object', properties: { ...managedTaskScopeProperties,
+          task_scope: { type: 'object', properties: { ...managedTaskScopeProperties, profile_source_refs: managedProfileSourceRefs,
             template_refs: { type: 'array', items: { type: 'string', pattern: '^lode://account-system/[a-z0-9][a-z0-9._-]*@[0-9]+\\.[0-9]+\\.[0-9]+$' } },
             account_binding_scopes: { type: 'array', items: { type: 'object', required: ['profile_ref', 'account_system_ref', 'account_ref'], properties: { profile_ref: { type: 'string' }, account_system_ref: { type: 'string' }, account_ref: { type: 'string' } }, additionalProperties: false } },
             file_refs: { type: 'array', items: { type: 'string', pattern: '^attachment:runtime/[0-9a-f-]{36}$' }, description: 'Only for file operations; upload carries one ref and download carries an empty array.' } }, required: ['operations'], additionalProperties: false }
@@ -228,7 +261,36 @@ const tools = [
       arguments: { type: 'object', description: 'A partial draft of the target operation fields; envelope and context fields are not accepted.', properties: Object.fromEntries(Object.entries(capabilityDefinitions.fields).filter(([name]) => name !== 'profile_ref').map(([name, schema]) => [name, { ...schema }])), additionalProperties: false }
     },
     required: ['operation'],
-    additionalProperties: false
+    additionalProperties: false,
+    allOf: [
+      {
+        if: { required: ['operation'], properties: { operation: { const: 'profile.migrate.request' } } },
+        then: {
+          properties: {
+            context: {
+              properties: {
+                task_scope: {
+                  required: ['operations', 'profile_refs', 'origins', 'profile_source_refs'],
+                  properties: { profile_source_refs: { minItems: 0, maxItems: 0 } }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        if: { required: ['operation'], properties: { operation: { not: { const: 'profile.migrate.request' } } } },
+        then: {
+          properties: {
+            context: {
+              properties: {
+                task_scope: { not: { required: ['profile_source_refs'] } }
+              }
+            }
+          }
+        }
+      }
+    ]
   } },
   { name: 'webenvoy_operation', description: managedOperationDescription, inputSchema: managedOperationSchema },
   { name: 'webenvoy_query', description: 'Query a prior Run without replay. If the response was lost, reconnect and query the original idempotency_key.', inputSchema: { type: 'object', properties: { run_id: { type: 'string', pattern: '^managed-[a-f0-9]{64}$' }, idempotency_key: { type: 'string', minLength: 1, maxLength: 512 } }, additionalProperties: false } },

@@ -1,0 +1,48 @@
+{
+  "schema": "profile-import-receipt.schema.json",
+  "cases": [
+    {
+      "name": "receipt cannot contain a private source path",
+      "instance": {
+        "schema_version": "harbor-profile-import-receipt/v1",
+        "idempotency_key": "run:import",
+        "request_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "source_ref": "profile-source:766261cf-b05c-431f-a6c2-4e6efa723d5d",
+        "source_path": "/private/source/profile",
+        "target_profile_ref": "profile:managed-target",
+        "target_identity_environment_ref": "identity-environment:managed-target",
+        "status": "completed",
+        "report": {
+          "schema_version": "harbor-profile-import-report/v1",
+          "status": "completed",
+          "imported": { "bookmarks": 1, "folders": 1 },
+          "skipped": { "bookmarks": 0, "folders": 0, "separators": 0, "unsafe_urls": 0 },
+          "repair_status": "not_attempted",
+          "requires_login": true,
+          "exclusions": ["history", "cookies", "logins", "extensions", "provider_configuration", "account_binding", "runtime_runs"]
+        }
+      }
+    },
+    {
+      "name": "report cannot claim history or credentials were imported",
+      "instance": {
+        "schema_version": "harbor-profile-import-receipt/v1",
+        "idempotency_key": "run:import",
+        "request_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "source_ref": "profile-source:766261cf-b05c-431f-a6c2-4e6efa723d5d",
+        "target_profile_ref": "profile:managed-target",
+        "target_identity_environment_ref": "identity-environment:managed-target",
+        "status": "completed",
+        "report": {
+          "schema_version": "harbor-profile-import-report/v1",
+          "status": "completed",
+          "imported": { "bookmarks": 1, "folders": 1, "history": 10 },
+          "skipped": { "bookmarks": 0, "folders": 0, "separators": 0, "unsafe_urls": 0 },
+          "repair_status": "not_attempted",
+          "requires_login": false,
+          "exclusions": ["history", "cookies", "logins", "extensions", "provider_configuration", "account_binding", "runtime_runs"]
+        }
+      }
+    }
+  ]
+}

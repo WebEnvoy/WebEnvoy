@@ -13,9 +13,25 @@ const projectLock = value => value && typeof value === 'object' && !Array.isArra
 const ownerSessionRunStatuses = new Set(['pending', 'admitted', 'running', 'requires_user_action', 'manual_recovery_required', 'unknown_outcome']);
 const safeIdentifier = /^[A-Za-z][A-Za-z0-9._:-]{0,127}$/;
 const safeRunId = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const safeProfileSourceRef = /^profile-source:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const exactKeys = (value, required, optional = []) => {
   const keys = Object.keys(value);
   return required.every(key => Object.hasOwn(value, key)) && keys.every(key => required.includes(key) || optional.includes(key));
+};
+const projectHarborError = value => value && typeof value === 'object' && !Array.isArray(value) &&
+  typeof value.error === 'string' && safeIdentifier.test(value.error)
+  ? { error: value.error }
+  : undefined;
+
+const projectProfileSource = value => {
+  const keys = ['schema_version', 'source_ref', 'provider_id', 'source_format', 'bookmark_count', 'registered_at', 'expires_at', 'revoked_at'];
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !exactKeys(value, keys, ['canonical_path', 'fingerprint']) ||
+      value.schema_version !== 'harbor-profile-source/v1' || typeof value.source_ref !== 'string' || !safeProfileSourceRef.test(value.source_ref) ||
+      value.provider_id !== 'camoufox' || value.source_format !== 'camoufox.firefox-places.v86' || !Number.isSafeInteger(value.bookmark_count) ||
+      value.bookmark_count < 0 || typeof value.registered_at !== 'string' || !Number.isFinite(Date.parse(value.registered_at)) ||
+      typeof value.expires_at !== 'string' || !Number.isFinite(Date.parse(value.expires_at)) ||
+      (value.revoked_at !== null && (typeof value.revoked_at !== 'string' || !Number.isFinite(Date.parse(value.revoked_at))))) return undefined;
+  return Object.fromEntries(keys.map(key => [key, value[key]]));
 };
 
 export function projectSessionSupervision(runtimeSessionRef, value) {
@@ -80,6 +96,25 @@ export function projectSessionFacts(value, { allowTerminalStop = false } = {}) {
 export function projectHarborResponse(req, value) {
   const pathname = new URL(req.url, 'http://owner.local').pathname;
   const allowTerminalStop = req.method === 'POST' && /^\/runtime\/sessions\/[^/]+\/stop$/.test(pathname);
+  if (pathname === '/owner/profile-sources') {
+    const error = projectHarborError(value);
+    if (error) return error;
+    if (req.method === 'GET') {
+      if (!value || typeof value !== 'object' || Array.isArray(value) || !Array.isArray(value.sources)) return undefined;
+      const sources = value.sources.map(projectProfileSource);
+      return sources.every(Boolean) ? { sources } : undefined;
+    }
+    if (req.method === 'POST') {
+      const source = projectProfileSource(value?.source);
+      return source ? { source } : undefined;
+    }
+  }
+  if (pathname === '/owner/profile-sources/revoke' && req.method === 'POST') {
+    const error = projectHarborError(value);
+    if (error) return error;
+    const source = projectProfileSource(value?.source);
+    return source ? { source } : undefined;
+  }
   if (pathname === '/runtime/sessions') {
     if (Array.isArray(value)) {
       const sessions = value.map(projectSessionFacts);
@@ -97,6 +132,6 @@ export function projectHarborResponse(req, value) {
     if (value.current_error) result.current_error = projectRuntimeError(value.current_error);
     return result;
   }
-  if (value && typeof value === 'object' && typeof value.error === 'string') return { error: value.error };
+  if (value && typeof value === 'object' && typeof value.error === 'string') return projectHarborError(value);
   return projectSessionFacts(value, { allowTerminalStop });
 }

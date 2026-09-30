@@ -74,7 +74,18 @@ function assertTaskScope(scope, definition, code) {
     return;
   }
   const fileScope = definition?.file_scope;
-  const keys = ['operations', 'profile_refs', 'origins', ...(fileScope ? ['file_refs'] : [])];
+  const profileTransfer = ['profile.import', 'profile.migrate.request'].includes(definition?.id);
+  if (profileTransfer) {
+    assertExactObject(scope, ['operations', 'profile_refs', 'origins', 'profile_source_refs'], code);
+    const importing = definition.id === 'profile.import';
+    taskArray(scope.operations, code, { min: 1, max: 1 });
+    taskArray(scope.profile_refs, code, { min: importing ? 0 : 1, max: importing ? 0 : 1 });
+    taskArray(scope.origins, code, { min: importing ? 1 : 0, max: importing ? 1 : 0, origin: true });
+    taskArray(scope.profile_source_refs, code, { min: importing ? 1 : 0, max: importing ? 1 : 0 });
+    if (scope.operations[0] !== definition.id || scope.profile_source_refs.some(value => !/^profile-source:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value))) throw new Error(code);
+    return;
+  }
+  const keys = ['operations', 'profile_refs', 'origins', ...(fileScope ? ['file_refs'] : []), ...(profileTransfer ? ['profile_source_refs'] : [])];
   assertExactObject(scope, keys, code);
   for (const key of ['operations', 'profile_refs', 'origins']) if (!Array.isArray(scope[key]) || scope[key].some(value => typeof value !== 'string')) throw new Error(code);
   if (fileScope === 'upload' && (!Array.isArray(scope.file_refs) || scope.file_refs.length !== 1 || typeof scope.file_refs[0] !== 'string')) throw new Error(code);
@@ -278,6 +289,9 @@ export function validateOperationRequest(value, definitions) {
   const definition = exposed.find(item => item.id === value.operation);
   if (!definition) throw new Error(code);
   assertTaskScope(value.task_scope, definition, code);
+  if (definition.id === 'profile.import' && (value.task_scope.profile_source_refs.length !== 1 || value.task_scope.profile_source_refs[0] !== value.profile_source_ref)) throw new Error(code);
+  if (definition.id === 'profile.migrate.request' && value.task_scope.profile_source_refs.length !== 0) throw new Error(code);
+  if (definition.id === 'profile.migrate.request' && (value.task_scope.profile_refs.length !== 1 || value.task_scope.profile_refs[0] !== value.profile_ref)) throw new Error(code);
   if (!value.task_scope.operations.includes(definition.id)) throw new Error(code);
   if (definition.id === 'account_system.import_template' && value.task_scope.template_refs[0] !== value.template_ref) throw new Error(code);
   if (definition.id === 'account.bind') {
@@ -322,6 +336,7 @@ export function validateDescribeRequest(value, definitions) {
     assertString(context.grant_id, code);
     if (!core) assertString(context.profile_ref, code);
     assertTaskScope(context.task_scope, definition, code);
+    if (value.operation === 'profile.migrate.request' && context.task_scope.profile_source_refs.length !== 0) throw new Error(code);
   }
   if (value.arguments !== undefined) {
     const draft = assertObject(value.arguments, code);

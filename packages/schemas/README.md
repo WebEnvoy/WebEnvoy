@@ -37,8 +37,11 @@ The files intentionally stay small:
 - `schemas/managed-task-operation-result.schema.json`
 - `schemas/provider-preference-read-result.schema.json`
 - `schemas/profile-lifecycle-mutation-request.schema.json`
+- `schemas/profile-import-receipt.schema.json`
 
 Fixtures under `fixtures/` are representative examples used by the package self-check. The self-check verifies that each schema declares owner/status/compatibility metadata and that each fixture is bound to a local schema and matching `schema_version`.
+
+The Profile import receipt schema covers only Harbor's bounded bookmark-import result and the original source/target references. See [`docs/specs/profile-transfer-v1.md`](../../docs/specs/profile-transfer-v1.md); it does not authorize a source or expose local path/profile material.
 
 `fixtures/golden-read-only-run-record.fixture.json` is the first reusable terminal read-only Run Record fixture. It binds the existing read-only task intent, Lode capability/package ref, Harbor runtime refs, result ref, and evidence ref so downstream smoke can query one stable run without inventing new fields.
 

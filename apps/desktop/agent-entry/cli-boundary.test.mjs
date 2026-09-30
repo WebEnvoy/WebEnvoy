@@ -7,12 +7,23 @@ import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import test from 'node:test';
 import definitions from '../../../packages/core/src/managed-capability-definitions.json' with { type: 'json' };
-import { validateManagedTaskRequest, validateOperationRequest } from './request-validation.mjs';
+import { validateDescribeRequest, validateManagedTaskRequest, validateOperationRequest } from './request-validation.mjs';
 import { INSTALLED_AGENT_MANIFEST_SCHEMA, INSTALLED_SKILL_VERSION, REQUIRED_AGENT_ASSETS, REQUIRED_DRIVER_ASSETS, sha, verifyBundle } from './bundle.mjs';
 
 const entryRoot = dirname(fileURLToPath(import.meta.url));
 const cliPath = join(entryRoot, 'cli.mjs');
 const installationLink = join(entryRoot, '../webenvoy-installation.json');
+
+test('migration contextual description requires an empty Profile source scope and keeps owner paths out of the Agent contract', () => {
+  const request = { operation: 'profile.migrate.request', context: { grant_id: 'grant:fixture', profile_ref: 'profile:fixture',
+    task_scope: { operations: ['profile.migrate.request'], profile_refs: ['profile:fixture'], origins: [], profile_source_refs: [] } },
+    arguments: { template_ref: 'template:owner-approved', target_provider_id: 'camoufox' } };
+  assert.doesNotThrow(() => validateDescribeRequest(request, definitions));
+  assert.throws(() => validateDescribeRequest({ ...request, context: { ...request.context, task_scope: { ...request.context.task_scope, profile_source_refs: undefined } } }, definitions), /describe_input_refused/);
+  assert.throws(() => validateDescribeRequest({ ...request, context: { ...request.context, task_scope: { ...request.context.task_scope, profile_source_refs: ['profile-source:11111111-1111-4111-8111-111111111111'] } } }, definitions), /describe_input_refused/);
+  assert.throws(() => validateDescribeRequest({ operation: 'profile.read', context: { ...request.context, task_scope: { operations: ['profile.read'], profile_refs: ['profile:fixture'], origins: [], profile_source_refs: [] } } }, definitions), /describe_input_refused/);
+  assert.throws(() => validateDescribeRequest({ ...request, arguments: { ...request.arguments, source_path: '/private/source' } }, definitions), /describe_input_refused/);
+});
 
 test('installed bundle version tracks the installed SKILL metadata and both package manifests', async () => {
   const skill = await readFile(join(entryRoot, 'skills/webenvoy-browser/SKILL.md'), 'utf8');
@@ -120,6 +131,16 @@ test('Agent task CLI rejects caller-supplied connection context before connectin
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
+test('Agent operation validator refuses owner source paths', () => {
+  const sourceRef = 'profile-source:00000000-0000-4000-8000-000000000000';
+  const request = {
+    idempotency_key: 'import-key', grant_id: 'grant:fixture', operation: 'profile.import',
+    template_ref: 'template:approved', profile_source_ref: sourceRef, source_path: '/private/source',
+    task_scope: { operations: ['profile.import'], profile_refs: [], profile_source_refs: [sourceRef], origins: [] }
+  };
+  assert.throws(() => validateOperationRequest(request, definitions), /operation_input_refused/);
+});
+
 test('CLI describes trusted local mode without claiming OS isolation', async () => {
   const setup = await runCli(['help', 'setup']);
   const agentSetup = await runCli(['help', 'agent', 'setup']);
@@ -223,6 +244,33 @@ test('owner list, diagnose and inspect use live reads without Runtime startup', 
     assert.deepEqual(requests, ['/runtime/sessions', '/owner/runtime-sessions/demo/runs', '/status', '/runtime/sessions/demo', '/owner/runtime-sessions/demo/runs']);
     assert.deepEqual(JSON.parse(list.stdout).sessions[0].supervision, { status: 'available', runs: [] });
     assert.deepEqual(JSON.parse(inspect.stdout).session.supervision, { status: 'available', runs: [] });
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('owner profile-source list uses the Harbor owner route without starting Runtime', async () => {
+  const dir = await (await import('node:fs/promises')).mkdtemp(join(tmpdir(), 'wsrc-'));
+  const socketPath = join(dir, 'owner-control.sock');
+  const requests = [];
+  const server = createServer((request, response) => {
+    let body = '';
+    request.on('data', chunk => { body += chunk; });
+    request.on('end', () => {
+      const parsedBody = body ? JSON.parse(body) : undefined;
+      requests.push({ url: request.url, method: request.method, body: parsedBody });
+      response.setHeader('content-type', 'application/json');
+      const value = { sources: [] };
+      response.end(JSON.stringify(value));
+    });
+  });
+  try {
+    await new Promise((resolve, reject) => { server.once('error', reject); server.listen(socketPath, resolve); });
+    await chmod(socketPath, 0o600);
+    const listed = await runCli(['profile-source', 'list', '--data-dir', dir]);
+    assert.equal(listed.code, 0);
+    assert.deepEqual(requests, [{ url: '/owner/profile-sources', method: 'GET', body: undefined }]);
   } finally {
     await new Promise(resolve => server.close(resolve));
     await rm(dir, { recursive: true, force: true });

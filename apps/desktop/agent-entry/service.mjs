@@ -7,6 +7,7 @@ import { root, verifyBundle } from './bundle.mjs';
 import { assertProviderPythonPairing, classifyCamoufoxBinding, classifyChromeOfficialBinding, verifyInstalledCamoufox, verifyInstalledChromeOfficial } from './provider-artifact.mjs';
 import { installedRuntimeEnvironment } from './runtime-environment.mjs';
 import { agentDataSocket, isOwnerHarborRoute, ownerControlSocket, prepareRuntimeSocket, requiresControlPrecondition, verifyLiveOsBoundary, verifyOsBoundary, verifyOwnerDataDirectory } from './os-boundary.mjs';
+import { isOwnerRoute } from './owner-routes.mjs';
 import { projectHarborResponse } from './service-projection.mjs';
 
 const dataDir = process.argv[2];
@@ -40,16 +41,6 @@ let ownerServer, agentServer;
 let agentSocketOwned = false;
 let stopping = false;
 const send = (res, status, body) => { res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)); };
-const ownerRoutes = (req) => (req.method === 'POST' && ['/owner/recovery/inspect', '/owner/recovery/backup', '/owner/recovery/plan', '/owner/recovery/apply'].includes(req.url)) ||
-  (req.method === 'GET' && /^\/owner\/recovery\/status\/[^/?]+$/.test(req.url)) ||
-  (req.method === 'GET' && /^\/owner\/runtime-sessions\/[^/?]+\/runs$/.test(req.url)) ||
-  (req.method === 'POST' && ['/owner/site-task-admissions/operations', '/owner/account-systems/operations', '/owner/account-bindings/operations'].includes(req.url)) ||
-  (req.method === 'GET' && (req.url === '/owner/files' || req.url.startsWith('/owner/files?'))) ||
-  (req.method === 'POST' && ['/owner/files/import', '/owner/files/export', '/owner/files/revoke', '/owner/files/delete'].includes(req.url)) ||
-  (req.method === 'GET' && (req.url === '/agent-access' || /^\/agent-access\/operations\/[^/?]+$/.test(req.url))) ||
-  ((req.method === 'GET' || req.method === 'PUT') && req.url === '/agent-access/management-policy') ||
-  (req.method === 'POST' && (['/agent-access/principals', '/agent-access/grants', '/agent-access/v2/grants', '/agent-access/profile-policies', '/agent-access/v2/profile-policies', '/agent-access/scope-confirmations'].includes(req.url) || /^\/agent-access\/(principals|connections|grants)\/[^/?]+\/revoke$/.test(req.url))) ||
-  isOwnerHarborRoute(req);
 const agentRoutes = (req) => (req.method === 'POST' && ['/agent-connections', '/managed-browser/capabilities/describe', '/managed-browser/operations', '/managed-skills/operations', '/managed-tasks/operations', '/managed-tasks/worker/started', '/managed-tasks/worker/broker', '/managed-tasks/worker/complete', '/managed-tasks/worker/fail', '/managed-account-systems/operations'].includes(req.url)) ||
   (req.method === 'GET' && (/^\/managed-browser\/operations\/[A-Za-z0-9_-]+$/.test(req.url) || /^\/managed-skills\/operations\/[A-Za-z0-9_-]+$/.test(req.url)));
 function harborControlReady() {
@@ -83,7 +74,7 @@ async function handle(role, req, res) {
     }
     const harborRoute = role === 'owner' && isOwnerHarborRoute(req);
     if (!state.ready && !(harborRoute && harborControlReady())) return send(res, 503, { ok: false, error: { code: state.error ?? (role === 'agent' ? 'owner_agent_isolation_unavailable' : 'runtime_starting') } });
-    const allowed = role === 'owner' ? ownerRoutes(req) : agentRoutes(req);
+    const allowed = role === 'owner' ? isOwnerRoute(req) : agentRoutes(req);
     if (!allowed) return send(res, 403, { ok: false, error: { code: role === 'owner' ? 'owner_route_denied' : 'agent_route_denied' } });
     const authorizationHeaders = req.rawHeaders.filter((header, index) => index % 2 === 0 && header.toLowerCase() === 'authorization');
     if (role === 'owner') {

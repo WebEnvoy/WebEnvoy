@@ -12,6 +12,7 @@ const fixtureAccountSystem = "account-system:github";
 const fixtureAccount = `account:sha256:${"a".repeat(64)}`;
 const fixtureTarget = "target:fixture";
 const fixtureFile = "attachment:runtime/11111111-1111-4111-8111-111111111111";
+const fixtureProfileSource = "profile-source:11111111-1111-4111-8111-111111111111";
 
 function fixtureField(field: string, operation: string): unknown {
   if (field === "profile_ref") return fixtureProfile;
@@ -27,6 +28,8 @@ function fixtureField(field: string, operation: string): unknown {
   if (field === "account_system_ref") return fixtureAccountSystem;
   if (field === "account_ref") return fixtureAccount;
   if (field === "confirmation") return "delete_local_data";
+  if (field === "profile_source_ref") return fixtureProfileSource;
+  if (field === "target_provider_id") return "camoufox";
   if (field === "url") return "https://example.com/next";
   if (field === "runtime_session_ref") return fixtureSession;
   if (field === "observation_ref") return fixtureObservation;
@@ -58,6 +61,8 @@ function fixtureTaskScope(definition: (typeof managedCapabilityDefinitions.opera
   };
   if (definition.file_scope === "upload") scope.file_refs = [fixtureFile];
   if (definition.file_scope === "download") scope.file_refs = [];
+  if (definition.id === "profile.import") { scope.profile_refs = []; scope.origins = [fixtureOrigin]; scope.profile_source_refs = [fixtureProfileSource]; }
+  if (definition.id === "profile.migrate.request") { scope.profile_refs = [fixtureProfile]; scope.origins = []; scope.profile_source_refs = []; }
   return scope;
 }
 
@@ -88,7 +93,7 @@ const observation = {
   runtime_session_ref: "session:fixture"
 };
 
-assert.equal(managedCapabilityDefinitions.operations.length, 42);
+assert.equal(managedCapabilityDefinitions.operations.length, 44);
 assert.match(managedCapabilityDefinition("profile.read")?.summary ?? "", /current identity, binding history and Harbor ownership/);
 assert.match(managedCapabilityDefinition("profile.list")?.summary ?? "", /conflicting or unknown identity does not block the read/);
 assert.deepEqual(managedCapabilityInputFields("instance.observe"), [
@@ -198,6 +203,8 @@ for (const definition of managedCapabilityDefinitions.operations.filter(item => 
   assert.ok(example, `${definition.id} illustrative example`);
   const exampleEnvelope = parserFixture(definition);
   for (const [field, value] of Object.entries(example!)) if (field !== "illustrative_only") exampleEnvelope[field] = value;
+  if (definition.id === "profile.import") exampleEnvelope.task_scope = { ...(exampleEnvelope.task_scope as Record<string, unknown>), profile_source_refs: [example!.profile_source_ref] };
+  if (definition.id === "profile.migrate.request") exampleEnvelope.task_scope = { ...(exampleEnvelope.task_scope as Record<string, unknown>), profile_refs: [example!.profile_ref] };
   assert.doesNotThrow(() => parseManagedBrowserRequest(exampleEnvelope), `${definition.id} assembled illustrative envelope`);
   const inputSchema = managedCapabilityExecutionInputSchema(definition.id) as Record<string, any>;
   assert.deepEqual(inputSchema.properties.operation.enum, [definition.id]);

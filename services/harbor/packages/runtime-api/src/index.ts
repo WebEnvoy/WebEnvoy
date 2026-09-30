@@ -1,7 +1,7 @@
 import { parseManagedInteractionRequest } from "./managed-interaction-request.js";
 import { managedScopeSemantics } from "./managed-scope-semantics.js";
 import { createHash } from "node:crypto";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { managedPublicOrigin, boundedManagedRef, managedUnavailable, type ManagedObservation, type ManagedObservationUnavailable } from "./managed-observation.js";
 import { boundedDiagnosticsInput, diagnosticsUnavailable, type RuntimeDiagnosticsResponse } from "./runtime-diagnostics.js";
 import { createIdentityConsistencyFacts, type IdentityConsistencyFacts, type IdentityConsistencyFactsInput } from "./identity-consistency.js";
@@ -58,7 +58,8 @@ import {
 import { opaqueRef } from "./refs.js";
 import { boundedEnvironmentUpdate, environmentUnavailable } from "./profile-environment.js";
 import { withProfileBackedLocalMaterial } from "./profile-backed-local-material.js";
-import { acquireProfileStorageOwnership, profileStorageHasExternalLock, profileStoragePathExists, type ProfileStorageOwnershipLock } from "./profile-storage.js";
+import { acquireProfileStorageOwnership, profileStorageHasExternalLock, profileStoragePath, profileStoragePathExists, type ProfileStorageOwnershipLock } from "./profile-storage.js";
+import { mergeBookmarksIntoTarget, ProfileSourceRegistry, type ProfileImportReceipt, type ProfileSourcePublicRecord } from "./profile-import.js";
 import {
   consumeManualAuthenticationAuthorizationGrant,
   type ManualAuthenticationAuthorizationGrant
@@ -551,6 +552,7 @@ export class HarborRuntime {
   private readonly detailReadTargets = new DetailReadTargetStore();
   private readonly viewerControls = new ViewerControlStore();
   private readonly identityEnvironments: LocalIdentityEnvironmentManager;
+  private readonly profileSources: ProfileSourceRegistry;
   private readonly browserProviderPreference: BrowserProviderPreferenceManager;
   private readonly runtimeSessions: RuntimeSessionStore;
   private readonly managedFiles: ManagedFileStore;
@@ -564,6 +566,9 @@ export class HarborRuntime {
     providerLifecycleOptions: ManagedProviderLifecycleOptions = {}
   ) {
     const ownerOptions = withProfileBackedLocalMaterial(identityEnvironmentOptions);
+    this.profileSources = new ProfileSourceRegistry(identityEnvironmentOptions.persistence_path
+      ? `${identityEnvironmentOptions.persistence_path}.profile-sources.json`
+      : undefined);
     this.managedFiles = createManagedFileStore({ persistence_path: identityEnvironmentOptions.persistence_path });
     this.browserProviderPreference = new BrowserProviderPreferenceManager({
       ...(identityEnvironmentOptions.persistence_path ? {
@@ -609,6 +614,101 @@ export class HarborRuntime {
 
   async createSession(input: CreateRuntimeSessionInput = {}): Promise<RuntimeSessionFacts> {
     return this.runtimeSessions.createSession(input);
+  }
+
+  registerProfileSource(sourcePath: string): ProfileSourcePublicRecord {
+    return this.profileSources.register(sourcePath);
+  }
+
+  listProfileSources(): ProfileSourcePublicRecord[] {
+    return this.profileSources.list();
+  }
+
+  revokeProfileSource(sourceRef: string): ProfileSourcePublicRecord {
+    return this.profileSources.revoke(sourceRef);
+  }
+
+  inspectProfileSource(sourceRef: string): ProfileSourcePublicRecord {
+    return this.profileSources.inspect(sourceRef);
+  }
+
+  importProfileBookmarks(idempotencyKey: string, sourceRef: string, targetProfileRef: string): ProfileImportReceipt {
+    const requestHash = createHash("sha256").update(`${sourceRef}\0${targetProfileRef}`).digest("hex");
+    const previous = this.profileSources.getImport(idempotencyKey);
+    if (previous) {
+      if (previous.request_hash !== requestHash) throw new Error("profile_import_idempotency_conflict");
+      if (previous.status === "completed") return previous;
+      throw new Error("profile_import_outcome_unknown");
+    }
+    const target = this.identityEnvironments.list().find(record => record.refs.profile_ref === targetProfileRef);
+    const targetFacts = target ? this.identityEnvironments.getFacts(target.identity_environment_ref) : null;
+    const targetProfileStorageRef = targetFacts?.browser_storage.profile_storage_ref;
+    if (!target || typeof targetProfileStorageRef !== "string" || !profileStoragePathExists(targetProfileStorageRef)) throw new Error("profile_import_target_missing");
+    const releaseMutation = this.runtimeSessions.reserveIdentityEnvironmentMutation([target.identity_environment_ref], [targetProfileStorageRef]);
+    if (!releaseMutation) throw new Error("profile_import_target_locked");
+    let ownership: ProfileStorageOwnershipLock;
+    try { ownership = acquireProfileStorageOwnership([targetProfileStorageRef]); }
+    catch {
+      releaseMutation();
+      throw new Error("profile_import_target_locked");
+    }
+    let sourceSnapshot: ReturnType<ProfileSourceRegistry["openImportSnapshot"]> | undefined;
+    try {
+      const current = this.identityEnvironments.list().find(record => record.refs.profile_ref === targetProfileRef);
+      const currentFacts = current ? this.identityEnvironments.getFacts(current.identity_environment_ref) : null;
+      if (!current || current.identity_environment_ref !== target.identity_environment_ref || currentFacts?.browser_storage.profile_storage_ref !== targetProfileStorageRef) {
+        throw new Error("profile_import_target_changed");
+      }
+      if (profileStorageHasExternalLock(targetProfileStorageRef) || this.runtimeSessions.isProfileStorageInUse(targetProfileStorageRef) ||
+          this.runtimeSessions.isIdentityEnvironmentInUse(target.identity_environment_ref)) throw new Error("profile_import_target_locked");
+      if (currentFacts?.provider_binding.selected_provider_id !== "camoufox") throw new Error("profile_import_target_unsupported");
+      const recovery = this.profileRecovery.inspect(target.refs.profile_ref);
+      if (recovery.status !== "completed" || recovery.continuity !== "matchable" || recovery.active_instance) {
+        throw new Error("profile_import_target_unsupported");
+      }
+      sourceSnapshot = this.profileSources.openImportSnapshot(sourceRef);
+      sourceSnapshot.assertUnchanged();
+      const dispatch = this.profileSources.beginImport({ schema_version: "harbor-profile-import-receipt/v1", idempotency_key: idempotencyKey,
+        request_hash: requestHash, source_ref: sourceRef, target_profile_ref: targetProfileRef,
+        target_identity_environment_ref: target.identity_environment_ref });
+      if (dispatch.status === "completed") return dispatch;
+      const report = mergeBookmarksIntoTarget(join(profileStoragePath(targetProfileStorageRef), "places.sqlite"), sourceSnapshot.bookmarks,
+        sourceSnapshot.assertUnchanged);
+      const receipt: ProfileImportReceipt = { ...dispatch, status: "completed", report };
+      this.profileSources.saveImport(receipt);
+      return receipt;
+    } finally {
+      sourceSnapshot?.release();
+      ownership.release();
+      releaseMutation();
+    }
+  }
+
+  getProfileImportResult(idempotencyKey: string): ProfileImportReceipt | null {
+    return this.profileSources.getImport(idempotencyKey) ?? null;
+  }
+
+  getProfileMigrationFacts(profileRef: string, targetProviderId: string) {
+    if (!( ["cloakbrowser", "chrome_official", "camoufox"] as string[]).includes(targetProviderId)) throw new Error("profile_migration_target_provider_unknown");
+    const profile = this.identityEnvironments.list().find(record => record.refs.profile_ref === profileRef);
+    if (!profile) throw new Error("identity_environment_missing");
+    const facts = this.identityEnvironments.getFacts(profile.identity_environment_ref);
+    if (!facts) throw new Error("identity_environment_missing");
+    const source = facts.provider_binding.selected_provider;
+    const target = this.getBrowserProviderStatus().providers.find(provider => provider.provider_id === targetProviderId);
+    if (!target) throw new Error("profile_migration_target_provider_unknown");
+    const publicVersion = (provider: typeof source) => provider ? {
+      version: provider.install.version,
+      ...(provider.install.camoufox_version === undefined ? {} : { camoufox_version: provider.install.camoufox_version }),
+      ...(provider.install.browser_version === undefined ? {} : { browser_version: provider.install.browser_version }),
+      ...(provider.install.playwright_version === undefined ? {} : { playwright_version: provider.install.playwright_version })
+    } : null;
+    return {
+      schema_version: "harbor-profile-migration-qualification/v1",
+      source: { profile_ref: profileRef, provider_id: facts.provider_binding.selected_provider_id, ...publicVersion(source) },
+      target: { provider_id: target.provider_id, ...publicVersion(target), availability: target.availability.state,
+        unavailable_reason: target.availability.unavailable_reason, role: target.role }
+    };
   }
 
   getSession(runtime_session_ref: string): RuntimeSessionFacts | null {

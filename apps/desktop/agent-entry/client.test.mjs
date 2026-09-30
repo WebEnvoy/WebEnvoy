@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { createInterface } from 'node:readline';
 import { Ajv2020 } from '../../../packages/schemas/node_modules/ajv/dist/2020.js';
 import { localRequest, runManagedSiteWorker } from './client.mjs';
+import { validateOperationRequest } from './request-validation.mjs';
 import { INSTALLED_SKILL_VERSION, REQUIRED_AGENT_ASSETS, REQUIRED_DRIVER_ASSETS, root, sha } from './bundle.mjs';
 
 async function stopChild(child) {
@@ -235,6 +236,7 @@ test('MCP guidance exposes instance.start origin admission', async () => {
     assert.equal(validateTask(taskStopFixture), true, JSON.stringify(validateTask.errors));
     assert.equal(validateTask({ ...taskQueryFixture, selector: { run_id: 'run:a', original_idempotency_key: 'key:a' } }), false);
     const validateOperation = new Ajv2020({ allErrors: true, strict: false }).compile(operation.inputSchema);
+    const operationConditions = operation.inputSchema.allOf.filter(condition => condition.if?.properties?.operation?.const);
     const snapshotSchemaFixture = {
       idempotency_key: 'schema-snapshot-limit', grant_id: 'grant:fixture', operation: 'instance.snapshot',
       task_scope: { operations: ['instance.snapshot'], profile_refs: ['profile:fixture'], origins: ['https://example.com'] },
@@ -258,7 +260,31 @@ test('MCP guidance exposes instance.start origin admission', async () => {
     assert.equal(validateOperation(bindSchemaFixture), true, JSON.stringify(validateOperation.errors));
     assert.equal(validateOperation({ ...bindSchemaFixture, task_scope: { operations: ['account.bind'], profile_refs: ['profile:github'], origins: ['https://github.com'] } }), false,
       'Account binding requires the exact task binding tuple');
-    const operationConditions = operation.inputSchema.allOf.filter(condition => condition.if?.properties?.operation?.const);
+    const profileSourceRef = 'profile-source:11111111-1111-4111-8111-111111111111';
+    const profileImportFixture = { idempotency_key: 'schema-profile-import', grant_id: 'grant:profile-import', operation: 'profile.import',
+      template_ref: 'template:approved', profile_source_ref: profileSourceRef,
+      task_scope: { operations: ['profile.import'], profile_refs: [], origins: ['https://example.com'], profile_source_refs: [profileSourceRef] } };
+    assert.equal(validateOperation(profileImportFixture), true, JSON.stringify(validateOperation.errors));
+    assert.deepEqual(operationConditions.find(condition => condition.if.properties.operation.const === 'profile.import').then.properties.task_scope['x-webenvoy-equals'],
+      { left: 'task_scope.profile_source_refs[0]', right: 'profile_source_ref' });
+    assert.throws(() => validateOperationRequest({ ...profileImportFixture,
+      task_scope: { ...profileImportFixture.task_scope, profile_source_refs: ['profile-source:22222222-2222-4222-8222-222222222222'] } }, definitions),
+      /operation_input_refused/, 'the installed MCP request validator rejects a source handle that differs from the top-level source');
+    assert.equal(validateOperation({ ...profileImportFixture, task_scope: { ...profileImportFixture.task_scope, operations: ['profile.import', 'profile.read'] } }), false,
+      'Profile import task scope contains exactly one operation');
+    assert.equal(validateOperation({ ...profileImportFixture, profile_source_ref: 'profile-source_bad' }), false,
+      'Profile source handles use the producer’s canonical colon UUID form');
+    const profileMigrationFixture = { idempotency_key: 'schema-profile-migration', grant_id: 'grant:profile-migration', operation: 'profile.migrate.request',
+      profile_ref: 'profile:github', template_ref: 'template:approved-chrome', target_provider_id: 'chrome_official',
+      task_scope: { operations: ['profile.migrate.request'], profile_refs: ['profile:github'], origins: [], profile_source_refs: [] } };
+    assert.equal(validateOperation(profileMigrationFixture), true, JSON.stringify(validateOperation.errors));
+    assert.deepEqual(operationConditions.find(condition => condition.if.properties.operation.const === 'profile.migrate.request').then.properties.task_scope['x-webenvoy-equals'],
+      { left: 'task_scope.profile_refs[0]', right: 'profile_ref' });
+    assert.throws(() => validateOperationRequest({ ...profileMigrationFixture,
+      task_scope: { ...profileMigrationFixture.task_scope, profile_refs: ['profile:other'] } }, definitions),
+      /operation_input_refused/, 'the installed MCP request validator rejects a Profile scope that differs from the top-level Profile');
+    assert.equal(validateOperation({ ...profileMigrationFixture, task_scope: { ...profileMigrationFixture.task_scope, profile_source_refs: [profileSourceRef] } }), false,
+      'Migration scope carries no source handles');
     for (const definition of definitions.operations.filter(item => item.exposure === 'exposed')) {
       const condition = operationConditions.find(item => item.if.properties.operation.const === definition.id);
       assert.ok(condition, `${definition.id} generated operation condition`);
@@ -295,8 +321,12 @@ test('MCP guidance exposes instance.start origin admission', async () => {
     const bindScopeCondition = coreScopeConditions.else;
     assert.equal(bindScopeCondition.if.properties.operation.const, 'account.bind');
     assert.deepEqual(bindScopeCondition.then.properties.task_scope.required, ['operations', 'profile_refs', 'origins', 'account_binding_scopes']);
-    assert.equal(bindScopeCondition.else.properties.task_scope.properties.file_refs, undefined);
-    assert.equal(bindScopeCondition.else.properties.task_scope.additionalProperties, false);
+    const transferScopeCondition = bindScopeCondition.else;
+    assert.deepEqual(transferScopeCondition.if.properties.operation.enum, ['profile.import', 'profile.migrate.request']);
+    assert.deepEqual(transferScopeCondition.then.properties.task_scope.required, ['operations', 'profile_refs', 'origins', 'profile_source_refs']);
+    assert.equal(transferScopeCondition.then.properties.task_scope.additionalProperties, false);
+    assert.equal(transferScopeCondition.else.properties.task_scope.properties.file_refs, undefined);
+    assert.equal(transferScopeCondition.else.properties.task_scope.additionalProperties, false);
     assert.ok(fileScopeCondition.then.properties.task_scope.properties.file_refs);
     assert.match(fileScopeCondition.then.properties.task_scope.properties.file_refs.description, /Omit this field for every non-file operation/);
     assert.equal(fileScopeCondition.then.properties.task_scope.additionalProperties, false);
@@ -319,6 +349,10 @@ test('MCP guidance exposes instance.start origin admission', async () => {
     const uploadScopeCondition = operation.inputSchema.allOf?.find(condition => condition.if?.properties?.operation?.enum?.includes('file.upload') && condition.then?.properties?.task_scope?.properties?.file_refs?.minItems === 1);
     assert.equal(uploadScopeCondition.then.properties.task_scope.required.includes('file_refs'), true);
     assert.match(operation.inputSchema.properties.origin.description, /task_scope\.origins is only the allowed set/);
+    assert.deepEqual(operationConditions.find(condition => condition.if.properties.operation.const === 'profile.import').then.properties.task_scope.required,
+      ['operations', 'profile_refs', 'origins', 'profile_source_refs']);
+    assert.deepEqual(operationConditions.find(condition => condition.if.properties.operation.const === 'profile.migrate.request').then.properties.task_scope.required,
+      ['operations', 'profile_refs', 'origins', 'profile_source_refs']);
     assert.deepEqual(operation.inputSchema.properties.delta_y.not, { const: 0 });
     assert.equal(operation.inputSchema.properties.configuration.additionalProperties, false);
     assert.ok(operation.inputSchema.allOf.find(condition => condition.if?.properties?.operation?.const === 'page.navigate').then['x-webenvoy-conditions'].some(condition => condition.kind === 'same_origin'));

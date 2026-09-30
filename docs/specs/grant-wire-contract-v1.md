@@ -1,10 +1,10 @@
 # Grant Wire Contract V1
 
-状态：Accepted；版本：v1.9（v1 兼容系列）；owner：Core。产品归口：[Work Item #508](https://github.com/WebEnvoy/WebEnvoy/issues/508)、已安装恢复 [#505](https://github.com/WebEnvoy/WebEnvoy/issues/505)、Provider 默认 [#516](https://github.com/WebEnvoy/WebEnvoy/issues/516)、受管浏览器文件 [#523](https://github.com/WebEnvoy/WebEnvoy/issues/523)、站点 SKILL [#563](https://github.com/WebEnvoy/WebEnvoy/issues/563)、Profile 元数据 [#599](https://github.com/WebEnvoy/WebEnvoy/issues/599)、Profile 安全生命周期 [#601](https://github.com/WebEnvoy/WebEnvoy/issues/601)、Agent 账号委派 [#605](https://github.com/WebEnvoy/WebEnvoy/issues/605) 与 BusinessTarget metadata [#602](https://github.com/WebEnvoy/WebEnvoy/issues/602)。本合同冻结恢复 Grant、SKILL 资源范围、Provider preference/创建模板、browser-files 文件范围、managed-browser scope semantics、site-task Agent projection、Profile metadata operation、Account tuple snapshots 和 Profile 安全生命周期 operation 的跨进程语义；既有 Principal、Connection、Profile Grant、撤销和交集规则仍由 Core owner API 维护。
+状态：Accepted；版本：v1.10（v1 兼容系列）；owner：Core。产品归口：[Work Item #508](https://github.com/WebEnvoy/WebEnvoy/issues/508)、已安装恢复 [#505](https://github.com/WebEnvoy/WebEnvoy/issues/505)、Provider 默认 [#516](https://github.com/WebEnvoy/WebEnvoy/issues/516)、受管浏览器文件 [#523](https://github.com/WebEnvoy/WebEnvoy/issues/523)、站点 SKILL [#563](https://github.com/WebEnvoy/WebEnvoy/issues/563)、Profile 元数据 [#599](https://github.com/WebEnvoy/WebEnvoy/issues/599)、Profile 安全生命周期 [#601](https://github.com/WebEnvoy/WebEnvoy/issues/601)、Agent 账号委派 [#605](https://github.com/WebEnvoy/WebEnvoy/issues/605) 、Profile transfer [#604](https://github.com/WebEnvoy/WebEnvoy/issues/604) 与 BusinessTarget metadata [#602](https://github.com/WebEnvoy/WebEnvoy/issues/602)。本合同冻结恢复 Grant、SKILL 资源范围、Provider preference/创建模板、browser-files 文件范围、managed-browser scope semantics、site-task Agent projection、Profile metadata operation、Account tuple snapshots 、Profile 安全生命周期 operation 和精确 Profile source scope 的跨进程语义；既有 Principal、Connection、Profile Grant、撤销和交集规则仍由 Core owner API 维护。
 
 ## 版本与兼容规则
 
-v1.0 的 recovery 与 v1.1 的 `skill_scope` 语义保持不变。v1.2 新增 preference operation 值，并允许新创建模板把 `provider_id` 明确设为 null；v1.3 新增可选 `file_scope` 与 browser task `file_refs`；v1.4 新增可选 `scope_semantics`，并以本节的 owner v2 lifecycle 兼容修订补齐正式 API/CLI；v1.5 新增 site task 的 `task.submit`、`task.query`、`task.stop` operation；v1.6 新增 `profile.metadata.update` operation 值，不增加 Grant 字段；v1.7 新增只由可信 owner 签发并经 Harbor 解析的 BusinessTarget Account tuple snapshots；v1.8 新增 `profile.copy_environment`、`profile.archive`、`profile.delete` operation 值，不增加 Grant 字段或 scope dimension；v1.9 新增 `account_system.import_template` 与 `account.bind` operation，以及各自独立的精确 `account_system_scope`、`account_binding_scopes`。site task 的普通结构化参数由版本化 managed-task request 携带并按 Lode pinned input schema 校验，不增加第二个材料注册表或 Grant scope。上述扩展不改变既有网页 `profile_refs`、`allowed_origins`、`allowed_operations` 的交集含义。未携带 `scope_semantics` 的 Grant/Profile policy 解释为 `legacy_request_guard_v1`；首次 legacy→v2 仍只能沿用原 owner 确认路径，Agent/task 请求不能指定或升级语义。之后的续发、重签、替换和 v2 policy 调整只走本节的 owner API/CLI/App 入口。
+v1.0 的 recovery 与 v1.1 的 `skill_scope` 语义保持不变。v1.2 新增 preference operation 值，并允许新创建模板把 `provider_id` 明确设为 null；v1.3 新增可选 `file_scope` 与 browser task `file_refs`；v1.4 新增可选 `scope_semantics`，并以本节的 owner v2 lifecycle 兼容修订补齐正式 API/CLI；v1.5 新增 site task 的 `task.submit`、`task.query`、`task.stop` operation；v1.6 新增 `profile.metadata.update` operation 值，不增加 Grant 字段；v1.7 新增只由可信 owner 签发并经 Harbor 解析的 BusinessTarget Account tuple snapshots；v1.8 新增 `profile.copy_environment`、`profile.archive`、`profile.delete` operation 值，不增加 Grant 字段或 scope dimension；v1.9 新增 `account_system.import_template` 与 `account.bind` operation，以及各自独立的精确 `account_system_scope`、`account_binding_scopes`；v1.10 增加 owner-registered Profile source 的精确 `profile_source_refs` scope。site task 的普通结构化参数由版本化 managed-task request 携带并按 Lode pinned input schema 校验，不增加第二个材料注册表或 Grant scope。上述扩展不改变既有网页 `profile_refs`、`allowed_origins`、`allowed_operations` 的交集含义。未携带 `scope_semantics` 的 Grant/Profile policy 解释为 `legacy_request_guard_v1`；首次 legacy→v2 仍只能沿用原 owner 确认路径，Agent/task 请求不能指定或升级语义。之后的续发、重签、替换和 v2 policy 调整只走本节的 owner API/CLI/App 入口。
 
 ### Managed browser scope semantics
 
@@ -193,6 +193,14 @@ Network/S2/Plugin 合同及实现合并后才生效，旧 reader 遇到不认识
 v1.5 reader 读取不含 `task.*` operation 的旧 Grant 时必须成功，但该 Grant 没有 site-task
 Agent 能力；旧严格 reader 遇到 `task.*` operation 必须明确拒绝，不能忽略后继续执行。
 该 extension 不改变既有 `skill_scope`、browser task scope 或 file scope 的旧语义。
+
+## Owner-registered Profile source scope (#604 candidate)
+
+`profile_source_refs` 是 Profile bookmark import 的独立可选 Grant scope；不得复用站点 SKILL 的 `skill_scope.source_refs`。每个值是 owner 在 Harbor 注册后返回的 opaque `profile-source:<uuid>`。缺少此字段的旧 Grant 读取为空数组，因此不能执行 `profile.import`。Owner 续发/替换明确携带时，只能保留 source Grant 已有的 exact refs；不能从 task input、路径或 Harbor registry 自动扩大 Grant。
+
+`profile.import` 的 Agent task scope 必须带恰好一个 `profile_source_refs`，与 top-level `profile_source_ref` 完全相同，并且在该 Grant 的 scope 中；`profile_refs` 必须为空。创建目标沿用同 Grant 的 approved creation template/origin 和 Profile creation quota。`profile.migrate.request` 带空 `profile_source_refs` 且绑定一个现存 `profile_ref`、其 owner-approved target template 与该 template 的 exact Provider。Source handle 是授权名称而非源 Profile storage ref，不能加入 Profile list/read 范围，也不能让 Core、Agent 或 Harbor capability projection读取本地路径。
+
+该 v1.10 extension 不改变 Accepted v1.6 reader 声明；严格旧 reader 遇到新增 Grant 字段必须拒绝，不可忽略后继续执行。
 
 ## Owner 入口与历史
 

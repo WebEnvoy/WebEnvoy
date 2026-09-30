@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -75,7 +75,14 @@ let afterIdentityEnvironmentSnapshot: (() => Promise<void>) | undefined;
 let principalId: string | undefined;
 let browserPreference: string | null = null, preferenceMutations = 0, dropPreferenceResponse = false;
 const preferenceReceipts = new Map<string, unknown>();
+const profileImportReceipts = new Map<string, Record<string, unknown>>();
+let profileManagementSessionsOpened = 0, profileManagementSessionsStopped = 0, profileImportWrites = 0;
+let profileManagementSessionRef: string | null = null, pendingProfileImport = false;
+let revokedProfileSourceRef: string | null = null;
+let delayedProfileSourceLookup: { sourceRef: string; started: () => void; wait: Promise<void> } | null = null;
+const profileImportEvents: string[] = [];
 let providerCatalogReads = 0;
+let profileMigrationFactReads = 0;
 const providerCatalog = {
   schema_version: "harbor-browser-provider-status/v0",
   providers: [
@@ -122,7 +129,7 @@ const server = createServer((req, res) => { void (async () => {
   let value: unknown;
   if (req.url === "/runtime/managed-operation-catalog") { managedOperationCatalogReads++; value = {
     schema_version: "webenvoy.harbor-operation-catalog.v0", catalog_ref: "harbor://managed-operations", catalog_version: "10",
-    operations: [...managedOperations.filter(op => !(managedInteractionOperations as readonly string[]).includes(op) && !(managedBusinessTargetOperations as readonly string[]).includes(op) && !op.startsWith("provider.preference.")).map(operation_id => ({ operation_id, category: (managedFileOperations as readonly string[]).includes(operation_id) || operation_id === "environment.update" || operation_id === "recovery.request" || ["page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward"].includes(operation_id) ? "prepare" : operation_id === "profile.delete" ? "destructive" : ["profile.create", "profile.copy_environment", "profile.archive", "profile.metadata.update", "account.bind"].includes(operation_id) ? "commit" : "read", target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: (managedFileOperations as readonly string[]).includes(operation_id) ? ["harbor://managed-profile", "harbor://controlled-page", "harbor://managed-file"] : ["harbor://managed-profile"] })),
+    operations: [...managedOperations.filter(op => !(managedInteractionOperations as readonly string[]).includes(op) && !(managedBusinessTargetOperations as readonly string[]).includes(op) && !op.startsWith("provider.preference.")).map(operation_id => ({ operation_id, category: (managedFileOperations as readonly string[]).includes(operation_id) || operation_id === "environment.update" || operation_id === "recovery.request" || ["page.open", "page.activate", "page.close", "page.navigate", "page.reload", "page.back", "page.forward"].includes(operation_id) ? "prepare" : operation_id === "profile.delete" ? "destructive" : ["profile.create", "profile.import", "profile.copy_environment", "profile.archive", "profile.metadata.update", "account.bind"].includes(operation_id) ? "commit" : "read", target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: (managedFileOperations as readonly string[]).includes(operation_id) ? ["harbor://managed-profile", "harbor://controlled-page", "harbor://managed-file"] : ["harbor://managed-profile"] })),
       ...["provider.preference.read", "provider.preference.set", "provider.preference.clear"].map(operation_id => ({ operation_id, category: operation_id === "provider.preference.read" ? "read" : "commit", target_scope: { target_types: ["provider_preference"] }, resource_requirement_refs: ["harbor://browser-provider-preference"] })),
       ...["controlled-page.observe", "controlled-page.interact"].map(operation_id => ({ operation_id, category: operation_id === "controlled-page.interact" ? "prepare" : "read", target_scope: { target_types: ["managed_profile"] }, resource_requirement_refs: ["harbor://managed-profile", "harbor://controlled-page"] }))]
   }; }
@@ -254,12 +261,16 @@ const server = createServer((req, res) => { void (async () => {
       res.setHeader("content-type", "application/json"); res.end(JSON.stringify(value)); return;
     }
     creates++;
-    const record = { refs: { profile_ref: `profile:${creates}` }, identity_environment_ref: `identity:${creates}`, name: `profile:${creates}`, tags: [], site: { origin: "https://example.com", display_name: "Example" }, status: { readiness: "ready" }, account_bindings: [], environment_summary: { provider_id: selectedProvider } };
+    const record = { schema_version: "harbor-local-identity-environment-store/v1", lifecycle_state: "active",
+      refs: { profile_ref: `profile:${creates}`, profile_storage_ref: `storage:${creates}` }, identity_environment_ref: `identity:${creates}`,
+      name: `profile:${creates}`, tags: [], site: { site_id: "example", origin: "https://example.com", display_name: "Example" },
+      status: { readiness: "ready" }, account_bindings: [], environment_summary: { provider_id: selectedProvider } };
     profiles.push(record); value = mutationReceipt({ status: "completed", operation: input.operation,
       identity_environment_ref: record.identity_environment_ref, record,
       provider_selection: omitProviderSelection ? null : { schema_version: "harbor-provider-selection/v1", source: input.identity_environment.requested_provider_id ? "explicit_request" : "user_default", selected_provider_id: selectedProvider },
       effects: { index: "registered", local_data: "created", login_state: "unchanged" } });
     receipts.set(input.idempotency_key, value);
+    if (input.idempotency_key.endsWith(":target-create")) profileImportEvents.push("target_create");
     await afterCreate?.();
     if (malformedCreateReply) { res.setHeader("content-type", "application/json"); res.end("[]"); return; }
     if (dropResponse) { req.socket.destroy(); return; }
@@ -277,6 +288,72 @@ const server = createServer((req, res) => { void (async () => {
     const receipt = receipts.get(receiptKey) ?? environmentReceipts.get(receiptKey);
     if (req.method === "GET" && receipt && typeof receipt === "object" && (receipt as { operation?: unknown }).operation === "archive") archiveReceiptReads++;
     value = receipt;
+  }
+  else if (req.url?.startsWith("/runtime/profile-sources/")) {
+    const sourceRef = decodeURIComponent(req.url.split("/").at(-1)!);
+    if (!/^profile-source:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(sourceRef)) { res.writeHead(404); res.end("{}"); return; }
+    if (delayedProfileSourceLookup?.sourceRef === sourceRef) {
+      const delayed = delayedProfileSourceLookup;
+      delayed.started();
+      await delayed.wait;
+      delayedProfileSourceLookup = null;
+    }
+    value = { source: { schema_version: "harbor-profile-source/v1", source_ref: sourceRef, provider_id: "camoufox", source_format: "camoufox.firefox-places.v86",
+      bookmark_count: 1, registered_at: new Date().toISOString(), expires_at: new Date(Date.now() + 60_000).toISOString(),
+      revoked_at: sourceRef === revokedProfileSourceRef ? new Date().toISOString() : null } };
+  } else if (req.url === "/runtime/profile-imports" && req.method === "POST") {
+    let body = ""; for await (const chunk of req) body += chunk;
+    const input = JSON.parse(body) as { idempotency_key: string; source_ref: string; target_profile_ref: string };
+    assert.equal(profileManagementSessionRef, null, "Harbor import must run only after the profile-management session has stopped");
+    profileImportEvents.push("import");
+    profileImportWrites++;
+    const profile = profiles.find(item => (item.refs as Record<string, unknown>).profile_ref === input.target_profile_ref)!;
+    const receipt = pendingProfileImport
+      ? { schema_version: "harbor-profile-import-receipt/v1", idempotency_key: input.idempotency_key, source_ref: input.source_ref,
+          target_profile_ref: input.target_profile_ref, target_identity_environment_ref: profile.identity_environment_ref, status: "possibly_dispatched" }
+      : { schema_version: "harbor-profile-import-receipt/v1", idempotency_key: input.idempotency_key, source_ref: input.source_ref,
+      target_profile_ref: input.target_profile_ref, target_identity_environment_ref: profile.identity_environment_ref,
+      status: "completed",
+      report: { schema_version: "harbor-profile-import-report/v1", status: "completed", imported: { bookmarks: 1, folders: 1 },
+        skipped: { bookmarks: 0, folders: 0, separators: 0, unsafe_urls: 0 }, repair_status: "not_attempted", requires_login: true,
+        exclusions: ["history", "cookies", "logins", "extensions", "provider_configuration", "account_binding", "runtime_runs"] } };
+    profileImportReceipts.set(input.idempotency_key, receipt);
+    pendingProfileImport = false;
+    value = { receipt };
+  } else if (req.url?.startsWith("/runtime/profile-imports/")) {
+    const key = decodeURIComponent(req.url.split("/").at(-1)!);
+    const receipt = profileImportReceipts.get(key);
+    if (!receipt) { res.writeHead(404); res.end("{}"); return; }
+    value = { receipt };
+  } else if (req.url === "/runtime/identity-environment-sessions" && req.method === "POST") {
+    profileManagementSessionsOpened++;
+    profileManagementSessionRef = `session:profile-management-${profileManagementSessionsOpened}`;
+    profileImportEvents.push("session_open");
+    value = { runtime_session_ref: profileManagementSessionRef };
+  } else if (req.url?.startsWith("/runtime/sessions/") && req.url.endsWith("/stop") && req.method === "POST") {
+    profileManagementSessionsStopped++;
+    assert.equal(decodeURIComponent(req.url.split("/").at(-2)!), profileManagementSessionRef);
+    profileManagementSessionRef = null;
+    profileImportEvents.push("session_stop");
+    value = { status: "stopped" };
+  } else if (req.url?.startsWith("/runtime/profile-migrations/")) {
+    const parts = req.url.split("/").slice(-2).map(decodeURIComponent);
+    const profileRef = parts[0]!, targetProviderId = parts[1]!;
+    const record = profiles.find(item => (item.refs as Record<string, unknown>).profile_ref === profileRef);
+    const targetProvider = providerCatalog.providers.find(item => item.provider_id === targetProviderId);
+    profileMigrationFactReads++;
+    if (!record || !targetProvider) { res.writeHead(404); res.end("{}"); return; }
+    const versions = (providerId: string) => providerId === "camoufox"
+      ? { version: "0.5.6", camoufox_version: "0.5.6", browser_version: "152.0.4-beta.30", playwright_version: "1.60.0" }
+      : providerId === "chrome_official" ? { version: "stable-1", browser_version: "stable-1", playwright_version: "1.60.0" } : { version: "unknown" };
+    const sourceProviderId = String((record.environment_summary as Record<string, unknown>).provider_id);
+    value = { schema_version: "harbor-profile-migration-qualification/v1",
+      source: { profile_ref: profileRef, provider_id: sourceProviderId, ...versions(sourceProviderId) },
+      target: { provider_id: targetProviderId, ...versions(targetProviderId), availability: targetProvider.availability.state,
+        unavailable_reason: targetProvider.availability.unavailable_reason, role: targetProvider.role } };
+  } else if (req.url?.startsWith("/runtime/identity-environments/") && req.url.endsWith("/session") && req.url !== "/runtime/identity-environments/identity%3A1/session") {
+    if (profileManagementSessionsStopped === profileManagementSessionsOpened && profileManagementSessionsOpened > 0) profileImportEvents.push("session_confirm");
+    value = { runtime_session: null };
   }
   else if (req.url === "/runtime/identity-environments") {
     identityEnvironmentReads++;
@@ -1090,6 +1167,177 @@ try {
     [`profile:${createCountBeforeMalformedReply + 1}`]);
   await assert.rejects(service.submit(credentialHash, { ...malformedCreateRequest, idempotency_key: "create-after-malformed-reconciliation" }), /managed_access_creation_denied/);
   assert.equal(creates, createCountBeforeMalformedReply + 1, "receipt reconciliation consumes the only quota slot without replay");
+  const profileSourceRef = `profile-source:${randomUUID()}`;
+  const importGrant = await accessStore.createGrant({ idempotency_key: "profile-import-grant", principal_id: principal.principal_id,
+    profile_refs: [], profile_source_refs: [profileSourceRef], allowed_operations: ["profile.import"], allowed_origins: ["https://example.com"],
+    expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 2, creation_template: grant.creation_template });
+  const importRequest = { idempotency_key: "profile-import-lost-target-response", connection_id: connection.connection_id, grant_id: importGrant.grant_id,
+    operation: "profile.import" as const, template_ref: grant.creation_template!.template_ref, profile_source_ref: profileSourceRef,
+    task_scope: { operations: ["profile.import" as const], profile_refs: [], origins: ["https://example.com"], profile_source_refs: [profileSourceRef] } };
+  const createsBeforeImport = creates;
+  dropResponse = true;
+  const lostImport = await service.submit(credentialHash, importRequest);
+  dropResponse = false;
+  assert.equal(lostImport.status, "unknown_outcome");
+  assert.equal(creates, createsBeforeImport + 1, "the original target Profile was created before response loss");
+  const importGrantBeforeQuery = (await accessStore.list()).grants.find(item => item.grant_id === importGrant.grant_id)!;
+  assert.equal(importGrantBeforeQuery.created_profile_refs.length, 0, "Core had not yet received Harbor's create response");
+  const importWritesBeforeQuery = profileImportWrites, importSessionsBeforeQuery = profileManagementSessionsOpened;
+  const queriedLostImport = await service.query(credentialHash, lostImport.run_id);
+  assert.equal(queriedLostImport.status, "unknown_outcome", "query preserves the original unknown outcome");
+  assert.equal((queriedLostImport.result as { import_status: string }).import_status, "unknown", "no import receipt means the import result remains unknown");
+  const recoveredProfileRef = (queriedLostImport.result as { profile: { profile_ref: string } }).profile.profile_ref;
+  assert.equal((await accessStore.list()).grants.find(item => item.grant_id === importGrant.grant_id)?.created_profile_refs[0], recoveredProfileRef,
+    "query reconciles the original created target against Grant quota");
+  assert.equal(creates, createsBeforeImport + 1, "query never creates a replacement target");
+  assert.equal(profileImportWrites, importWritesBeforeQuery, "query never starts import after finding no Harbor receipt");
+  assert.equal(profileManagementSessionsOpened, importSessionsBeforeQuery, "query never starts a provider session");
+  const sameKeyLostImport = await service.submit(credentialHash, importRequest);
+  assert.equal(sameKeyLostImport.run_id, lostImport.run_id, "same-key submission preserves the original unknown import Run");
+  assert.equal(sameKeyLostImport.status, "unknown_outcome");
+  assert.equal((sameKeyLostImport.result as { import_status: string }).import_status, "unknown");
+  assert.equal(profileImportWrites, importWritesBeforeQuery, "same-key unknown import is not replayed");
+  const blockedImportRetry = await service.submit(credentialHash, { ...importRequest, idempotency_key: "profile-import-new-key-blocked" });
+  assert.equal(blockedImportRetry.failure?.code, "managed_browser_creation_reconciliation_required", "unknown import blocks further quota use on the Grant");
+  assert.equal(creates, createsBeforeImport + 1);
+
+  const successImportGrant = await accessStore.createGrant({ idempotency_key: "profile-import-success-grant", principal_id: principal.principal_id,
+    profile_refs: [], profile_source_refs: [profileSourceRef], allowed_operations: ["profile.import"], allowed_origins: ["https://example.com"],
+    expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 1, creation_template: grant.creation_template });
+  const importEventsBeforeSuccess = profileImportEvents.length;
+  const completedImport = await service.submit(credentialHash, { ...importRequest, idempotency_key: "profile-import-success", grant_id: successImportGrant.grant_id,
+    task_scope: { ...importRequest.task_scope } });
+  assert.equal(completedImport.status, "succeeded", JSON.stringify(completedImport));
+  assert.equal((completedImport.result as { import_status: string }).import_status, "completed");
+  assert.equal((completedImport.result as { import_report: { imported: { bookmarks: number }; requires_login: boolean } }).import_report.imported.bookmarks, 1);
+  assert.equal((completedImport.result as { import_report: { requires_login: boolean } }).import_report.requires_login, true);
+  assert.equal(profileManagementSessionsOpened, profileManagementSessionsStopped, "the authenticated profile-management session is always stopped");
+  assert.equal(profileImportWrites, importWritesBeforeQuery + 1, "the successful Run issued exactly one Harbor import");
+  assert.deepEqual(profileImportEvents.slice(importEventsBeforeSuccess), ["target_create", "session_open", "session_stop", "session_confirm", "import"],
+    "Core initializes the target through an authenticated session, stops and confirms it, then dispatches import");
+  const queriedCompletedImport = await service.query(credentialHash, completedImport.run_id);
+  assert.deepEqual(queriedCompletedImport, completedImport, "query returns the completed import under its original Run");
+  assert.deepEqual(await service.submit(credentialHash, { ...importRequest, idempotency_key: "profile-import-success", grant_id: successImportGrant.grant_id,
+    task_scope: { ...importRequest.task_scope } }), completedImport, "same-key success returns the original import receipt without replay");
+  assert.equal(profileImportWrites, importWritesBeforeQuery + 1, "success query and same-key submit do not dispatch another import");
+
+  const pendingImportGrant = await accessStore.createGrant({ idempotency_key: "profile-import-pending-grant", principal_id: principal.principal_id,
+    profile_refs: [], profile_source_refs: [profileSourceRef], allowed_operations: ["profile.import"], allowed_origins: ["https://example.com"],
+    expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 1, creation_template: grant.creation_template });
+  pendingProfileImport = true;
+  const importWritesBeforePending = profileImportWrites, createsBeforePending = creates, sessionsBeforePending = profileManagementSessionsOpened;
+  const pendingImport = await service.submit(credentialHash, { ...importRequest, idempotency_key: "profile-import-pending", grant_id: pendingImportGrant.grant_id,
+    task_scope: { ...importRequest.task_scope } });
+  assert.equal(pendingImport.status, "unknown_outcome", JSON.stringify(pendingImport));
+  assert.equal(profileImportWrites, importWritesBeforePending + 1);
+  const pendingImportQuery = await service.query(credentialHash, pendingImport.run_id);
+  assert.equal(pendingImportQuery.status, "unknown_outcome", "a durable possibly-dispatched receipt does not become success");
+  assert.equal((pendingImportQuery.result as { import_status: string }).import_status, "unknown");
+  assert.equal(profileImportWrites, importWritesBeforePending + 1, "query never retries an import with a pending receipt");
+  assert.equal(creates, createsBeforePending + 1, "query keeps the original target when import receipt is pending");
+  assert.equal(profileManagementSessionsOpened, sessionsBeforePending + 1, "query never starts another initialization session");
+  const sameKeyPendingImport = await service.submit(credentialHash, { ...importRequest, idempotency_key: "profile-import-pending", grant_id: pendingImportGrant.grant_id,
+    task_scope: { ...importRequest.task_scope } });
+  assert.equal(sameKeyPendingImport.run_id, pendingImport.run_id, "same-key pending import remains on the original Run");
+  assert.equal(sameKeyPendingImport.status, "unknown_outcome");
+  assert.equal((sameKeyPendingImport.result as { import_status: string }).import_status, "unknown");
+  assert.equal(profileImportWrites, importWritesBeforePending + 1, "same-key pending import is not replayed");
+
+  const failedImportGrant = await accessStore.createGrant({ idempotency_key: "profile-import-source-revoked-grant", principal_id: principal.principal_id,
+    profile_refs: [], profile_source_refs: [profileSourceRef], allowed_operations: ["profile.import"], allowed_origins: ["https://example.com"],
+    expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 1, creation_template: grant.creation_template });
+  const failedImportRequest = { ...importRequest, idempotency_key: "profile-import-revoked-source", grant_id: failedImportGrant.grant_id,
+    task_scope: { ...importRequest.task_scope } };
+  const createsBeforeFailedImport = creates, sessionsBeforeFailedImport = profileManagementSessionsOpened, writesBeforeFailedImport = profileImportWrites;
+  revokedProfileSourceRef = profileSourceRef;
+  const failedImport = await service.submit(credentialHash, failedImportRequest);
+  revokedProfileSourceRef = null;
+  assert.equal(failedImport.status, "failed", JSON.stringify(failedImport));
+  assert.equal(failedImport.failure?.code, "managed_browser_profile_source_unavailable");
+  assert.deepEqual(await service.query(credentialHash, failedImport.run_id), failedImport, "query preserves a known source-revoked failure for the original Run");
+  assert.deepEqual(await service.submit(credentialHash, failedImportRequest), failedImport, "same-key failed import returns the original terminal Run");
+  assert.equal(creates, createsBeforeFailedImport, "known source failure creates no target");
+  assert.equal(profileManagementSessionsOpened, sessionsBeforeFailedImport, "known source failure opens no initialization session");
+  assert.equal(profileImportWrites, writesBeforeFailedImport, "known source failure dispatches no Harbor import");
+
+  const concurrentRevokeSourceRef = `profile-source:${randomUUID()}`;
+  const concurrentRevokeGrant = await accessStore.createGrant({ idempotency_key: "profile-import-concurrent-revoke-grant", principal_id: principal.principal_id,
+    profile_refs: [], profile_source_refs: [concurrentRevokeSourceRef], allowed_operations: ["profile.import"], allowed_origins: ["https://example.com"],
+    expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 1, creation_template: grant.creation_template });
+  const concurrentRevokeRequest = { ...importRequest, idempotency_key: "profile-import-concurrent-revoke", grant_id: concurrentRevokeGrant.grant_id,
+    profile_source_ref: concurrentRevokeSourceRef, task_scope: { ...importRequest.task_scope, profile_source_refs: [concurrentRevokeSourceRef] } };
+  let sourceLookupStarted!: () => void, releaseSourceLookup!: () => void;
+  const sourceLookupStartedPromise = new Promise<void>(resolve => { sourceLookupStarted = resolve; });
+  const sourceLookupGate = new Promise<void>(resolve => { releaseSourceLookup = resolve; });
+  delayedProfileSourceLookup = { sourceRef: concurrentRevokeSourceRef, started: sourceLookupStarted, wait: sourceLookupGate };
+  const createsBeforeConcurrentRevoke = creates, sessionsBeforeConcurrentRevoke = profileManagementSessionsOpened, writesBeforeConcurrentRevoke = profileImportWrites;
+  const inFlightImport = service.submit(credentialHash, concurrentRevokeRequest);
+  await sourceLookupStartedPromise;
+  await accessStore.revokeGrant({ idempotency_key: "profile-import-revoke-during-source-query", grant_id: concurrentRevokeGrant.grant_id });
+  releaseSourceLookup();
+  const revokedDuringSourceQuery = await inFlightImport;
+  assert.equal(revokedDuringSourceQuery.status, "failed", JSON.stringify(revokedDuringSourceQuery));
+  assert.equal(revokedDuringSourceQuery.failure?.code, "managed_access_grant_unavailable");
+  assert.equal(creates, createsBeforeConcurrentRevoke, "a Grant revoked during Harbor source lookup does not dispatch target creation");
+  assert.equal(profileManagementSessionsOpened, sessionsBeforeConcurrentRevoke, "a revoked import does not initialize a target");
+  assert.equal(profileImportWrites, writesBeforeConcurrentRevoke, "a revoked import does not dispatch the data import");
+  assert.deepEqual((await accessStore.list()).grants.find(item => item.grant_id === concurrentRevokeGrant.grant_id)?.created_profile_refs, [],
+    "a Grant revoked during source lookup does not consume a Profile creation quota slot");
+
+  const revokedImportGrant = await accessStore.createGrant({ idempotency_key: "profile-import-revoked-grant", principal_id: principal.principal_id,
+    profile_refs: [], profile_source_refs: [profileSourceRef], allowed_operations: ["profile.import"], allowed_origins: ["https://example.com"],
+    expires_at: new Date(Date.now() + 60_000).toISOString(), max_created_profiles: 1, creation_template: grant.creation_template });
+  const createsBeforeRevokedImport = creates, sessionsBeforeRevokedImport = profileManagementSessionsOpened, writesBeforeRevokedImport = profileImportWrites;
+  afterCreate = async () => { await accessStore.revokeGrant({ idempotency_key: "profile-import-revoke-after-target", grant_id: revokedImportGrant.grant_id }); };
+  const revokedImport = await service.submit(credentialHash, { ...importRequest, idempotency_key: "profile-import-revoked-after-create", grant_id: revokedImportGrant.grant_id,
+    task_scope: { ...importRequest.task_scope } });
+  afterCreate = undefined;
+  assert.equal(revokedImport.status, "failed", JSON.stringify(revokedImport));
+  assert.equal(creates, createsBeforeRevokedImport + 1, "the already-created target is retained after authorization changes");
+  assert.equal((await accessStore.list()).grants.find(item => item.grant_id === revokedImportGrant.grant_id)?.created_profile_refs.length, 1,
+    "the original target still consumes the Grant creation quota");
+  assert.equal(profileManagementSessionsOpened, sessionsBeforeRevokedImport, "revocation after target creation prevents initialization");
+  assert.equal(profileImportWrites, writesBeforeRevokedImport, "revocation after target creation prevents import dispatch");
+
+  await accessStore.setProfilePolicy({ idempotency_key: "profile-migration-policy", profile_ref: "profile:1",
+    allowed_operations: ["profile.list", "profile.read", "profile.migrate.request"], allowed_origins: [] });
+  const migrationTemplate = { ...grant.creation_template!, template_ref: "template:approved-camoufox", provider_id: "camoufox" as const };
+  const migrationGrant = await accessStore.createGrant({ idempotency_key: "profile-migration-grant", principal_id: principal.principal_id,
+    profile_refs: ["profile:1"], allowed_operations: ["profile.migrate.request"], allowed_origins: [], expires_at: new Date(Date.now() + 60_000).toISOString(),
+    max_created_profiles: 0, creation_template: migrationTemplate });
+  const migrationRequest = { idempotency_key: "profile-migration-same-version", connection_id: connection.connection_id, grant_id: migrationGrant.grant_id,
+    operation: "profile.migrate.request" as const, profile_ref: "profile:1", template_ref: migrationTemplate.template_ref, target_provider_id: "camoufox" as const,
+    task_scope: { operations: ["profile.migrate.request" as const], profile_refs: ["profile:1"], origins: [], profile_source_refs: [] } };
+  const sessionReadsBeforeMigration = sessionReads, createsBeforeMigration = creates, importWritesBeforeMigration = profileImportWrites;
+  const sameVersionMigration = await service.submit(credentialHash, migrationRequest);
+  assert.equal(sameVersionMigration.status, "succeeded", JSON.stringify(sameVersionMigration));
+  assert.equal((sameVersionMigration.result as { status: string }).status, "not_required");
+  assert.equal((sameVersionMigration.result as { qualification: { reason_code: string } }).qualification.reason_code, "profile_migration_same_provider_same_version");
+  assert.equal(sessionReads, sessionReadsBeforeMigration, "migration qualification does not read or require an active Instance");
+  assert.equal(creates, createsBeforeMigration, "migration request never creates a target");
+  assert.equal(profileImportWrites, importWritesBeforeMigration, "migration request never copies or imports data");
+  assert.equal(profileMigrationFactReads, 1);
+
+  const chromeMigrationTemplate = { ...migrationTemplate, template_ref: "template:approved-chrome", provider_id: "chrome_official" as const };
+  const chromeMigrationGrant = await accessStore.createGrant({ idempotency_key: "profile-migration-chrome-grant", principal_id: principal.principal_id,
+    profile_refs: ["profile:1"], allowed_operations: ["profile.migrate.request"], allowed_origins: [], expires_at: new Date(Date.now() + 60_000).toISOString(),
+    max_created_profiles: 0, creation_template: chromeMigrationTemplate });
+  const rejectedMigrationRequest = { ...migrationRequest, idempotency_key: "profile-migration-unqualified-pair", grant_id: chromeMigrationGrant.grant_id,
+    template_ref: chromeMigrationTemplate.template_ref, target_provider_id: "chrome_official" as const };
+  const unqualifiedMigration = await service.submit(credentialHash, rejectedMigrationRequest);
+  assert.equal(unqualifiedMigration.status, "succeeded", JSON.stringify(unqualifiedMigration));
+  assert.equal((unqualifiedMigration.result as { status: string }).status, "qualification_rejected");
+  assert.equal((unqualifiedMigration.result as { qualification: { reason_code: string } }).qualification.reason_code, "profile_migration_pair_not_qualified");
+  const capabilityDescriptionsBeforeMigrationDescribe = capabilityDescriptions;
+  const contextualMigration = await service.describe(credentialHash, { connection_id: connection.connection_id, operation: "profile.migrate.request",
+    context: { grant_id: chromeMigrationGrant.grant_id, profile_ref: "profile:1", task_scope: rejectedMigrationRequest.task_scope },
+    arguments: { template_ref: chromeMigrationTemplate.template_ref, target_provider_id: "chrome_official" } });
+  assert.equal((contextualMigration.availability as { state: string }).state, "blocked");
+  assert.deepEqual((contextualMigration.availability as { reason_codes: string[] }).reason_codes, ["profile_migration_pair_not_qualified"]);
+  assert.deepEqual(contextualMigration.execution_checks, ["reauthorize"], "contextual migration description has no browser-runtime check");
+  assert.equal(capabilityDescriptions, capabilityDescriptionsBeforeMigrationDescribe, "migration description uses the same Harbor Provider qualification facts instead of active-browser capability lookup");
+  assert.equal(sessionReads, sessionReadsBeforeMigration, "contextual migration description also avoids active-session reads");
+  assert.equal(profileMigrationFactReads, 4, "describing rechecks the exact Harbor qualification facts");
 
   const browserOps = ["instance.navigate", "instance.read", "instance.observe"];
   await accessStore.setProfilePolicy({ idempotency_key: "public-policy", profile_ref: "profile:1", allowed_operations: browserOps, allowed_origins: ["https://example.com"] });
