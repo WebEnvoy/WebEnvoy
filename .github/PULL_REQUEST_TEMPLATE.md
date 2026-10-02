@@ -45,6 +45,6 @@
 - 独立审查证据：
 - 结论：`APPROVE` / `REQUEST_CHANGES` / pending
 
-单账号开发无需为了形式制造第二 GitHub 身份。无法使用不同账号原生 `Approve` 时，与实现执行者分离的审查会话／进程／工作树可以在 PR 顶级评论中记录 exact head SHA、审查范围、实际读取/运行的检查、findings 和明确结论；该评论可替代原生 Approve。实现执行者自己的自审不能替代独立审查。
+自主合并条件与审查要求见 [`AGENTS.md`](../AGENTS.md#github-native-交付)。单账号无法使用原生 `Approve` 时，由独立 reviewer 本人提交绑定所审 HEAD 的 `COMMENT` review，记录审查范围、实际检查、findings 和明确结论；实现者自审不能替代独立审查。
 
 Python 编译检查使用 `make py-compile` 或 `python3 tools/py_compile_clean.py ...`，不要在 checkout 中直接运行会生成缓存的裸 `py_compile`。
